@@ -32,6 +32,14 @@ namespace AutoImportServiceCore
                     config.Sources
                         .OfType<Microsoft.Extensions.Configuration.Json.JsonConfigurationSource>()
                         .Where(x => x.Path == "appsettings.json");
+
+                    // We need to build here already, so that we can read the base directory for secrets.
+                    hostingContext.Configuration = config.Build();
+
+                    var secretsBasePath = hostingContext.Configuration.GetSection("Ais").GetValue<string>("SecretsBaseDirectory");
+
+                    config.AddJsonFile($"{secretsBasePath}ais-appsettings-secrets.json", false, false)
+                            .AddJsonFile($"ais-appsettings.{hostingContext.HostingEnvironment.EnvironmentName}.json", true, true);
                 })
                 .ConfigureServices((hostContext, services) =>
                 {
