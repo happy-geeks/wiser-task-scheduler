@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Xml.Serialization;
+using AutoImportServiceCore.Modules.Ftps.Models;
 using AutoImportServiceCore.Modules.GenerateFiles.Models;
 using AutoImportServiceCore.Modules.HttpApis.Models;
 using AutoImportServiceCore.Modules.ImportFiles.Models;
@@ -70,5 +71,12 @@ namespace AutoImportServiceCore.Core.Models
         [XmlArray("ImportFiles")]
         [XmlArrayItem(typeof(ImportFileModel))]
         public ImportFileModel[] ImportFileModels { get; set; }
+
+        /// <summary>
+        /// Gets or sets the FTPs.
+        /// </summary>
+        [XmlArray("Ftps")]
+        [XmlArrayItem(typeof(FtpModel))]
+        public FtpModel[] Ftps { get; set; }
     }
 }
