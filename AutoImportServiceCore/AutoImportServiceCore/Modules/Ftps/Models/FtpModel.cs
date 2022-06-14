@@ -1,6 +1,7 @@
 ﻿using System.Xml.Serialization;
 using AutoImportServiceCore.Core.Models;
 using AutoImportServiceCore.Modules.Body.Models;
+using AutoImportServiceCore.Modules.Ftps.Enums;
 
 namespace AutoImportServiceCore.Modules.Ftps.Models;
 
@@ -10,17 +11,24 @@ public class FtpModel : ActionModel
     /// <summary>
     /// Gets or sets the type of FTP that needs to be used.
     /// </summary>
-    public FtpTypes Type { get; set; } = FtpTypes.FTPS;
+    public FtpTypes Type { get; set; } = FtpTypes.Ftps;
 
     /// <summary>
     /// Gets or sets if the FTP is used for upload or download.
     /// </summary>
     public FtpActionTypes Action { get; set; } = FtpActionTypes.Download;
 
+    public EncryptionModes EncryptionMode { get; set; } = EncryptionModes.Auto;
+
     /// <summary>
     /// Gets or sets the host of the FTP.
     /// </summary>
     public string Host { get; set; }
+
+    /// <summary>
+    /// Gets or sets the port of the FTP.
+    /// </summary>
+    public int Port { get; set; }
 
     /// <summary>
     /// Gets or sets the user to login with.
@@ -61,11 +69,6 @@ public class FtpModel : ActionModel
     /// Gets or sets if a passive connection needs to be used.
     /// </summary>
     public bool UsePassive { get; set; } = true;
-
-    /// <summary>
-    /// Gets or sets if a Ssl 
-    /// </summary>
-    public bool UseSsl { get; set; }
 
     /// <summary>
     /// Gets or sets the path to the SSH private key.

@@ -1,4 +1,4 @@
-﻿namespace AutoImportServiceCore.Modules.Ftps.Models;
+﻿namespace AutoImportServiceCore.Modules.Ftps.Enums;
 
 public enum FtpActionTypes
 {
