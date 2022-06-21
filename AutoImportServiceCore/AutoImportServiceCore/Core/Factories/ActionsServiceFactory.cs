@@ -1,6 +1,8 @@
 ﻿using System;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
+using AutoImportServiceCore.Modules.Communications.Interfaces;
+using AutoImportServiceCore.Modules.Communications.Models;
 using AutoImportServiceCore.Modules.GenerateFiles.Interfaces;
 using AutoImportServiceCore.Modules.GenerateFiles.Models;
 using AutoImportServiceCore.Modules.HttpApis.Interfaces;
@@ -43,6 +45,8 @@ namespace AutoImportServiceCore.Core.Factories
                     return serviceProvider.GetRequiredService<IGenerateFileService>() as IActionsService;
                 case ImportFileModel:
                     return serviceProvider.GetRequiredService<IImportFilesService>() as IActionsService;
+                case CommunicationModel:
+                    return serviceProvider.GetRequiredService<ICommunicationsService>() as IActionsService;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(action), action.ToString());
             }
