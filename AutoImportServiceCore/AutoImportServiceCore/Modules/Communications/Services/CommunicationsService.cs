@@ -31,6 +31,9 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
     private readonly ILogService logService;
     private readonly ILogger<CommunicationsService> logger;
 
+    private const string EmailSubjectForCommunicationError = "Error while sending communication";
+    
+    private DateTime lastErrorSent = DateTime.MinValue;
     private string connectionString;
 
     public CommunicationsService(IServiceProvider serviceProvider, ILogService logService, ILogger<CommunicationsService> logger)
@@ -105,31 +108,66 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 
 		    string statusCode = null;
 		    string statusMessage = null;
+		    var sendErrorNotification = false;
 		    
 		    try
 		    {
-			    databaseConnection.ClearParameters();
 			    email.AttemptCount++;
-			    databaseConnection.AddParameter("attempt_count", email.AttemptCount);
 			    await gclCommunicationsService.SendEmailDirectlyAsync(email, communication.SmtpSettings);
+			    databaseConnection.ClearParameters();
 			    databaseConnection.AddParameter("processed_date", DateTime.Now);
 		    }
 		    catch (SmtpException smtpException)
 		    {
+			    databaseConnection.ClearParameters();
 			    statusCode = smtpException.StatusCode.ToString();
 			    statusMessage = $"Attempt #{email.AttemptCount}:{Environment.NewLine}{smtpException}";
 			    await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, $"Failed to send email for communication ID {email.Id} due to SMTP error:\n{smtpException}", configurationServiceName, communication.TimeId, communication.Order);
+
+			    switch (smtpException.StatusCode)
+			    {
+				    case SmtpStatusCode.ServiceClosingTransmissionChannel:
+				    case SmtpStatusCode.CannotVerifyUserWillAttemptDelivery:
+				    case SmtpStatusCode.ServiceNotAvailable:
+				    case SmtpStatusCode.MailboxBusy:
+				    case SmtpStatusCode.LocalErrorInProcessing:
+				    case SmtpStatusCode.InsufficientStorage:
+				    case SmtpStatusCode.MailboxUnavailable:
+				    case SmtpStatusCode.UserNotLocalTryAlternatePath:
+				    case SmtpStatusCode.ExceededStorageAllocation:
+				    case SmtpStatusCode.TransactionFailed:
+				    case SmtpStatusCode.GeneralFailure:
+					    sendErrorNotification = true;
+					    break;
+				    default:
+					    // If another error has occured it will most likely not work other times.
+					    email.AttemptCount = communication.MaxNumberOfCommunicationAttempts;
+					    break;
+			    }
 		    }
 		    catch (Exception e)
 		    {
+			    databaseConnection.ClearParameters();
 			    statusCode = "General exception";
 			    statusMessage = $"Attempt #{email.AttemptCount}:{Environment.NewLine}{e}";
 			    await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, $"Failed to send email for communication ID {email.Id} due to general error:\n{e}", configurationServiceName, communication.TimeId, communication.Order);
+
+			    if (!e.Message.Contains("Mail API error", StringComparison.OrdinalIgnoreCase))
+			    {
+				    // If another error has occured it will most likely not work other times.
+				    email.AttemptCount = communication.MaxNumberOfCommunicationAttempts;
+			    }
 		    }
 		    
+		    databaseConnection.AddParameter("attempt_count", email.AttemptCount);
 			databaseConnection.AddParameter("status_code", statusCode);
 			databaseConnection.AddParameter("status_message", statusMessage);
 		    await databaseConnection.InsertOrUpdateRecordBasedOnParametersAsync(WiserTableNames.WiserCommunicationGenerated, email.Id);
+
+		    if (sendErrorNotification)
+		    {
+			    await SendErrorNotification(communication, databaseConnection, email.AttemptCount, email.Subject, String.Join(';', email.Receivers.Select(x => x.Address)), statusMessage, CommunicationTypes.Email);
+		    }
 	    }
         
         return null;
@@ -212,6 +250,11 @@ WHERE
 
 	        for (var i = 0; i < addresses.Length; i++)
 	        {
+		        if (String.IsNullOrWhiteSpace(addresses[i]))
+		        {
+			        continue;
+		        }
+		        
 		        receiverAddresses.Add(new CommunicationReceiverModel()
 		        {
 			        Address = addresses[i],
@@ -234,6 +277,20 @@ WHERE
 	        ccAddresses.AddRange(rawCcValue.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries));
         }
 
+        var attachmentUrls = new List<string>();
+        var rawAttachmentUrls = row.Field<string>("attachment_urls");
+        if (!String.IsNullOrWhiteSpace(rawAttachmentUrls))
+        {
+	        attachmentUrls.AddRange(rawAttachmentUrls.Split(new[] {',', ';'}, StringSplitOptions.RemoveEmptyEntries));
+        }
+
+        var wiserItemFiles = new List<ulong>();
+        var rawWiserItemFiles = row.Field<string>("wiser_item_files");
+        if (!String.IsNullOrWhiteSpace(rawWiserItemFiles))
+        {
+	        wiserItemFiles.AddRange(rawWiserItemFiles.Split(new[] {',', ';'}, StringSplitOptions.RemoveEmptyEntries).Select(UInt64.Parse).ToList());
+        }
+
         var singleCommunication = new SingleCommunicationModel()
         {
 	        Id = Convert.ToInt32(row["id"]),
@@ -247,6 +304,10 @@ WHERE
 	        SenderName = row.Field<string>("sender_name"),
 	        Subject = row.Field<string>("subject"),
 	        Content = row.Field<string>("content"),
+	        UploadedFile = row.Field<byte[]>("uploaded_file"),
+	        UploadedFileName = row.Field<string>("uploaded_filename"),
+	        AttachmentUrls = attachmentUrls,
+	        WiserItemFiles = wiserItemFiles,
 	        Type = Enum.Parse<CommunicationTypes>(row.Field<string>("communicationtype"), true),
 	        SendDate = row.Field<DateTime>("send_date"),
 	        AttemptCount = row.Field<int>("attempt_count"),
@@ -277,5 +338,32 @@ WHERE
 	           || (singleCommunication.AttemptCount == 3 && totalMinutesSinceLastAttempt < 15)
 	           || (singleCommunication.AttemptCount == 4 && totalMinutesSinceLastAttempt < 60)
 	           || (singleCommunication.AttemptCount >= 5 && totalMinutesSinceLastAttempt < 1440);
+    }
+
+    private async Task SendErrorNotification(CommunicationModel communication, IDatabaseConnection databaseConnection, int attemptCount, string subject, string receivers, string statusMessage, CommunicationTypes type)
+    {
+	    // Check if an error email needs to be send.
+	    if (attemptCount < communication.MaxNumberOfCommunicationAttempts || String.IsNullOrWhiteSpace(communication.EmailAddressForErrorNotifications) || subject == EmailSubjectForCommunicationError || lastErrorSent.Date >= DateTime.Today)
+	    {
+		    return;
+	    }
+
+	    var lastErrorMail = await databaseConnection.GetAsync($"SELECT MAX(send_date) AS lastErrorMail FROM {WiserTableNames.WiserCommunicationGenerated} WHERE is_internal_error_mail = 1");
+	    if (lastErrorMail.Rows[0].Field<object>("lastErrorMail") != null && lastErrorMail.Rows[0].Field<DateTime>("lastErrorMail").Date == DateTime.Today)
+	    {
+		    lastErrorSent = lastErrorMail.Rows[0].Field<DateTime>("lastErrorMail").Date;
+		    return;
+	    }
+			    
+	    databaseConnection.ClearParameters();
+	    databaseConnection.AddParameter("receiver", communication.EmailAddressForErrorNotifications);
+	    databaseConnection.AddParameter("sender", communication.EmailAddressForErrorNotifications);
+	    databaseConnection.AddParameter("subject", EmailSubjectForCommunicationError);
+	    databaseConnection.AddParameter("content", $"<p>Failed to send {type} to '{receivers}'.</p><p>Error log:</p><pre>{statusMessage}</pre>");
+	    databaseConnection.AddParameter("communicationtype", "email");
+	    databaseConnection.AddParameter("send_date", DateTime.Now);
+	    databaseConnection.AddParameter("is_internal_error_mail", true);
+	    await databaseConnection.InsertOrUpdateRecordBasedOnParametersAsync(WiserTableNames.WiserCommunicationGenerated, false);
+	    lastErrorSent = DateTime.Now;
     }
 }
