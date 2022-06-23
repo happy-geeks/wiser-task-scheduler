@@ -96,8 +96,17 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 	    if (!emails.Any())
 	    {
 		    await logService.LogInformation(logger, LogScopes.RunStartAndStop, communication.LogSettings, "No emails found to be send.", configurationServiceName, communication.TimeId, communication.Order);
-		    return null;
+		    return new JObject()
+		    {
+			    {"Type", "Email"},
+			    {"Processed", 0},
+			    {"Failed", 0},
+			    {"Total", 0}
+		    };
 	    }
+
+	    var processed = 0;
+	    var failed = 0;
 
 	    foreach (var email in emails)
 	    {
@@ -114,11 +123,13 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    {
 			    email.AttemptCount++;
 			    await gclCommunicationsService.SendEmailDirectlyAsync(email, communication.SmtpSettings);
+			    processed++;
 			    databaseConnection.ClearParameters();
 			    databaseConnection.AddParameter("processed_date", DateTime.Now);
 		    }
 		    catch (SmtpException smtpException)
 		    {
+			    failed++;
 			    databaseConnection.ClearParameters();
 			    statusCode = smtpException.StatusCode.ToString();
 			    statusMessage = $"Attempt #{email.AttemptCount}:{Environment.NewLine}{smtpException}";
@@ -147,6 +158,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    }
 		    catch (Exception e)
 		    {
+			    failed++;
 			    databaseConnection.ClearParameters();
 			    statusCode = "General exception";
 			    statusMessage = $"Attempt #{email.AttemptCount}:{Environment.NewLine}{e}";
@@ -170,7 +182,13 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    }
 	    }
         
-        return null;
+	    return new JObject()
+	    {
+		    {"Type", "Email"},
+		    {"Processed", processed},
+		    {"Failed", failed},
+		    {"Total", processed + failed}
+	    };
     }
 
     /// <summary>
