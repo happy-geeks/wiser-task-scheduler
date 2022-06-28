@@ -2,6 +2,7 @@
 using AutoImportServiceCore.Core.Models;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Communication.Enums;
+using GeeksCoreLibrary.Modules.Communication.Models;
 
 namespace AutoImportServiceCore.Modules.Communications.Models;
 
@@ -37,4 +38,9 @@ public class CommunicationModel : ActionModel
     /// Gets or sets the settings for the SMTP if the <see cref="Type"/> is Email.
     /// </summary>
     public SmtpSettings SmtpSettings { get; set; }
+
+    /// <summary>
+    /// Gets or sets the settings for SMS if the <see cref="Type"/> is SMS.
+    /// </summary>
+    public SmsSettings SmsSettings { get; set; }
 }

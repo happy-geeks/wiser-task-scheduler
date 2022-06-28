@@ -191,6 +191,69 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 	    };
     }
 
+    private async Task<JObject> ProcessSmsAsync(CommunicationModel communication, IDatabaseConnection databaseConnection, GclCommunicationsService gclCommunicationsService, string configurationServiceName)
+    {
+	    var smsList = await GetCommunicationsOfTypeAsync(communication, databaseConnection, configurationServiceName);
+
+	    if (!smsList.Any())
+	    {
+		    await logService.LogInformation(logger, LogScopes.RunStartAndStop, communication.LogSettings, "No text messages found to be send.", configurationServiceName, communication.TimeId, communication.Order);
+		    return new JObject()
+		    {
+			    {"Type", "SMS"},
+			    {"Processed", 0},
+			    {"Failed", 0},
+			    {"Total", 0}
+		    };
+	    }
+
+	    var processed = 0;
+	    var failed = 0;
+
+	    foreach (var sms in smsList)
+	    {
+		    if (ShouldDelay(sms) || sms.AttemptCount >= communication.MaxNumberOfCommunicationAttempts)
+		    {
+			    continue;
+		    }
+
+		    string statusCode = null;
+		    string statusMessage = null;
+
+		    try
+		    {
+			    sms.AttemptCount++;
+			    await gclCommunicationsService.SendSmsDirectlyAsync(sms, communication.SmsSettings);
+			    processed++;
+			    databaseConnection.ClearParameters();
+			    databaseConnection.AddParameter("processed_date", DateTime.Now);
+		    }
+		    catch (Exception e)
+		    {
+			    failed++;
+			    databaseConnection.ClearParameters();
+			    statusCode = "General exception";
+			    statusMessage = $"Attempt #{sms.AttemptCount}:{Environment.NewLine}{e}";
+			    await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, $"Failed to send sms for communication ID {sms.Id} due to general error:\n{e}", configurationServiceName, communication.TimeId, communication.Order);
+
+			    sms.AttemptCount = communication.MaxNumberOfCommunicationAttempts;
+		    }
+
+		    databaseConnection.AddParameter("attempt_count", sms.AttemptCount);
+		    databaseConnection.AddParameter("status_code", statusCode);
+		    databaseConnection.AddParameter("status_message", statusMessage);
+		    await databaseConnection.InsertOrUpdateRecordBasedOnParametersAsync(WiserTableNames.WiserCommunicationGenerated, sms.Id);
+	    }
+	    
+	    return new JObject()
+	    {
+		    {"Type", "SMS"},
+		    {"Processed", processed},
+		    {"Failed", failed},
+		    {"Total", processed + failed}
+	    };
+    }
+
     /// <summary>
     /// Get all communications that need to be send.
     /// </summary>
