@@ -76,6 +76,8 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
         {
             case CommunicationTypes.Email:
                 return await ProcessMailsAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName);
+            case CommunicationTypes.Sms:
+	            return await ProcessSmsAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName);
             default:
                 throw new ArgumentOutOfRangeException(nameof(communication.Type), communication.Type.ToString());
         }
@@ -200,7 +202,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    await logService.LogInformation(logger, LogScopes.RunStartAndStop, communication.LogSettings, "No text messages found to be send.", configurationServiceName, communication.TimeId, communication.Order);
 		    return new JObject()
 		    {
-			    {"Type", "SMS"},
+			    {"Type", "Sms"},
 			    {"Processed", 0},
 			    {"Failed", 0},
 			    {"Total", 0}
@@ -247,7 +249,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 	    
 	    return new JObject()
 	    {
-		    {"Type", "SMS"},
+		    {"Type", "Sms"},
 		    {"Processed", processed},
 		    {"Failed", failed},
 		    {"Total", processed + failed}
