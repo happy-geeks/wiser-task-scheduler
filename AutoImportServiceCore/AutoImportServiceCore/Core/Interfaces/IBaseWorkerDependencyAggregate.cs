@@ -10,6 +10,11 @@ namespace AutoImportServiceCore.Core.Interfaces
     public interface IBaseWorkerDependencyAggregate
     {
         /// <summary>
+        /// Gets the service to use for logging.
+        /// </summary>
+        ILogService LogService { get; }
+
+        /// <summary>
         /// Gets the <see cref="ILogger"/>.
         /// </summary>
         ILogger<BaseWorker> Logger { get; }

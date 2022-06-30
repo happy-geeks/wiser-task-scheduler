@@ -12,18 +12,22 @@ namespace AutoImportServiceCore.Core.Aggregates
     public class BaseWorkerDependencyAggregate : IBaseWorkerDependencyAggregate, IScopedService, ISingletonService
     {
         /// <inheritdoc />
+        public ILogService LogService { get; }
+
+        /// <inheritdoc />
         public ILogger<BaseWorker> Logger { get; }
 
         /// <inheritdoc />
         public IRunSchemesService RunSchemesService { get; }
-        
+
         /// <summary>
         /// Creates a new instance of <see cref="BaseWorkerDependencyAggregate"/>.
         /// </summary>
         /// <param name="logger"></param>
         /// <param name="runSchemesService"></param>
-        public BaseWorkerDependencyAggregate(ILogger<BaseWorker> logger, IRunSchemesService runSchemesService)
+        public BaseWorkerDependencyAggregate(ILogService logService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService)
         {
+            LogService = logService;
             Logger = logger;
             RunSchemesService = runSchemesService;
         }

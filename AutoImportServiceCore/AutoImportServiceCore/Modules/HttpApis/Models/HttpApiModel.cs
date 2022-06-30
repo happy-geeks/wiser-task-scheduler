@@ -7,7 +7,7 @@ using AutoImportServiceCore.Modules.Body.Models;
 namespace AutoImportServiceCore.Modules.HttpApis.Models
 {
     /// <summary>
-    /// A model for a HTTP API.
+    /// A model for an HTTP API.
     /// </summary>
     [XmlType("HttpApi")]
     public class HttpApiModel : ActionModel

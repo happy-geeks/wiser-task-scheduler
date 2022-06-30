@@ -22,6 +22,6 @@ namespace AutoImportServiceCore.Core.Interfaces
         /// <param name="action">The action to execute.</param>
         /// <param name="resultSets">The result sets from previous actions in the same run.</param>
         /// <returns></returns>
-        Task<JObject> Execute(ActionModel action, JObject resultSets);
+        Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName);
     }
 }

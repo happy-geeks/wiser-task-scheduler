@@ -1,16 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
-using AutoImportServiceCore.Core.Services;
 using AutoImportServiceCore.Modules.Queries.Interfaces;
 using AutoImportServiceCore.Modules.Queries.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Helpers;
+using GeeksCoreLibrary.Modules.Databases.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
 
@@ -21,20 +23,20 @@ namespace AutoImportServiceCore.Modules.Queries.Services
     /// </summary>
     public class QueriesService : IQueriesService, IActionsService, IScopedService
     {
+        private readonly ILogService logService;
         private readonly ILogger<QueriesService> logger;
-        private readonly AisDatabaseConnection databaseConnection;
+        private readonly IServiceProvider serviceProvider;
 
         private string connectionString;
 
         /// <summary>
         /// Creates a new instance of <see cref="QueriesService"/>.
         /// </summary>
-        /// <param name="logger"></param>
-        /// <param name="databaseConnection"></param>
-        public QueriesService(ILogger<QueriesService> logger, AisDatabaseConnection databaseConnection)
+        public QueriesService(ILogService logService, ILogger<QueriesService> logger, IServiceProvider serviceProvider)
         {
+            this.logService = logService;
             this.logger = logger;
-            this.databaseConnection = databaseConnection;
+            this.serviceProvider = serviceProvider;
         }
 
         /// <inheritdoc />
@@ -44,17 +46,29 @@ namespace AutoImportServiceCore.Modules.Queries.Services
         }
 
         /// <inheritdoc />
-        public async Task<JObject> Execute(ActionModel action, JObject resultSets)
+        public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
         {
-            var query = (QueryModel)action;
+            using var scope = serviceProvider.CreateScope();
+            var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
-            LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, query.LogSettings, $"Executing query in time id: {query.TimeId}, order: {query.Order}");
+            var query = (QueryModel)action;
+            await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
+            databaseConnection.ClearParameters();
+
+            // Enforce the set character set and collation that is used during the execution of this action.
+            databaseConnection.AddParameter("characterSet", query.CharacterEncoding.CharacterSet);
+            databaseConnection.AddParameter("collation", query.CharacterEncoding.Collation);
+            await databaseConnection.GetAsync("SET NAMES ?characterSet COLLATE ?collation", cleanUp: false);
+            databaseConnection.ClearParameters();
+
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, query.LogSettings, $"Executing query in time id: {query.TimeId}, order: {query.Order}", configurationServiceName, query.TimeId, query.Order);
 
             // If not using a result set execute the query as given.
             if (String.IsNullOrWhiteSpace(query.UseResultSet))
             {
-                LogHelper.LogInformation(logger, LogScopes.RunBody, query.LogSettings, $"Query: {query.Query}");
-                return await databaseConnection.ExecuteQuery(connectionString, query.Query);
+                await logService.LogInformation(logger, LogScopes.RunBody, query.LogSettings, $"Query: {query.Query}", configurationServiceName, query.TimeId, query.Order);
+                var dataTable = await databaseConnection.GetAsync(query.Query);
+                return GetResultSetFromDataTable(dataTable);
             }
 
             var keyParts = query.UseResultSet.Split('.');
@@ -64,12 +78,18 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             var parameterKeys = tuple.Item2;
             var insertedParameters = tuple.Item3;
 
-            LogHelper.LogInformation(logger, LogScopes.RunBody, query.LogSettings, $"Query: {queryString}");
+            await logService.LogInformation(logger, LogScopes.RunBody, query.LogSettings, $"Query: {queryString}", configurationServiceName, query.TimeId, query.Order);
 
             // Perform the query when there are no parameters. Either no values are used from the using result set or all values have been combined and a single query is sufficient.
             if (parameterKeys.Count == 0)
             {
-                return await databaseConnection.ExecuteQuery(connectionString, queryString, insertedParameters);
+                foreach (var parameter in insertedParameters)
+                {
+                    databaseConnection.AddParameter(parameter.Key, parameter.Value);
+                }
+
+                var dataTable = await databaseConnection.GetAsync(queryString);
+                return GetResultSetFromDataTable(dataTable);
             }
 
             var jArray = new JArray();
@@ -81,6 +101,7 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             for (var i = 0; i < usingResultSet.Count; i++)
             {
                 rows[0] = i;
+                var lastIQuery = i == usingResultSet.Count - 1;
 
                 if (keyWithSecondLayer != null)
                 {
@@ -89,12 +110,13 @@ namespace AutoImportServiceCore.Modules.Queries.Services
                     for (var j = 0; j < secondLayerArray.Count; j++)
                     {
                         rows[1] = j;
-                        jArray.Add(await ExecuteQueryWithParameters(queryString, rows, usingResultSet, parameterKeys, insertedParameters));
+                        var lastJQuery = j == secondLayerArray.Count - 1;
+                        jArray.Add(await ExecuteQueryWithParameters(databaseConnection, queryString, rows, usingResultSet, parameterKeys, insertedParameters, lastIQuery && lastJQuery));
                     }
                 }
                 else
                 {
-                    jArray.Add(await ExecuteQueryWithParameters(queryString, rows, usingResultSet, parameterKeys, insertedParameters));
+                    jArray.Add(await ExecuteQueryWithParameters(databaseConnection, queryString, rows, usingResultSet, parameterKeys, insertedParameters, lastIQuery));
                 }
             }
 
@@ -104,7 +126,7 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             };
         }
 
-        private async Task<JObject> ExecuteQueryWithParameters(string queryString, List<int> rows, JArray usingResultSet, List<string> parameterKeys, List<KeyValuePair<string, string>> insertedParameters)
+        private async Task<JObject> ExecuteQueryWithParameters(IDatabaseConnection databaseConnection, string queryString, List<int> rows, JArray usingResultSet, List<string> parameterKeys, List<KeyValuePair<string, string>> insertedParameters, bool lastQuery)
         {
             var parameters = new List<KeyValuePair<string, string>>(insertedParameters);
 
@@ -115,7 +137,43 @@ namespace AutoImportServiceCore.Modules.Queries.Services
                 parameters.Add(new KeyValuePair<string, string>(parameterName, value));
             }
 
-            return await databaseConnection.ExecuteQuery(connectionString, queryString, parameters);
+            databaseConnection.ClearParameters();
+            foreach (var parameter in parameters)
+            {
+                databaseConnection.AddParameter(parameter.Key, parameter.Value);
+            }
+
+            var dataTable = await databaseConnection.GetAsync(queryString, cleanUp: lastQuery);
+            return GetResultSetFromDataTable(dataTable);
+        }
+
+        private JObject GetResultSetFromDataTable(DataTable dataTable)
+        {
+            var resultSet = new JObject();
+
+            if (dataTable == null || dataTable.Rows.Count == 0)
+            {
+                return resultSet;
+            }
+
+            var jArray = new JArray();
+
+            foreach (DataRow row in dataTable.Rows)
+            {
+                var jObject = new JObject();
+
+                for (var i = 0; i < dataTable.Columns.Count; i++)
+                {
+                    var columnName = dataTable.Columns[i].ColumnName;
+                    jObject.Add(columnName, row[i].ToString());
+                }
+
+                jArray.Add(jObject);
+            }
+
+            resultSet.Add("Results", jArray);
+
+            return resultSet;
         }
     }
 }

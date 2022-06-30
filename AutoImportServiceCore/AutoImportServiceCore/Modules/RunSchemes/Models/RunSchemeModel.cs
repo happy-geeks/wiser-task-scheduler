@@ -28,6 +28,11 @@ namespace AutoImportServiceCore.Modules.RunSchemes.Models
         public int TimeId { get; set; }
 
         /// <summary>
+        /// Gets or sets if the run time needs to be run immediately.
+        /// </summary>
+        public bool RunImmediately { get; set; } = false;
+
+        /// <summary>
         /// Gets or sets the delay for <see cref="RunSchemeTypes"/>.Continuous.
         /// </summary>
         [XmlIgnore]

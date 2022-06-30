@@ -37,6 +37,12 @@ namespace AutoImportServiceCore.Core.Models
         public string OnlyWithStatusCode { get; set; }
 
         /// <summary>
+        /// Gets or sets which result set needs to have a success state.
+        /// Result set name and required status (True/False), separated by a comma (,).
+        /// </summary>
+        public string OnlyWithSuccessState { get; set; }
+
+        /// <summary>
         /// Gets or sets the log settings that apply to the action.
         /// </summary>
         public LogSettings LogSettings { get; set; }

@@ -15,5 +15,7 @@ namespace AutoImportServiceCore.Modules.Queries.Models
         /// </summary>
         [Required]
         public string Query { get; set; }
+
+        public CharacterEncodingModel CharacterEncoding { get; set; } = new CharacterEncodingModel();
     }
 }

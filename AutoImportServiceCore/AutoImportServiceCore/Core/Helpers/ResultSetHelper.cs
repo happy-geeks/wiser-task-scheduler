@@ -32,7 +32,7 @@ namespace AutoImportServiceCore.Core.Helpers
                 }
 
                 var arrayKey = key.Substring(0, key.IndexOf('['));
-                var indexKey = int.Parse(key.Substring(arrayKey.Length + 1, key.Length - arrayKey.Length - 2));
+                var indexKey = GetIndex(keyParts, rows);
                 return (T) usingResultSet[arrayKey][indexKey];
             }
 
@@ -43,13 +43,19 @@ namespace AutoImportServiceCore.Core.Helpers
             {
                 return GetCorrectObject<T>(remainingKey, rows, (JObject)usingResultSet[keyParts[0]]);
             }
+            
+            var index = GetIndex(keyParts, rows);
+            return GetCorrectObject<T>(remainingKey, rows, (JObject)((JArray)usingResultSet[keyParts[0].Substring(0, keyParts[0].IndexOf('['))])[index]);
+        }
 
+        private static int GetIndex(string[] keyParts, List<int> rows)
+        {
             var indexLetter = keyParts[0][keyParts[0].Length - 2];
-            var index = -1;
+            var index = 0;
             // If an index letter is used get the correct value based on letter, starting from 'i'.
             if (char.IsLetter(indexLetter))
             {
-                index = rows[(int) indexLetter - 105];
+                index = rows[(int)indexLetter - 105];
             }
             // If a specific value is used for the array index use that instead.
             else
@@ -58,7 +64,7 @@ namespace AutoImportServiceCore.Core.Helpers
                 index = Int32.Parse(indexIdentifier.Substring(1, indexIdentifier.Length - 2));
             }
 
-            return GetCorrectObject<T>(remainingKey, rows, (JObject)((JArray)usingResultSet[keyParts[0].Substring(0, keyParts[0].IndexOf('['))])[index]);
+            return index;
         }
     }
 }

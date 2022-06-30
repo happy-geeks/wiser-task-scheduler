@@ -5,12 +5,12 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
-using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models.OAuth;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Modules.Objects.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -20,17 +20,19 @@ namespace AutoImportServiceCore.Core.Services
 {
     public class OAuthService : IOAuthService, ISingletonService
     {
-        private const string TableName = "easy_objects";
+        private const string LogName = "OAuthService";
 
         private readonly GclSettings gclSettings;
+        private readonly ILogService logService;
         private readonly ILogger<OAuthService> logger;
         private readonly IServiceProvider serviceProvider;
 
         private OAuthConfigurationModel configuration;
 
-        public OAuthService(IOptions<GclSettings> gclSettings, ILogger<OAuthService> logger, IServiceProvider serviceProvider)
+        public OAuthService(IOptions<GclSettings> gclSettings, ILogService logService, ILogger<OAuthService> logger, IServiceProvider serviceProvider)
         {
             this.gclSettings = gclSettings.Value;
+            this.logService = logService;
             this.logger = logger;
             this.serviceProvider = serviceProvider;
         }
@@ -41,31 +43,15 @@ namespace AutoImportServiceCore.Core.Services
             this.configuration = configuration;
 
             using var scope = serviceProvider.CreateScope();
-            var databaseConnection = scope.ServiceProvider.GetRequiredService<AisDatabaseConnection>();
-
-            var query = @$"SELECT accessToken.`value` AS accessToken, tokenType.`value` AS tokenType, refreshToken.`value` AS refreshToken, expireTime.`value` AS expireTime
-FROM (SELECT 1) AS temp
-LEFT JOIN {TableName} AS accessToken ON accessToken.`key` = ?accessToken
-LEFT JOIN {TableName} AS tokenType ON tokenType.`key` = ?tokenType
-LEFT JOIN {TableName} AS refreshToken ON refreshToken.`key` = ?refreshToken
-LEFT JOIN {TableName} AS expireTime ON expireTime.`key` = ?expireTime";
+            var objectsService = scope.ServiceProvider.GetRequiredService<IObjectsService>();
 
             // Check if there is already information stored in the database to use.
             foreach (var oAuth in this.configuration.OAuths)
             {
-                var parameters = new List<KeyValuePair<string, string>>
-                {
-                    new("accessToken", $"AIS_{oAuth.ApiName}_AccessToken"),
-                    new("tokenType", $"AIS_{oAuth.ApiName}_TokenType"),
-                    new("refreshToken", $"AIS_{oAuth.ApiName}_RefreshToken"),
-                    new("expireTime", $"AIS_{oAuth.ApiName}_ExpireTime")
-                };
-                
-                JObject result = await databaseConnection.ExecuteQuery(this.configuration.ConnectionString, query, parameters);
-                oAuth.AccessToken = ((string)ResultSetHelper.GetCorrectObject<JValue>("Results[0].accessToken", ReplacementHelper.EmptyRows, result))?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
-                oAuth.TokenType = (string)ResultSetHelper.GetCorrectObject<JValue>("Results[0].tokenType", ReplacementHelper.EmptyRows, result);
-                oAuth.RefreshToken = ((string)ResultSetHelper.GetCorrectObject<JValue>("Results[0].refreshToken", ReplacementHelper.EmptyRows, result))?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
-                var expireTime = (string) ResultSetHelper.GetCorrectObject<JValue>("Results[0].expireTime", ReplacementHelper.EmptyRows, result);
+                oAuth.AccessToken = (await objectsService.GetSystemObjectValueAsync($"AIS_{oAuth.ApiName}_AccessToken"))?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
+                oAuth.TokenType = await objectsService.GetSystemObjectValueAsync($"AIS_{oAuth.ApiName}_TokenType");
+                oAuth.RefreshToken = (await objectsService.GetSystemObjectValueAsync($"AIS_{oAuth.ApiName}_RefreshToken"))?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
+                var expireTime = await objectsService.GetSystemObjectValueAsync($"AIS_{oAuth.ApiName}_ExpireTime");
                 oAuth.ExpireTime = String.IsNullOrWhiteSpace(expireTime) ? DateTime.MinValue : Convert.ToDateTime(expireTime);
 
                 oAuth.LogSettings ??= configuration.LogSettings;
@@ -98,7 +84,7 @@ LEFT JOIN {TableName} AS expireTime ON expireTime.`key` = ?expireTime";
                     OAuthState failState;
                     if (String.IsNullOrWhiteSpace(oAuthApi.AccessToken) || String.IsNullOrWhiteSpace(oAuthApi.RefreshToken))
                     {
-                        LogHelper.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using username and password.");
+                        logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using username and password.", LogName);
 
                         failState = OAuthState.FailedLogin;
                         formData.Add(new KeyValuePair<string, string>("grant_type", "password"));
@@ -107,7 +93,7 @@ LEFT JOIN {TableName} AS expireTime ON expireTime.`key` = ?expireTime";
                     }
                     else
                     {
-                        LogHelper.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.");
+                        logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.", LogName);
 
                         failState = OAuthState.FailedRefreshToken;
                         formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
@@ -136,7 +122,7 @@ LEFT JOIN {TableName} AS expireTime ON expireTime.`key` = ?expireTime";
 
                     if (!response.IsSuccessStatusCode)
                     {
-                        LogHelper.LogError(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to get access token for {oAuthApi.ApiName}. Received: {response.StatusCode}\n{json}");
+                        logService.LogError(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to get access token for {oAuthApi.ApiName}. Received: {response.StatusCode}\n{json}", LogName);
                         return failState;
                     }
 
@@ -157,7 +143,7 @@ LEFT JOIN {TableName} AS expireTime ON expireTime.`key` = ?expireTime";
 
                     oAuthApi.ExpireTime -= oAuthApi.ExpireTimeOffset;
 
-                    LogHelper.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"A new access token has been retrieved for {oAuthApi.ApiName} and is valid till {oAuthApi.ExpireTime}");
+                    logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"A new access token has been retrieved for {oAuthApi.ApiName} and is valid till {oAuthApi.ExpireTime}", LogName);
 
                     return OAuthState.NewToken;
                 }
@@ -210,29 +196,12 @@ LEFT JOIN {TableName} AS expireTime ON expireTime.`key` = ?expireTime";
         private async Task SaveToDatabaseAsync(OAuthModel oAuthApi)
         {
             using var scope = serviceProvider.CreateScope();
-            var databaseConnection = scope.ServiceProvider.GetRequiredService<AisDatabaseConnection>();
+            var objectsService = scope.ServiceProvider.GetRequiredService<IObjectsService>();
 
-            var query = $@"INSERT INTO {TableName} (typenr, `key`, `value`)
-VALUES
-    (-1, ?accessTokenKey, ?accessTokenValue),
-    (-1, ?tokenTypeKey, ?tokenTypeValue),
-    (-1, ?refreshTokenKey, ?refreshTokenValue),
-    (-1, ?expireTimeKey, ?expireTimeValue)
-ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)";
-
-            var parameters = new List<KeyValuePair<string, string>>
-            {
-                new("accessTokenKey", $"AIS_{oAuthApi.ApiName}_AccessToken"),
-                new("accessTokenValue", oAuthApi.AccessToken.EncryptWithAes(gclSettings.DefaultEncryptionKey)),
-                new("tokenTypeKey", $"AIS_{oAuthApi.ApiName}_TokenType"),
-                new("tokenTypeValue", oAuthApi.TokenType),
-                new("refreshTokenKey", $"AIS_{oAuthApi.ApiName}_RefreshToken"),
-                new("refreshTokenValue", oAuthApi.RefreshToken.EncryptWithAes(gclSettings.DefaultEncryptionKey)),
-                new("expireTimeKey", $"AIS_{oAuthApi.ApiName}_ExpireTime"),
-                new("expireTimeValue", oAuthApi.ExpireTime.ToString())
-            };
-
-            await databaseConnection.ExecuteQuery(configuration.ConnectionString, query, parameters);
+            await objectsService.SetSystemObjectValueAsync($"AIS_{oAuthApi.ApiName}_AccessToken", oAuthApi.AccessToken.EncryptWithAes(gclSettings.DefaultEncryptionKey));
+            await objectsService.SetSystemObjectValueAsync($"AIS_{oAuthApi.ApiName}_TokenType", oAuthApi.TokenType);
+            await objectsService.SetSystemObjectValueAsync($"AIS_{oAuthApi.ApiName}_RefreshToken", oAuthApi.RefreshToken.EncryptWithAes(gclSettings.DefaultEncryptionKey));
+            await objectsService.SetSystemObjectValueAsync($"AIS_{oAuthApi.ApiName}_ExpireTime", oAuthApi.ExpireTime.ToString());
         }
     }
 }

@@ -75,8 +75,8 @@ namespace AutoImportServiceCore.Core.Helpers
                     else
                     {
                         var parameterName = DatabaseHelpers.CreateValidParameterName(key);
-                        result = result.Replace($"[{{{key}<>}}]", $"?{key.Replace("[]", "")}");
-                        insertedParameters.Add(new KeyValuePair<string, string>(key.Replace("[]", ""), value));
+                        result = result.Replace($"[{{{key}<>}}]", $"?{parameterName}");
+                        insertedParameters.Add(new KeyValuePair<string, string>(parameterName, value));
                     }
                 }
                 else

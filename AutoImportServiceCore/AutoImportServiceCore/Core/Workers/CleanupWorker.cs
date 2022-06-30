@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -12,6 +8,8 @@ namespace AutoImportServiceCore.Core.Workers
 {
     public class CleanupWorker : BaseWorker
     {
+        private const string LogName = "CleanupService";
+
         private readonly ICleanupService cleanupService;
         private readonly ILogger<CleanupWorker> logger;
 
@@ -24,7 +22,7 @@ namespace AutoImportServiceCore.Core.Workers
         /// <param name="baseWorkerDependencyAggregate"></param>
         public CleanupWorker(IOptions<AisSettings> aisSettings, ICleanupService cleanupService, ILogger<CleanupWorker> logger, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
         {
-            Initialize("Cleanup", aisSettings.Value.CleanupService.RunScheme, true);
+            Initialize(LogName, aisSettings.Value.CleanupService.RunScheme, true);
             RunScheme.LogSettings ??= new LogSettings();
 
             this.cleanupService = cleanupService;

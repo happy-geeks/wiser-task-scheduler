@@ -38,7 +38,7 @@ namespace AutoImportServiceCore.Modules.Body.Services
                         // Replace body with values from first row.
                         if (bodyPart.SingleItem)
                         {
-                            body = ReplacementHelper.ReplaceText(body, rows, parameterKeys, (JObject)resultSets[bodyPart.UseResultSet]);
+                            body = ReplacementHelper.ReplaceText(body, rows, parameterKeys, ResultSetHelper.GetCorrectObject<JObject>(bodyPart.UseResultSet, rows, resultSets));
                         }
                         // Replace and combine body with values for each row.
                         else
@@ -101,7 +101,7 @@ namespace AutoImportServiceCore.Modules.Body.Services
                 {
                     rows[1] = j;
                     var bodyWithValues = ReplacementHelper.ReplaceText(body, rows, parameterKeys, (JObject)usingResultSet[i]);
-                    bodyCollection.Append($"{(i > 0 ? separator : "")}{bodyWithValues}");
+                    bodyCollection.Append($"{(i > startIndex || j > 0 ? separator : "")}{bodyWithValues}");
                 }
             }
 

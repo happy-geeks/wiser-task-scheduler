@@ -26,6 +26,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
     {
         private readonly IOAuthService oAuthService;
         private readonly IBodyService bodyService;
+        private readonly ILogService logService;
         private readonly ILogger<HttpApisService> logger;
 
         private bool retryOAuthUnauthorizedResponse;
@@ -35,38 +36,38 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         /// </summary>
         /// <param name="oAuthService"></param>
         /// <param name="bodyService"></param>
+        /// <param name="logService">The service to use for logging.</param>
         /// <param name="logger"></param>
-        public HttpApisService(IOAuthService oAuthService, IBodyService bodyService, ILogger<HttpApisService> logger)
+        public HttpApisService(IOAuthService oAuthService, IBodyService bodyService, ILogService logService, ILogger<HttpApisService> logger)
         {
             this.oAuthService = oAuthService;
             this.bodyService = bodyService;
+            this.logService = logService;
             this.logger = logger;
-
-            retryOAuthUnauthorizedResponse = true;
         }
 
         /// <inheritdoc />
         public async Task Initialize(ConfigurationModel configuration) { }
 
         /// <inheritdoc />
-        public async Task<JObject> Execute(ActionModel action, JObject resultSets)
+        public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
         {
             var httpApi = (HttpApiModel) action;
             var jArray = new JArray();
 
-            LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, httpApi.LogSettings, $"Executing HTTP API in time id: {httpApi.TimeId}, order: {httpApi.Order}");
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, httpApi.LogSettings, $"Executing HTTP API in time id: {httpApi.TimeId}, order: {httpApi.Order}", configurationServiceName, httpApi.TimeId, httpApi.Order);
 
             if (httpApi.SingleRequest)
             {
                 if (String.IsNullOrWhiteSpace(httpApi.NextUrlProperty))
                 {
-                    return await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, ReplacementHelper.EmptyRows);
+                    return await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, ReplacementHelper.EmptyRows, configurationServiceName);
                 }
 
                 var url = httpApi.Url;
                 do
                 {
-                    var result = await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, ReplacementHelper.EmptyRows, url);
+                    var result = await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, ReplacementHelper.EmptyRows, configurationServiceName, url);
                     url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}", ReplacementHelper.EmptyRows, result, false);
                     jArray.Add(result);
                 } while (!String.IsNullOrWhiteSpace(url));
@@ -85,14 +86,14 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
                 if (String.IsNullOrWhiteSpace(httpApi.NextUrlProperty))
                 {
-                    jArray.Add(await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{i}]", indexRows));
+                    jArray.Add(await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{i}]", indexRows, configurationServiceName, forcedIndex: i));
                 }
                 else
                 {
                     var url = httpApi.Url;
                     do
                     {
-                        var result = await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{indexRows[0]}]", indexRows, url);
+                        var result = await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{indexRows[0]}]", indexRows, configurationServiceName, url, i);
                         url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}", ReplacementHelper.EmptyRows, result, false);
                         jArray.Add(result);
                     } while (!String.IsNullOrWhiteSpace(url));
@@ -114,7 +115,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
         /// <param name="rows">The indexes/rows of the array, passed to be used if '[i]' is used in the key.</param>
         /// <param name="overrideUrl">The url to use instead of the provided url, used for continuous calls with a next URL.</param>
         /// <returns></returns>
-        private async Task<JObject> ExecuteRequest(HttpApiModel httpApi, JObject resultSets, string useResultSet, List<int> rows, string overrideUrl = "")
+        private async Task<JObject> ExecuteRequest(HttpApiModel httpApi, JObject resultSets, string useResultSet, List<int> rows, string configurationServiceName, string overrideUrl = "", int forcedIndex = -1)
         {
             var url = String.IsNullOrWhiteSpace(overrideUrl) ? httpApi.Url : overrideUrl;
 
@@ -130,12 +131,12 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                 url = ReplacementHelper.ReplaceText(url, rows, parameterKeys, usingResultSet, htmlEncode: true);
             }
 
-            LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Url: {url}, method: {httpApi.Method}");
+            await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Url: {url}, method: {httpApi.Method}", configurationServiceName, httpApi.TimeId, httpApi.Order);
             var request = new HttpRequestMessage(new HttpMethod(httpApi.Method), url);
 
             foreach (var header in httpApi.Headers)
             {
-                if (string.IsNullOrWhiteSpace(header.UseResultSet))
+                if (String.IsNullOrWhiteSpace(header.UseResultSet))
                 {
                     request.Headers.Add(header.Name, header.Value);
                 }
@@ -159,14 +160,14 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                     request.Headers.Add("Authorization", token);
                 }
             }
-
-            LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Headers: {request.Headers}");
             
+            await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Headers: {request.Headers}", configurationServiceName, httpApi.TimeId, httpApi.Order);
+
             if (httpApi.Body != null)
             {
-                var body = bodyService.GenerateBody(httpApi.Body, rows, resultSets);
+                var body = bodyService.GenerateBody(httpApi.Body, rows, resultSets, forcedIndex);
 
-                LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Body:\n{body}");
+                await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Body:\n{body}", configurationServiceName, httpApi.TimeId, httpApi.Order);
                 request.Content = new StringContent(body)
                 {
                     Headers = {ContentType = new MediaTypeHeaderValue(httpApi.Body.ContentType)}
@@ -182,7 +183,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                 retryOAuthUnauthorizedResponse = false;
                 await oAuthService.RequestWasUnauthorizedAsync(httpApi.OAuth);
 
-                LogHelper.LogWarning(logger, LogScopes.RunBody, httpApi.LogSettings, $"Request to {url} return \"Unauthorized\" on OAuth token. Retrying once with new OAuth token.");
+                await logService.LogWarning(logger, LogScopes.RunBody, httpApi.LogSettings, $"Request to {url} return \"Unauthorized\" on OAuth token. Retrying once with new OAuth token.", configurationServiceName, httpApi.TimeId, httpApi.Order);
                 return await ExecuteRequest(httpApi, resultSets, useResultSet, rows, overrideUrl);
             }
 
@@ -224,7 +225,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
             // Always add the body as plain text.
             resultSet.Add("BodyPlainText", responseBody);
 
-            LogHelper.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Status: {resultSet["StatusCode"]}, Result body:\n{responseBody}");
+            await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Status: {resultSet["StatusCode"]}, Result body:\n{responseBody}", configurationServiceName, httpApi.TimeId, httpApi.Order);
 
             return resultSet;
         }

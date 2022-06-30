@@ -7,7 +7,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Serialization;
 using AutoImportServiceCore.Core.Enums;
-using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
 using AutoImportServiceCore.Core.Models.OAuth;
@@ -15,6 +14,8 @@ using AutoImportServiceCore.Core.Workers;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
 using AutoImportServiceCore.Modules.Wiser.Interfaces;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Extensions;
+using GeeksCoreLibrary.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -27,11 +28,15 @@ namespace AutoImportServiceCore.Core.Services
     /// </summary>
     public class MainService : IMainService, ISingletonService
     {
+        private const string LogName = "MainService";
+
         private readonly string localConfiguration;
         private readonly string localOAuthConfiguration;
+        private readonly GclSettings gclSettings;
         private readonly IServiceProvider serviceProvider;
         private readonly IWiserService wiserService;
         private readonly IOAuthService oAuthService;
+        private readonly ILogService logService;
         private readonly ILogger<MainService> logger;
 
         private readonly ConcurrentDictionary<string, ActiveConfigurationModel> activeConfigurations;
@@ -44,13 +49,15 @@ namespace AutoImportServiceCore.Core.Services
         /// <summary>
         /// Creates a new instance of <see cref="MainService"/>.
         /// </summary>
-        public MainService(IOptions<AisSettings> aisSettings, IServiceProvider serviceProvider, IWiserService wiserService, IOAuthService oAuthService, ILogger<MainService> logger)
+        public MainService(IOptions<AisSettings> aisSettings, IOptions<GclSettings> gclSettings, IServiceProvider serviceProvider, IWiserService wiserService, IOAuthService oAuthService, ILogService logService, ILogger<MainService> logger)
         {
             localConfiguration = aisSettings.Value.MainService.LocalConfiguration;
             localOAuthConfiguration = aisSettings.Value.MainService.LocalOAuthConfiguration;
+            this.gclSettings = gclSettings.Value;
             this.serviceProvider = serviceProvider;
             this.wiserService = wiserService;
             this.oAuthService = oAuthService;
+            this.logService = logService;
             this.logger = logger;
 
             activeConfigurations = new ConcurrentDictionary<string, ActiveConfigurationModel>();
@@ -159,7 +166,7 @@ namespace AutoImportServiceCore.Core.Services
             {
                 await configurationStopTasks[i];
 
-                LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.");
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.", LogName);
             }
         }
 
@@ -182,7 +189,13 @@ namespace AutoImportServiceCore.Core.Services
 
                 foreach (var wiserConfiguration in wiserConfigurations)
                 {
-                    if(String.IsNullOrWhiteSpace(wiserConfiguration.EditorValue)) continue;
+                    // Decrypt configurations if they have been encrypted.
+                    if (!String.IsNullOrWhiteSpace(wiserConfiguration.EditorValue) && !wiserConfiguration.EditorValue.StartsWith("{") && !wiserConfiguration.EditorValue.StartsWith("<"))
+                    {
+                        wiserConfiguration.EditorValue = wiserConfiguration.EditorValue.DecryptWithAes(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
+                    }
+
+                    if (String.IsNullOrWhiteSpace(wiserConfiguration.EditorValue)) continue;
 
                     if (wiserConfiguration.EditorValue.StartsWith("<OAuthConfiguration>"))
                     {
@@ -253,7 +266,7 @@ namespace AutoImportServiceCore.Core.Services
             }
             else
             {
-                LogHelper.LogError(logger, LogScopes.RunBody, LogSettings, $"Configuration '{configurationFileName}' is not in supported format."); //TODO log configuration name when configurations are loaded from Wiser.
+                logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Configuration '{configurationFileName}' is not in supported format.", configurationFileName);
                 return null;
             }
 
@@ -267,7 +280,7 @@ namespace AutoImportServiceCore.Core.Services
                 return configuration;
             }
 
-            LogHelper.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Did not start configuration {configuration.ServiceName} due to conflicts.");
+            logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Did not start configuration {configuration.ServiceName} due to conflicts.", configurationFileName);
             return null;
         }
 

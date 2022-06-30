@@ -21,16 +21,19 @@ namespace AutoImportServiceCore.Modules.GenerateFiles.Services
     public class GenerateFileService : IGenerateFileService, IActionsService, IScopedService
     {
         private readonly IBodyService bodyService;
+        private readonly ILogService logService;
         private readonly ILogger<GenerateFileService> logger;
 
         /// <summary>
         /// Create a new instance of <see cref="GenerateFileService"/>.
         /// </summary>
         /// <param name="bodyService"></param>
+        /// <param name="logService"></param>
         /// <param name="logger"></param>
-        public GenerateFileService(IBodyService bodyService, ILogger<GenerateFileService> logger)
+        public GenerateFileService(IBodyService bodyService, ILogService logService, ILogger<GenerateFileService> logger)
         {
             this.bodyService = bodyService;
+            this.logService = logService;
             this.logger = logger;
         }
 
@@ -38,13 +41,13 @@ namespace AutoImportServiceCore.Modules.GenerateFiles.Services
         public async Task Initialize(ConfigurationModel configuration) {}
 
         /// <inheritdoc />
-        public async Task<JObject> Execute(ActionModel action, JObject resultSets)
+        public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
         {
             var generateFile = (GenerateFileModel) action;
 
             if (generateFile.SingleFile)
             {
-                return await GenerateFile(generateFile, ReplacementHelper.EmptyRows, resultSets, generateFile.UseResultSet);
+                return await GenerateFile(generateFile, ReplacementHelper.EmptyRows, resultSets, configurationServiceName, generateFile.UseResultSet);
             }
 
             var rows = ResultSetHelper.GetCorrectObject<JArray>(generateFile.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
@@ -53,7 +56,7 @@ namespace AutoImportServiceCore.Modules.GenerateFiles.Services
             for (var i = 0; i < rows.Count; i++)
             {
                 var indexRows = new List<int> { i };
-                jArray.Add(await GenerateFile(generateFile, indexRows, resultSets, $"{generateFile.UseResultSet}[{i}]", i));
+                jArray.Add(await GenerateFile(generateFile, indexRows, resultSets, configurationServiceName, $"{generateFile.UseResultSet}[{i}]", i));
             }
 
             return new JObject
@@ -69,7 +72,7 @@ namespace AutoImportServiceCore.Modules.GenerateFiles.Services
         /// <param name="rows">The indexes/rows of the array, passed to be used if '[i]' is used in the key.</param>
         /// <param name="resultSets">The result sets from previous actions in the same run.</param>
         /// <returns></returns>
-        private async Task<JObject> GenerateFile(GenerateFileModel generateFile, List<int> rows, JObject resultSets, string useResultSet, int forcedIndex = -1)
+        private async Task<JObject> GenerateFile(GenerateFileModel generateFile, List<int> rows, JObject resultSets, string configurationServiceName, string useResultSet, int forcedIndex = -1)
         {
             var fileLocation = generateFile.FileLocation;
             var fileName = generateFile.FileName;
@@ -88,7 +91,7 @@ namespace AutoImportServiceCore.Modules.GenerateFiles.Services
                 fileName = ReplacementHelper.ReplaceText(fileNameTuple.Item1, rows, fileNameTuple.Item2, usingResultSet);
             }
 
-            LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"Generating file '{fileName}' at '{fileLocation}'.");
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"Generating file '{fileName}' at '{fileLocation}'.", configurationServiceName, generateFile.TimeId, generateFile.Order);
 
             var body = bodyService.GenerateBody(generateFile.Body, rows, resultSets, forcedIndex);
 
@@ -98,15 +101,19 @@ namespace AutoImportServiceCore.Modules.GenerateFiles.Services
                 Directory.CreateDirectory(fileLocation);
                 await File.WriteAllTextAsync(Path.Combine(fileLocation, fileName), body);
                 fileGenerated = true;
-                LogHelper.LogInformation(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"File '{fileName}' generated at '{fileLocation}'.");
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"File '{fileName}' generated at '{fileLocation}'.", configurationServiceName, generateFile.TimeId, generateFile.Order);
             }
             catch (Exception e)
             {
-                LogHelper.LogError(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"Failed to generate file '{fileName}' at '{fileLocation}'.\n{e}");
+                await logService.LogError(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"Failed to generate file '{fileName}' at '{fileLocation}'.\n{e}", configurationServiceName, generateFile.TimeId, generateFile.Order);
             }
-
-            var result = $"{{ 'FileName': '{fileName}', 'FileLocation': '{fileLocation}', 'FileGenerated': {fileGenerated.ToString().ToLower()} }}";
-            return JObject.Parse(result);
+            
+            return new JObject()
+            {
+                {"FileName", fileName},
+                {"FileLocation", fileLocation},
+                {"Success", fileGenerated}
+            };
         }
     }
 }

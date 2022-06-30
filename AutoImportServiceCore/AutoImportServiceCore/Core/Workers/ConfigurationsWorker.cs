@@ -32,10 +32,9 @@ namespace AutoImportServiceCore.Core.Workers
         /// <param name="configuration">The configuration to retrieve the correct information from.</param>
         /// <param name="name">The name of the worker.</param>
         /// <param name="runScheme">The run scheme of the worker.</param>
-        /// <param name="runImmediately">True to run the action immediately, false to run at first delayed time.</param>
-        public void Initialize(ConfigurationModel configuration, string name, RunSchemeModel runScheme, bool runImmediately = false)
+        public void Initialize(ConfigurationModel configuration, string name, RunSchemeModel runScheme)
         {
-            Initialize(name, runScheme, runImmediately);
+            Initialize(name, runScheme, runScheme.RunImmediately);
 
             configurationsService.Name = Name;
             configurationsService.LogSettings = RunScheme.LogSettings;
