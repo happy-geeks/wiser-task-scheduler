@@ -7,6 +7,7 @@ using AutoImportServiceCore.Modules.HttpApis.Models;
 using AutoImportServiceCore.Modules.ImportFiles.Models;
 using AutoImportServiceCore.Modules.Queries.Models;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
+using AutoImportServiceCore.Modules.WiserImports.Models;
 
 namespace AutoImportServiceCore.Core.Models
 {
@@ -85,5 +86,12 @@ namespace AutoImportServiceCore.Core.Models
         /// </summary>
         [XmlElement("BranchQueue")]
         public BranchQueueModel BranchQueueModel { get; set; }
+
+        /// <summary>
+        /// Gets or sets the Wiser the imports need to be handled for.
+        /// </summary>
+        [XmlArray("WiserImports")]
+        [XmlArrayItem(typeof(WiserImportModel))]
+        public WiserImportModel[] WiserImportModels { get; set; }
     }
 }

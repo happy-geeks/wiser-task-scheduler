@@ -82,7 +82,8 @@ namespace AutoImportServiceCore.Core.Services
                 configuration.HttpApis,
                 configuration.GenerateFileModels,
                 configuration.ImportFileModels,
-                configuration.CleanupItems
+                configuration.CleanupItems,
+                configuration.WiserImportModels
             };
 
             var allActions = new List<ActionModel>();

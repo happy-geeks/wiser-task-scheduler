@@ -13,6 +13,8 @@ using AutoImportServiceCore.Modules.ImportFiles.Interfaces;
 using AutoImportServiceCore.Modules.ImportFiles.Models;
 using AutoImportServiceCore.Modules.Queries.Interfaces;
 using AutoImportServiceCore.Modules.Queries.Models;
+using AutoImportServiceCore.Modules.WiserImports.Interfaces;
+using AutoImportServiceCore.Modules.WiserImports.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -51,6 +53,8 @@ namespace AutoImportServiceCore.Core.Factories
                     return serviceProvider.GetRequiredService<ICleanupItemsService>() as IActionsService;
                 case BranchQueueModel:
                     return serviceProvider.GetRequiredService<IBranchQueueService>() as IActionsService;
+                case WiserImportModel:
+                    return serviceProvider.GetRequiredService<IWiserImportsService>() as IActionsService;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(action), action.ToString());
             }
