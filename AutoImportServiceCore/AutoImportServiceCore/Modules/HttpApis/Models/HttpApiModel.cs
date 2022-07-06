@@ -51,5 +51,11 @@ namespace AutoImportServiceCore.Modules.HttpApis.Models
         /// Gets or sets the body to send with the request.
         /// </summary>
         public BodyModel Body { get; set; }
+
+        /// <summary>
+        /// Gets or sets the expected content type. This will force the result to be cast to this object.
+        /// Set to null or an empty string to use the Content-Type header of the result (if there is one). 
+        /// </summary>
+        public string ResultContentType { get; set; }
     }
 }
