@@ -113,7 +113,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
             {
                 try
                 {
-                    import.Item = await wiserItemsService.SaveAsync(import.Item, username: usernameForLogs, userId: importRow.UserId);
+                    import.Item = await wiserItemsService.SaveAsync(import.Item, import.Item.ParentItemId, username: usernameForLogs, userId: importRow.UserId);
                 }
                 catch (Exception e)
                 {
