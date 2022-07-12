@@ -31,7 +31,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
         private DateTime accessTokenExpireTime;
         private string refreshToken;
 
-        public string AccesToken => GetAccessToken();
+        public string AccessToken => GetAccessToken();
 
         public WiserService(IOptions<AisSettings> aisSettings, ILogService logService, ILogger<WiserService> logger)
         {
@@ -77,7 +77,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
         /// <summary>
         /// DO NOT CALL THIS BY YOURSELF!
         /// Login to the Wiser API.
-        /// This method is called when using <see cref="AccesToken"/> or <see cref="GetAccessToken"/> with a lock.
+        /// This method is called when using <see cref="AccessToken"/> or <see cref="GetAccessToken"/> with a lock.
         /// </summary>
         private void Login(bool useRefreshToken = false)
         {
@@ -141,7 +141,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
             return await Task.Run(() =>
             {
                 var request = new HttpRequestMessage(HttpMethod.Get, $"{wiserSettings.WiserApiUrl}api/v3/templates/entire-tree-view?startFrom=AIS{(string.IsNullOrWhiteSpace(wiserSettings.ConfigurationPath) ? "" : $",{wiserSettings.ConfigurationPath}")}");
-                request.Headers.Add("Authorization", $"Bearer {AccesToken}");
+                request.Headers.Add("Authorization", $"Bearer {AccessToken}");
 
                 using var client = new HttpClient();
                 try

@@ -2,19 +2,27 @@
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Text;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
+using AutoImportServiceCore.Modules.Wiser.Interfaces;
 using AutoImportServiceCore.Modules.WiserImports.Interfaces;
 using AutoImportServiceCore.Modules.WiserImports.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Enums;
+using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Core.Services;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
+using GeeksCoreLibrary.Modules.Imports.Models;
 using GeeksCoreLibrary.Modules.Objects.Interfaces;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,20 +30,25 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using GclCommunicationsService = GeeksCoreLibrary.Modules.Communication.Services.CommunicationsService;
 
 namespace AutoImportServiceCore.Modules.WiserImports.Services;
 
 public class WiserImportsService : IWiserImportsService, IActionsService, IScopedService
 {
     private readonly IServiceProvider serviceProvider;
+    private readonly AisSettings aisSettings;
+    private readonly IWiserService wiserService;
     private readonly ILogService logService;
     private readonly ILogger<WiserImportsService> logger;
     
     private string connectionString;
 
-    public WiserImportsService(IServiceProvider serviceProvider, ILogService logService, ILogger<WiserImportsService> logger)
+    public WiserImportsService(IServiceProvider serviceProvider, IOptions<AisSettings> aisSettings, IWiserService wiserService, ILogService logService, ILogger<WiserImportsService> logger)
     {
         this.serviceProvider = serviceProvider;
+        this.aisSettings = aisSettings.Value;
+        this.wiserService = wiserService;
         this.logService = logService;
         this.logger = logger;
     }
@@ -84,9 +97,11 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
         var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
         var gclSettings = scope.ServiceProvider.GetRequiredService<IOptions<GclSettings>>();
         var wiserItemsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<WiserItemsService>>();
+        var gclCommunicationsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<GclCommunicationsService>>();
         
         var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, null, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
-
+        var gclCommunicationsService = new GclCommunicationsService(gclSettings, gclCommunicationsServiceLogger, wiserItemsService, databaseConnection);
+        
         foreach (DataRow row in importDataTable.Rows)
         {
             var importRow = new ImportRowModel(row);
@@ -99,8 +114,9 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
             }
 
             stopwatch.Restart();
+            var startDate = DateTime.Now;
             databaseConnection.AddParameter("id", importRow.Id);
-            databaseConnection.AddParameter("startDate", DateTime.Now);
+            databaseConnection.AddParameter("startDate", startDate);
             await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserImport} SET started_on = ?startDate WHERE id = ?id");
 
             var errors = new List<string>();
@@ -108,7 +124,8 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
             var itemParentIdsToKeep = new Dictionary<int, Dictionary<ulong, List<ulong>>>();
             var sourceLinksToKeep = new Dictionary<int, Dictionary<ulong, List<ulong>>>();
 
-            var importData = JsonConvert.DeserializeObject<List<ImportDataModel>>(importRow.RawData, new JsonSerializerSettings() {NullValueHandling = NullValueHandling.Ignore});
+            var serializerSettings = new JsonSerializerSettings() {NullValueHandling = NullValueHandling.Ignore};
+            var importData = JsonConvert.DeserializeObject<List<ImportDataModel>>(importRow.RawData, serializerSettings);
             foreach (var import in importData)
             {
                 try
@@ -117,7 +134,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
                 }
                 catch (Exception e)
                 {
-                    //TODO log error
+                    await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Failed to import an item due to exception:\n{e}\n\nItem details:\n{JsonConvert.SerializeObject(import.Item, serializerSettings)}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
                     // No need to import links and files if the item failed to be imported.
                     continue;
                 }
@@ -128,7 +145,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
                     {
                         if (link.ItemId == 0 && link.DestinationItemId == 0)
                         {
-                            //TODO log that no items are being linked.
+                            await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Found link with neither an item_id nor a destination_item_id for item '{import.Item.Id}', but it has not data, so there is nothing we can import.", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
                             continue;
                         }
 
@@ -166,7 +183,42 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
                             }
                         }
 
-                        //TODO delete existing links if set.
+                        // If the user wants to delete existing links, make a list with links that we need to keep, so we can delete the rest at the end of the import.
+                        if (link.DeleteExistingLinks)
+                        {
+                            // If the current item is the source item, then we want to delete all other links of the given destination, so that only the imported items will remain linked to that destination.
+                            if (link.ItemId == import.Item.Id)
+                            {
+                                var listToUse = link.UseParentItemId ? itemParentIdsToKeep : destinationLinksToKeep;
+
+                                if (!listToUse.ContainsKey(link.Type))
+                                {
+                                    listToUse.Add(link.Type, new Dictionary<ulong, List<ulong>>());
+                                }
+
+                                if (!listToUse[link.Type].ContainsKey(link.DestinationItemId))
+                                {
+                                    listToUse[link.Type].Add(link.DestinationItemId, new List<ulong>());
+                                }
+                                
+                                listToUse[link.Type][link.DestinationItemId].Add(link.ItemId);
+                            }
+                            // Else if the current item is the destination item, then we want to delete all other links of the given source, so that this item will only remain linked the the items from this import.
+                            else if (link.DestinationItemId == import.Item.Id)
+                            {
+                                if (!sourceLinksToKeep.ContainsKey(link.Type))
+                                {
+                                    sourceLinksToKeep.Add(link.Type, new Dictionary<ulong, List<ulong>>());
+                                }
+
+                                if (!sourceLinksToKeep[link.Type].ContainsKey(link.ItemId))
+                                {
+                                    sourceLinksToKeep[link.Type].Add(link.ItemId, new List<ulong>());
+                                }
+                                
+                                sourceLinksToKeep[link.Type][link.ItemId].Add(link.DestinationItemId);
+                            }
+                        }
 
                         if (!link.UseParentItemId && link.Details != null && link.Details.Any())
                         {
@@ -183,7 +235,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
                     }
                     catch (Exception e)
                     {
-                        //TODO log error
+                        await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Error while trying yo import an item link due to exception:\n{e}\n\nItem link details:\n{JsonConvert.SerializeObject(link, serializerSettings)}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
                         errors.Add(e.Message);
                     }
                 }
@@ -198,7 +250,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
                         {
                             var errorMessage = $"Could not import file '{file.FileName}' for item '{import.Item.Id}' because it was not found on the hard-disk of the server.";
                             errors.Add(errorMessage);
-                            //TODO log error
+                            await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, errorMessage, configurationServiceName, wiserImport.TimeId, wiserImport.Order);
                             
                             continue;
                         }
@@ -214,7 +266,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
                     }
                     catch (Exception e)
                     {
-                        //TODO log error
+                        await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Error while trying to import an item file:\n{e}\n\nFile details:\n{JsonConvert.SerializeObject(file, serializerSettings)}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
                         errors.Add(e.Message);
                     }
                 }
@@ -238,7 +290,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
                         }
                         catch (Exception e)
                         {
-                            //TODO log error
+                            await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Error while trying to delete item links (destination) of type '{linkType}' due to exception:\n{e}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
                             errors.Add(e.Message);
                         }
                     }
@@ -257,7 +309,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
                         }
                         catch (Exception e)
                         {
-                            //TODO log error
+                            await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Error while trying to delete item links (parent) of type '{linkType}' due to exception:\n{e}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
                             errors.Add(e.Message);
                         }
                     }
@@ -279,13 +331,14 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
                         }
                         catch (Exception e)
                         {
-                            //TODO log error
+                            await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Error while trying to delete item links (source) of type '{linkType}' due to exception:\n{e}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
                             errors.Add(e.Message);
                         }
                     }
                 }
             }
-            
+
+            var endDate = DateTime.Now;
             stopwatch.Stop();
             
             databaseConnection.AddParameter("id", importRow.Id);
@@ -294,17 +347,9 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
             databaseConnection.AddParameter("errors", String.Join(Environment.NewLine, errors));
             await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserImport} SET finished_on = ?finishedOn, success = ?success, errors = ?errors WHERE id = ?id");
             
-            databaseConnection.AddParameter("userId", importRow.UserId);
-            var userDataTable = await databaseConnection.GetAsync($"SELECT `value` FROM {WiserTableNames.WiserItemDetail} WHERE item_id = ?userId AND `key` = 'email_address'");
-            if (userDataTable.Rows.Count == 0)
-            {
-                //TODO log error
-                continue;
-            }
-            
-            //TODO send email to user.
-            
-            //TODO send task alert to user.
+            var subject = $"Import {(String.IsNullOrWhiteSpace(importRow.ImportName) ? "" : $" with the name '{importRow.ImportName}'")} from {DateTime.Now.ToString("dddd, dd MMMM yyyy", new CultureInfo("en-Us"))} did {(errors.Any() ? "(partially) go wrong" : "finish successfully")}";
+            await NotifyUserByEmail(wiserImport, importRow, databaseConnection, gclCommunicationsService, configurationServiceName, subject, errors, startDate, endDate, stopwatch);
+            await NotifyUserByTaskAlert(wiserImport, importRow, wiserItemsService, configurationServiceName, usernameForLogs, subject);
         }
         
         throw new System.NotImplementedException();
@@ -354,5 +399,93 @@ WHERE server_name = ?serverName
 AND started_on IS NULL
 AND start_on <= ?now
 ORDER BY added_on ASC");
+    }
+
+    /// <summary>
+    /// Notify the user that placed the import using an email about the status of the import.
+    /// </summary>
+    /// <param name="wiserImport">The AIS information for handling the imports.</param>
+    /// <param name="importRow">The information of the import itself.</param>
+    /// <param name="databaseConnection">The connection to the database.</param>
+    /// <param name="gclCommunicationsService">The communications service from the GCL to add the email to the queue.</param>
+    /// <param name="configurationServiceName">The name of the configuration the import is executed within.</param>
+    /// <param name="subject">The subject of the email.</param>
+    /// <param name="errors">The list of errors that have been given during the import.</param>
+    /// <param name="startDate">The date and time the import started.</param>
+    /// <param name="endDate">The date and time the import stopped.</param>
+    /// <param name="stopwatch">The stopwatch used to measure the passed time.</param>
+    private async Task NotifyUserByEmail(WiserImportModel wiserImport, ImportRowModel importRow, IDatabaseConnection databaseConnection, GclCommunicationsService gclCommunicationsService, string configurationServiceName, string subject, List<string> errors, DateTime startDate, DateTime endDate, Stopwatch stopwatch)
+    {
+        databaseConnection.AddParameter("userId", importRow.UserId);
+        var userDataTable = await databaseConnection.GetAsync($"SELECT `value` AS receiver FROM {WiserTableNames.WiserItemDetail} WHERE item_id = ?userId AND `key` = 'email_address'");
+        
+        if (userDataTable.Rows.Count == 0)
+        {
+            await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Could not find email address for user '{importRow.UserId}' and import '{importRow.Id}'", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
+            // If there is no email address to send the notification to skip it.
+            return;
+        }
+
+        var receiver = userDataTable.Rows[0].Field<string>("receiver");
+            
+        var content = new StringBuilder();
+        content.Append($"The import started at {startDate.ToString("HH:mm:ss")} and finished on {endDate.ToString("HH:mm:ss")}. The import took a total of {stopwatch.Elapsed.Hours} hour(s), {stopwatch.Elapsed.Minutes} minute(s) and {stopwatch.Elapsed.Seconds} second(s).");
+        if (errors.Any())
+        {
+            content.Append($"<br><br>The following errors occurred during the import: <ul><li><pre>{String.Join("</pre></li><li><pre>", errors)}</pre></li></ul>");
+        }
+            
+        await gclCommunicationsService.SendEmailAsync(receiver, subject, content.ToString(), importRow.Username, sendDate: DateTime.Now);
+    }
+    
+    /// <summary>
+    /// Notify the user that placed the import using a task alert about the status of the import.
+    /// </summary>
+    /// <param name="wiserImport">The AIS information for handling the imports.</param>
+    /// <param name="importRow">The information of the import itself.</param>
+    /// <param name="wiserItemsService">The Wiser items service to save the task alert.</param>
+    /// <param name="configurationServiceName">The name of the configuration the import is executed within.</param>
+    /// <param name="usernameForLogs">The username to use for the logs in the database.</param>
+    /// <param name="subject">The subject of the task alert.</param>
+    private async Task NotifyUserByTaskAlert(WiserImportModel wiserImport, ImportRowModel importRow, IWiserItemsService wiserItemsService, string configurationServiceName, string usernameForLogs, string subject)
+    {
+        // Create and save the task alert in the database.
+        var taskAlert = new WiserItemModel()
+            {
+                EntityType = "agendering",
+                ModuleId = 708,
+                PublishedEnvironment = Environments.Live,
+                Details = new List<WiserItemDetailModel>()
+                {
+                    new() {Key = "agendering_date", Value = DateTime.Now.ToString("yyyy-MM-dd")},
+                    new() {Key = "content", Value = subject},
+                    new() {Key = "userid", Value = importRow.UserId},
+                    new() {Key = "username", Value = importRow.Username},
+                    new() {Key = "placed_by", Value = "AIS"},
+                    new() {Key = "placed_by_id", Value = importRow.UserId}
+                }
+            };
+
+            await wiserItemsService.SaveAsync(taskAlert, username: usernameForLogs, userId: importRow.UserId);
+
+            // Push the task alert to the user to give a signal within Wiser if it is open.
+            var accessToken = await Task.Run(() => wiserService.AccessToken);
+
+            try
+            {
+                var client = new HttpClient();
+                var request = new HttpRequestMessage(HttpMethod.Post, $"{aisSettings.Wiser.WiserApiUrl}api/v3/pusher/message");
+                request.Headers.Add("Authorization", $"Bearer {accessToken}");
+                request.Content = JsonContent.Create(new { userId = importRow.UserId });
+                var response = await client.SendAsync(request);
+                if (!response.IsSuccessStatusCode)
+                {
+                    await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Failed to notify the user of the import through the task alert pusher, server returned status '{response.StatusCode}' with reason '{response.ReasonPhrase}'.", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
+                }
+            }
+            catch (Exception e)
+            {
+                await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Failed to notify the user of the import through the task alert pusher due to exception:\n{e}.", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
+            }
     }
 }
