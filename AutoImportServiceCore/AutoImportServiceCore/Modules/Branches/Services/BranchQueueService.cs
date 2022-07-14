@@ -1453,17 +1453,18 @@ WHERE `id` = ?id";
             {
                 try
                 {
+                    // Change connection string to one with a specific user for deleting a database.
                     if (!String.IsNullOrWhiteSpace(branchQueue.UsernameForDeletingBranches) && !String.IsNullOrWhiteSpace(branchQueue.PasswordForDeletingBranches))
                     {
                         connectionStringBuilder.UserID = branchQueue.UsernameForDeletingBranches;
                         connectionStringBuilder.Password = branchQueue.PasswordForDeletingBranches;
+                        await databaseConnection.ChangeConnectionStringsAsync(connectionStringBuilder.ConnectionString, connectionStringBuilder.ConnectionString);
                     }
 
-                    await using var deleteConnection = new MySqlConnection(connectionStringBuilder.ConnectionString);
-                    await deleteConnection.OpenAsync();
-                    await using var deleteCommand = deleteConnection.CreateCommand();
-                    deleteCommand.CommandText = $"DROP DATABASE `{branchDatabase}`;";
-                    await deleteCommand.ExecuteNonQueryAsync();
+                    await databaseConnection.ExecuteAsync($"DROP DATABASE `{branchDatabase}`;");
+                    
+                    // Change connection string back to the original.
+                    await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
                 }
                 catch (Exception exception)
                 {
