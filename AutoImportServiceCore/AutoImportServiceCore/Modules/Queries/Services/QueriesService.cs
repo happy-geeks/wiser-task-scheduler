@@ -32,9 +32,6 @@ namespace AutoImportServiceCore.Modules.Queries.Services
         /// <summary>
         /// Creates a new instance of <see cref="QueriesService"/>.
         /// </summary>
-        /// <param name="logService">The service to use for logging.</param>
-        /// <param name="logger"></param>
-        /// <param name="databaseConnection"></param>
         public QueriesService(ILogService logService, ILogger<QueriesService> logger, IServiceProvider serviceProvider)
         {
             this.logService = logService;
@@ -153,29 +150,26 @@ namespace AutoImportServiceCore.Modules.Queries.Services
         private JObject GetResultSetFromDataTable(DataTable dataTable)
         {
             var resultSet = new JObject();
-
-            if (dataTable == null || dataTable.Rows.Count == 0)
-            {
-                return resultSet;
-            }
-
             var jArray = new JArray();
 
-            foreach (DataRow row in dataTable.Rows)
+            if (dataTable != null && dataTable.Rows.Count > 0)
             {
-                var jObject = new JObject();
 
-                for (var i = 0; i < dataTable.Columns.Count; i++)
+                foreach (DataRow row in dataTable.Rows)
                 {
-                    var columnName = dataTable.Columns[i].ColumnName;
-                    jObject.Add(columnName, row[i].ToString());
-                }
+                    var jObject = new JObject();
 
-                jArray.Add(jObject);
+                    for (var i = 0; i < dataTable.Columns.Count; i++)
+                    {
+                        var columnName = dataTable.Columns[i].ColumnName;
+                        jObject.Add(columnName, row[i].ToString());
+                    }
+
+                    jArray.Add(jObject);
+                }
             }
 
             resultSet.Add("Results", jArray);
-
             return resultSet;
         }
     }

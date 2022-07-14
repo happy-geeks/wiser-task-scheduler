@@ -1,4 +1,5 @@
-﻿using AutoImportServiceCore.Modules.Wiser.Models;
+﻿using AutoImportServiceCore.Core.Models.Cleanup;
+using AutoImportServiceCore.Modules.Wiser.Models;
 
 namespace AutoImportServiceCore.Core.Models
 {
