@@ -5,6 +5,8 @@ using AutoImportServiceCore.Modules.CleanupItems.Interfaces;
 using AutoImportServiceCore.Modules.CleanupItems.Models;
 using AutoImportServiceCore.Modules.Branches.Interfaces;
 using AutoImportServiceCore.Modules.Branches.Models;
+using AutoImportServiceCore.Modules.Communications.Interfaces;
+using AutoImportServiceCore.Modules.Communications.Models;
 using AutoImportServiceCore.Modules.GenerateFiles.Interfaces;
 using AutoImportServiceCore.Modules.GenerateFiles.Models;
 using AutoImportServiceCore.Modules.HttpApis.Interfaces;
@@ -55,6 +57,8 @@ namespace AutoImportServiceCore.Core.Factories
                     return serviceProvider.GetRequiredService<IBranchQueueService>() as IActionsService;
                 case WiserImportModel:
                     return serviceProvider.GetRequiredService<IWiserImportsService>() as IActionsService;
+                case CommunicationModel:
+                    return serviceProvider.GetRequiredService<ICommunicationsService>() as IActionsService;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(action), action.ToString());
             }

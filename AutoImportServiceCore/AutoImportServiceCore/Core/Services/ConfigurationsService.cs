@@ -6,6 +6,7 @@ using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
+using AutoImportServiceCore.Modules.RunSchemes.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
@@ -78,11 +79,18 @@ namespace AutoImportServiceCore.Core.Services
         {
             var actionSets = new List<ActionModel[]>
             {
+                configuration.QueryGroup,
                 configuration.Queries,
+                configuration.HttpApiGroup,
                 configuration.HttpApis,
-                configuration.GenerateFileModels,
-                configuration.ImportFileModels,
+                configuration.GenerateFileGroup,
+                configuration.GenerateFiles,
+                configuration.ImportFileGroup,
+                configuration.ImportFiles,
+                configuration.CleanupItemGroup,
                 configuration.CleanupItems,
+                configuration.CommunicationGroup,
+                configuration.Communications,
                 configuration.WiserImportModels
             };
 
@@ -116,8 +124,8 @@ namespace AutoImportServiceCore.Core.Services
 
             // Check for duplicate run scheme time ids.
             var runSchemeTimeIds = new List<int>();
-
-            foreach (var runScheme in configuration.RunSchemes)
+            
+            foreach (var runScheme in configuration.GetAllRunSchemes())
             {
                 runSchemeTimeIds.Add(runScheme.TimeId);
             }

@@ -11,6 +11,7 @@ using AutoImportServiceCore.Core.Models;
 using AutoImportServiceCore.Modules.Wiser.Interfaces;
 using AutoImportServiceCore.Modules.Wiser.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Enums;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
@@ -140,7 +141,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
             // Lock cannot be used inside an async function. This way we can wait till the request has completed.
             return await Task.Run(() =>
             {
-                var request = new HttpRequestMessage(HttpMethod.Get, $"{wiserSettings.WiserApiUrl}api/v3/templates/entire-tree-view?startFrom=AIS{(string.IsNullOrWhiteSpace(wiserSettings.ConfigurationPath) ? "" : $",{wiserSettings.ConfigurationPath}")}");
+                var request = new HttpRequestMessage(HttpMethod.Get, $"{wiserSettings.WiserApiUrl}api/v3/templates/entire-tree-view?startFrom=AIS{(string.IsNullOrWhiteSpace(wiserSettings.ConfigurationPath) ? "" : $",{wiserSettings.ConfigurationPath}")}&environment={Environments.Live}");
                 request.Headers.Add("Authorization", $"Bearer {AccessToken}");
 
                 using var client = new HttpClient();

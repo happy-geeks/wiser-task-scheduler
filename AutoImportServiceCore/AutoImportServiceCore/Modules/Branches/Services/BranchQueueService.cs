@@ -1448,6 +1448,30 @@ WHERE `id` = ?id";
                 await productionConnection.DisposeAsync();
             }
 
+            // Delete the branch if there were no errors and the user indicated it should be deleted after a successful merge.
+            if (!errors.Any() && settings.DeleteAfterSuccessfulMerge)
+            {
+                try
+                {
+                    // Change connection string to one with a specific user for deleting a database.
+                    if (!String.IsNullOrWhiteSpace(branchQueue.UsernameForDeletingBranches) && !String.IsNullOrWhiteSpace(branchQueue.PasswordForDeletingBranches))
+                    {
+                        connectionStringBuilder.UserID = branchQueue.UsernameForDeletingBranches;
+                        connectionStringBuilder.Password = branchQueue.PasswordForDeletingBranches;
+                        await databaseConnection.ChangeConnectionStringsAsync(connectionStringBuilder.ConnectionString, connectionStringBuilder.ConnectionString);
+                    }
+
+                    await databaseConnection.ExecuteAsync($"DROP DATABASE `{branchDatabase}`;");
+                    
+                    // Change connection string back to the original.
+                    await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
+                }
+                catch (Exception exception)
+                {
+                    errors.Add($"Het verwijderen van de branch is niet gelukt: {exception}");
+                }
+            }
+
             var errorsString = errors.ToString();
             if (errorsString == "[]")
             {
@@ -1472,7 +1496,7 @@ WHERE `id` = ?id";
         private static async Task LockTablesAsync(MySqlConnection mySqlConnection, IEnumerable<string> tablesToLock, bool alsoLockIdMappingsTable)
         {
             await using var productionCommand = mySqlConnection.CreateCommand();
-            productionCommand.CommandText = $"{(!alsoLockIdMappingsTable ? "" : $"LOCK TABLES {WiserTableNames.WiserIdMappings} WRITE, ")}LOCK TABLES {String.Join(", ", tablesToLock.Select(table => $"{table} WRITE"))}";
+            productionCommand.CommandText = $"LOCK TABLES {(!alsoLockIdMappingsTable ? "" : $"{WiserTableNames.WiserIdMappings} WRITE, ")}{String.Join(", ", tablesToLock.Select(table => $"{table} WRITE"))}";
             await productionCommand.ExecuteNonQueryAsync();
         }
 
