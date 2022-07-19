@@ -157,8 +157,8 @@ AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?
         
         try
         {
-            //await wiserItemsService.DeleteAsync(ids, username: "AIS Cleanup", saveHistory: cleanupItem.SaveHistory, skipPermissionsCheck: true);
-            //await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Finished cleanup for items of entity '{cleanupItem.EntityName}', delete action: '{deleteAction}'.", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
+            await wiserItemsService.DeleteAsync(ids, username: "AIS Cleanup", saveHistory: cleanupItem.SaveHistory, skipPermissionsCheck: true, entityType: cleanupItem.EntityName);
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Finished cleanup for items of entity '{cleanupItem.EntityName}', delete action: '{deleteAction}'.", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
         }
         catch (Exception e)
         {

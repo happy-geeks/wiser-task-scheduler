@@ -199,8 +199,22 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
             // Add all content headers to the result set.
             ExtractHeadersIntoResultSet(resultSet, response.Content.Headers);
 
+            // Determine content type.
+            string contentType = null;
+            if (!String.IsNullOrWhiteSpace(httpApi.ResultContentType))
+            {
+                contentType = httpApi.ResultContentType;
+            }
+            else if (resultSet.ContainsKey("Content-Type"))
+            {
+                contentType = (string) resultSet["Content-Type"]?[0];
+            }
+            
+            // Make sure contentType is not null.
+            contentType ??= String.Empty;
+
             var responseBody = await response.Content.ReadAsStringAsync();
-            if (resultSet.ContainsKey("Content-Type") && ((string)resultSet["Content-Type"][0]).Contains("json"))
+            if (contentType.Contains("json"))
             {
                 if (responseBody.StartsWith("{"))
                 {
@@ -211,7 +225,7 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
                     resultSet.Add("Body", JArray.Parse(responseBody));
                 }
             }
-            else if (resultSet.ContainsKey("Content-Type") && ((string)resultSet["Content-Type"][0]).Contains("xml"))
+            else if (contentType.Contains("xml"))
             {
                 var xml = new XmlDocument();
                 xml.LoadXml(responseBody);

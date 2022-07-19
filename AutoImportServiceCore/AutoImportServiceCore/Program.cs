@@ -8,13 +8,11 @@ using AutoImportServiceCore.Core.Workers;
 using GeeksCoreLibrary.Components.Account.Interfaces;
 using GeeksCoreLibrary.Components.Account.Services;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
-using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
-using GeeksCoreLibrary.Core.Services;
+using GeeksCoreLibrary.Modules.Branches.Interfaces;
+using GeeksCoreLibrary.Modules.Branches.Services;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.Databases.Services;
-using GeeksCoreLibrary.Modules.DataSelector.Interfaces;
-using GeeksCoreLibrary.Modules.DataSelector.Services;
 using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
 using GeeksCoreLibrary.Modules.GclReplacements.Services;
 using GeeksCoreLibrary.Modules.Languages.Interfaces;
@@ -90,6 +88,7 @@ namespace AutoImportServiceCore
             services.AddScoped<IStringReplacementsService, StringReplacementsService>();
             services.AddScoped<ILanguagesService, LanguagesService>();
             services.AddScoped<IAccountsService, AccountsService>();
+            services.AddScoped<IBranchesService, BranchesService>();
 
             // Configure automatic scanning of classes for dependency injection.
             services.Scan(scan => scan
