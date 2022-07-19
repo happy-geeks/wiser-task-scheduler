@@ -139,12 +139,19 @@ namespace AutoImportServiceCore.Core.Models
         public BranchQueueModel BranchQueueModel { get; set; }
 
         /// <summary>
-        /// Gets or sets the Wiser the imports need to be handled for.
+        /// Gets or sets the Wiser the imports need to be handled for that have been placed in the group.
         /// </summary>
         [XmlArray("WiserImports")]
         [XmlArrayItem(typeof(WiserImportModel))]
-        public WiserImportModel[] WiserImportModels { get; set; }
-        
+        public WiserImportModel[] WiserImportGroup { get; set; }
+
+        /// <summary>
+        /// Gets or sets the Wiser the imports need to be handled for that have been placed outside the group.
+        /// </summary>
+        [XmlElement("WiserImport")]
+        public WiserImportModel[] WiserImports { get; set; }
+
+        /// <summary>
         /// Get all run schemes that are defined in this configuration.
         /// Will combine the run schemes inside and outside the group.
         /// </summary>

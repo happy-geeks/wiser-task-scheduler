@@ -91,7 +91,8 @@ namespace AutoImportServiceCore.Core.Services
                 configuration.CleanupItems,
                 configuration.CommunicationGroup,
                 configuration.Communications,
-                configuration.WiserImportModels
+                configuration.WiserImportGroup,
+                configuration.WiserImports
             };
 
             var allActions = new List<ActionModel>();

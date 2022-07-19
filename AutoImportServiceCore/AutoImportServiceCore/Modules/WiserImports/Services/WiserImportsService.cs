@@ -41,6 +41,8 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
     private readonly IWiserService wiserService;
     private readonly ILogService logService;
     private readonly ILogger<WiserImportsService> logger;
+    private readonly JsonSerializerSettings serializerSettings = new JsonSerializerSettings() {NullValueHandling = NullValueHandling.Ignore};
+    private readonly FileExtensionContentTypeProvider fileExtensionContentTypeProvider = new FileExtensionContentTypeProvider();
     
     private string connectionString;
 
@@ -73,7 +75,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
         using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
         await databaseConnection.ChangeConnectionStringsAsync(connectionStringToUse, connectionStringToUse);
         
-        var importDataTable = await GetImportsToProcess(databaseConnection);
+        var importDataTable = await GetImportsToProcessAsync(databaseConnection);
         if (importDataTable.Rows.Count == 0)
         {
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, wiserImport.LogSettings, $"Finished the import for '{databaseName}' due to no imports to process.", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
@@ -88,7 +90,6 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
         }
         
         var stopwatch = new Stopwatch();
-        var fileExtensionContentTypeProvider = new FileExtensionContentTypeProvider();
         
         // Wiser Items Service requires dependency injection that results in the need of MVC services that are unavailable.
         // Get all other services and create the Wiser Items Service with one of the services missing.
@@ -123,8 +124,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
             var destinationLinksToKeep = new Dictionary<int, Dictionary<ulong, List<ulong>>>();
             var itemParentIdsToKeep = new Dictionary<int, Dictionary<ulong, List<ulong>>>();
             var sourceLinksToKeep = new Dictionary<int, Dictionary<ulong, List<ulong>>>();
-
-            var serializerSettings = new JsonSerializerSettings() {NullValueHandling = NullValueHandling.Ignore};
+            
             var importData = JsonConvert.DeserializeObject<List<ImportDataModel>>(importRow.RawData, serializerSettings);
             foreach (var import in importData)
             {
@@ -139,203 +139,14 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
                     continue;
                 }
 
-                foreach (var link in import.Links)
-                {
-                    try
-                    {
-                        if (link.ItemId == 0 && link.DestinationItemId == 0)
-                        {
-                            await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Found link with neither an item_id nor a destination_item_id for item '{import.Item.Id}', but it has not data, so there is nothing we can import.", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
-                            continue;
-                        }
-
-                        // Set the missing link to the new item.
-                        if (link.ItemId == 0)
-                        {
-                            link.ItemId = import.Item.Id;
-                        }
-                        else
-                        {
-                            link.DestinationItemId = import.Item.Id;
-                        }
-
-                        // Sorting starts with 1, so set value to 1 if not set.
-                        if (link.Ordering == 0)
-                        {
-                            link.Ordering = 1;
-                        }
-
-                        if (!link.UseParentItemId)
-                        {
-                            databaseConnection.AddParameter("itemId", link.ItemId);
-                            databaseConnection.AddParameter("destinationItemId", link.DestinationItemId);
-                            databaseConnection.AddParameter("type", link.Type);
-                            var linkPrefix = await wiserItemsService.GetTablePrefixForLinkAsync(link.Type);
-                            var existingLinkDataTable = await databaseConnection.GetAsync($"SELECT id FROM {linkPrefix}{WiserTableNames.WiserItemLink} WHERE item_id = ?itemId AND destination_item_id = ?destinationItemId AND type = ?type");
-
-                            if (existingLinkDataTable.Rows.Count > 0)
-                            {
-                                link.Id = existingLinkDataTable.Rows[0].Field<ulong>("id");
-                            }
-                            else
-                            {
-                                link.Id = await wiserItemsService.AddItemLinkAsync(link.ItemId, link.DestinationItemId, link.Type, link.Ordering, usernameForLogs, importRow.UserId);
-                            }
-                        }
-
-                        // If the user wants to delete existing links, make a list with links that we need to keep, so we can delete the rest at the end of the import.
-                        if (link.DeleteExistingLinks)
-                        {
-                            // If the current item is the source item, then we want to delete all other links of the given destination, so that only the imported items will remain linked to that destination.
-                            if (link.ItemId == import.Item.Id)
-                            {
-                                var listToUse = link.UseParentItemId ? itemParentIdsToKeep : destinationLinksToKeep;
-
-                                if (!listToUse.ContainsKey(link.Type))
-                                {
-                                    listToUse.Add(link.Type, new Dictionary<ulong, List<ulong>>());
-                                }
-
-                                if (!listToUse[link.Type].ContainsKey(link.DestinationItemId))
-                                {
-                                    listToUse[link.Type].Add(link.DestinationItemId, new List<ulong>());
-                                }
-                                
-                                listToUse[link.Type][link.DestinationItemId].Add(link.ItemId);
-                            }
-                            // Else if the current item is the destination item, then we want to delete all other links of the given source, so that this item will only remain linked the the items from this import.
-                            else if (link.DestinationItemId == import.Item.Id)
-                            {
-                                if (!sourceLinksToKeep.ContainsKey(link.Type))
-                                {
-                                    sourceLinksToKeep.Add(link.Type, new Dictionary<ulong, List<ulong>>());
-                                }
-
-                                if (!sourceLinksToKeep[link.Type].ContainsKey(link.ItemId))
-                                {
-                                    sourceLinksToKeep[link.Type].Add(link.ItemId, new List<ulong>());
-                                }
-                                
-                                sourceLinksToKeep[link.Type][link.ItemId].Add(link.DestinationItemId);
-                            }
-                        }
-
-                        if (!link.UseParentItemId && link.Details != null && link.Details.Any())
-                        {
-                            foreach (var linkDetail in link.Details)
-                            {
-                                linkDetail.IsLinkProperty = true;
-                                linkDetail.ItemLinkId = link.Id;
-                                linkDetail.Changed = true;
-                            }
-
-                            import.Item.Details.AddRange(link.Details);
-                            await wiserItemsService.SaveAsync(import.Item, username: usernameForLogs, userId: importRow.UserId);
-                        }
-                    }
-                    catch (Exception e)
-                    {
-                        await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Error while trying yo import an item link due to exception:\n{e}\n\nItem link details:\n{JsonConvert.SerializeObject(link, serializerSettings)}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
-                        errors.Add(e.Message);
-                    }
-                }
-
-                var basePath = $@"C:\temp\AIS Import\{importRow.CustomerId}\{importRow.Id}\";
-                foreach (var file in import.Files)
-                {
-                    try
-                    {
-                        var fileLocation = Path.Combine(basePath, file.FileName);
-                        if (!File.Exists(fileLocation))
-                        {
-                            var errorMessage = $"Could not import file '{file.FileName}' for item '{import.Item.Id}' because it was not found on the hard-disk of the server.";
-                            errors.Add(errorMessage);
-                            await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, errorMessage, configurationServiceName, wiserImport.TimeId, wiserImport.Order);
-                            
-                            continue;
-                        }
-
-                        file.ItemId = import.Item.Id;
-                        file.Content = await File.ReadAllBytesAsync(fileLocation);
-                        if (fileExtensionContentTypeProvider.TryGetContentType(file.FileName, out var contentType))
-                        {
-                            file.ContentType = contentType;
-                        }
-
-                        file.Id = await wiserItemsService.AddItemFileAsync(file, usernameForLogs, importRow.UserId);
-                    }
-                    catch (Exception e)
-                    {
-                        await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Error while trying to import an item file:\n{e}\n\nFile details:\n{JsonConvert.SerializeObject(file, serializerSettings)}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
-                        errors.Add(e.Message);
-                    }
-                }
+                await ImportLinksAsync(wiserImport, import, databaseConnection, wiserItemsService, usernameForLogs, errors, destinationLinksToKeep, itemParentIdsToKeep, sourceLinksToKeep, importRow, configurationServiceName);
+                await ImportFilesAsync(wiserImport, import, databaseConnection, wiserItemsService, usernameForLogs, errors, importRow, configurationServiceName);
             }
 
+            // If there have been no errors the import was successful. We can safely cleanup any links that need to be deleted.
             if (!errors.Any())
             {
-                foreach (var destinationLink in destinationLinksToKeep)
-                {
-                    var linkType = destinationLink.Key;
-                    foreach (var destination in destinationLink.Value)
-                    {
-                        var destinatonItemId = destination.Key;
-                        var linkPrefix = await wiserItemsService.GetTablePrefixForLinkAsync(linkType);
-
-                        try
-                        {
-                            databaseConnection.AddParameter("type", linkType);
-                            databaseConnection.AddParameter("destinationItemId", destinatonItemId);
-                            await databaseConnection.ExecuteAsync($"DELETE FROM {linkPrefix}{WiserTableNames.WiserItemLink} WHERE type = ?type AND destination_item_id = ?destinationItemId AND item_id NOT IN ({String.Join(",", destination.Value)})");
-                        }
-                        catch (Exception e)
-                        {
-                            await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Error while trying to delete item links (destination) of type '{linkType}' due to exception:\n{e}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
-                            errors.Add(e.Message);
-                        }
-                    }
-                }
-
-                foreach (var parentItem in itemParentIdsToKeep)
-                {
-                    var linkType = parentItem.Key;
-                    foreach (var parent in parentItem.Value)
-                    {
-                        var parentItemId = parent.Key;
-                        try
-                        {
-                            databaseConnection.AddParameter("parentItemId", parentItemId);
-                            await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserItem} SET parent_item_id = 0 WHERE parent_item_id = ?parentItemId AND id NOT IN ({String.Join(",", parent.Value)})");
-                        }
-                        catch (Exception e)
-                        {
-                            await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Error while trying to delete item links (parent) of type '{linkType}' due to exception:\n{e}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
-                            errors.Add(e.Message);
-                        }
-                    }
-                }
-
-                foreach (var sourceLink in sourceLinksToKeep)
-                {
-                    var linkType = sourceLink.Key;
-                    foreach (var source in sourceLink.Value)
-                    {
-                        var sourceItemId = source.Key;
-                        var linkPrefix = await wiserItemsService.GetTablePrefixForLinkAsync(linkType);
-                        
-                        try
-                        {
-                            databaseConnection.AddParameter("type", linkType);
-                            databaseConnection.AddParameter("sourceItemId", sourceItemId);
-                            await databaseConnection.ExecuteAsync($"DELETE FROM {linkPrefix}{WiserTableNames.WiserItemLink} WHERE type = ?type AND item_id = ?sourceItemId AND destination_item_id NOT IN ({String.Join(",", source.Value)})");
-                        }
-                        catch (Exception e)
-                        {
-                            await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Error while trying to delete item links (source) of type '{linkType}' due to exception:\n{e}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
-                            errors.Add(e.Message);
-                        }
-                    }
-                }
+                await CleanupLinks(wiserImport, databaseConnection, wiserItemsService, errors, destinationLinksToKeep, itemParentIdsToKeep, sourceLinksToKeep, configurationServiceName);
             }
 
             var endDate = DateTime.Now;
@@ -348,8 +159,8 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
             await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserImport} SET finished_on = ?finishedOn, success = ?success, errors = ?errors WHERE id = ?id");
             
             var subject = $"Import {(String.IsNullOrWhiteSpace(importRow.ImportName) ? "" : $" with the name '{importRow.ImportName}'")} from {DateTime.Now.ToString("dddd, dd MMMM yyyy", new CultureInfo("en-Us"))} did {(errors.Any() ? "(partially) go wrong" : "finish successfully")}";
-            await NotifyUserByEmail(wiserImport, importRow, databaseConnection, gclCommunicationsService, configurationServiceName, subject, errors, startDate, endDate, stopwatch);
-            await NotifyUserByTaskAlert(wiserImport, importRow, wiserItemsService, configurationServiceName, usernameForLogs, subject);
+            await NotifyUserByEmailAsync(wiserImport, importRow, databaseConnection, gclCommunicationsService, configurationServiceName, subject, errors, startDate, endDate, stopwatch);
+            await NotifyUserByTaskAlertAsync(wiserImport, importRow, wiserItemsService, configurationServiceName, usernameForLogs, subject);
         }
         
         throw new System.NotImplementedException();
@@ -380,7 +191,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
     /// </summary>
     /// <param name="databaseConnection">The database connection to use.</param>
     /// <returns>Returns a <see cref="DataTable"/> containing the rows of the imports that need to be processed.</returns>
-    private async Task<DataTable> GetImportsToProcess(IDatabaseConnection databaseConnection)
+    private async Task<DataTable> GetImportsToProcessAsync(IDatabaseConnection databaseConnection)
     {
         databaseConnection.AddParameter("serverName", Environment.MachineName);
         // Ensure import times are based on server time and not database time to prevent difference in time zones to have imports be processed to early/late.
@@ -402,6 +213,246 @@ ORDER BY added_on ASC");
     }
 
     /// <summary>
+    /// Import the links to Wiser.
+    /// </summary>
+    /// <param name="wiserImport">The AIS information for handling the imports.</param>
+    /// <param name="import">The data to import.</param>
+    /// <param name="databaseConnection">The connection to the database.</param>
+    /// <param name="wiserItemsService">The WiserItemsService to use to import the data.</param>
+    /// <param name="usernameForLogs">The username to use for the logs in Wiser.</param>
+    /// <param name="errors">The list of errors.</param>
+    /// <param name="destinationLinksToKeep">The list of destination links to keep.</param>
+    /// <param name="itemParentIdsToKeep">The list of item parent ids to keep.</param>
+    /// <param name="sourceLinksToKeep">The list of source links to keep.</param>
+    /// <param name="importRow">The information of the import itself.</param>
+    /// <param name="configurationServiceName">The name of the configuration the import is executed within.</param>
+    private async Task ImportLinksAsync(WiserImportModel wiserImport, ImportDataModel import, IDatabaseConnection databaseConnection, IWiserItemsService wiserItemsService, string usernameForLogs, List<string> errors, Dictionary<int, Dictionary<ulong, List<ulong>>> destinationLinksToKeep, Dictionary<int, Dictionary<ulong, List<ulong>>> itemParentIdsToKeep, Dictionary<int, Dictionary<ulong, List<ulong>>> sourceLinksToKeep, ImportRowModel importRow, string configurationServiceName)
+    {
+        foreach (var link in import.Links)
+        {
+            try
+            {
+                if (link.ItemId == 0 && link.DestinationItemId == 0)
+                {
+                    await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Found link with neither an item_id nor a destination_item_id for item '{import.Item.Id}', but it has not data, so there is nothing we can import.", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
+                    continue;
+                }
+
+                // Set the missing link to the new item.
+                if (link.ItemId == 0)
+                {
+                    link.ItemId = import.Item.Id;
+                }
+                else
+                {
+                    link.DestinationItemId = import.Item.Id;
+                }
+
+                // Sorting starts with 1, so set value to 1 if not set.
+                if (link.Ordering == 0)
+                {
+                    link.Ordering = 1;
+                }
+
+                if (!link.UseParentItemId)
+                {
+                    databaseConnection.AddParameter("itemId", link.ItemId);
+                    databaseConnection.AddParameter("destinationItemId", link.DestinationItemId);
+                    databaseConnection.AddParameter("type", link.Type);
+                    var linkPrefix = await wiserItemsService.GetTablePrefixForLinkAsync(link.Type);
+                    var existingLinkDataTable = await databaseConnection.GetAsync($"SELECT id FROM {linkPrefix}{WiserTableNames.WiserItemLink} WHERE item_id = ?itemId AND destination_item_id = ?destinationItemId AND type = ?type");
+
+                    if (existingLinkDataTable.Rows.Count > 0)
+                    {
+                        link.Id = existingLinkDataTable.Rows[0].Field<ulong>("id");
+                    }
+                    else
+                    {
+                        link.Id = await wiserItemsService.AddItemLinkAsync(link.ItemId, link.DestinationItemId, link.Type, link.Ordering, usernameForLogs, importRow.UserId);
+                    }
+                }
+
+                // If the user wants to delete existing links, make a list with links that we need to keep, so we can delete the rest at the end of the import.
+                if (link.DeleteExistingLinks)
+                {
+                    // If the current item is the source item, then we want to delete all other links of the given destination, so that only the imported items will remain linked to that destination.
+                    if (link.ItemId == import.Item.Id)
+                    {
+                        var listToUse = link.UseParentItemId ? itemParentIdsToKeep : destinationLinksToKeep;
+
+                        if (!listToUse.ContainsKey(link.Type))
+                        {
+                            listToUse.Add(link.Type, new Dictionary<ulong, List<ulong>>());
+                        }
+
+                        if (!listToUse[link.Type].ContainsKey(link.DestinationItemId))
+                        {
+                            listToUse[link.Type].Add(link.DestinationItemId, new List<ulong>());
+                        }
+                        
+                        listToUse[link.Type][link.DestinationItemId].Add(link.ItemId);
+                    }
+                    // Else if the current item is the destination item, then we want to delete all other links of the given source, so that this item will only remain linked the the items from this import.
+                    else if (link.DestinationItemId == import.Item.Id)
+                    {
+                        if (!sourceLinksToKeep.ContainsKey(link.Type))
+                        {
+                            sourceLinksToKeep.Add(link.Type, new Dictionary<ulong, List<ulong>>());
+                        }
+
+                        if (!sourceLinksToKeep[link.Type].ContainsKey(link.ItemId))
+                        {
+                            sourceLinksToKeep[link.Type].Add(link.ItemId, new List<ulong>());
+                        }
+                        
+                        sourceLinksToKeep[link.Type][link.ItemId].Add(link.DestinationItemId);
+                    }
+                }
+
+                if (!link.UseParentItemId && link.Details != null && link.Details.Any())
+                {
+                    foreach (var linkDetail in link.Details)
+                    {
+                        linkDetail.IsLinkProperty = true;
+                        linkDetail.ItemLinkId = link.Id;
+                        linkDetail.Changed = true;
+                    }
+
+                    import.Item.Details.AddRange(link.Details);
+                    await wiserItemsService.SaveAsync(import.Item, username: usernameForLogs, userId: importRow.UserId);
+                }
+            }
+            catch (Exception e)
+            {
+                await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Error while trying yo import an item link due to exception:\n{e}\n\nItem link details:\n{JsonConvert.SerializeObject(link, serializerSettings)}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
+                errors.Add(e.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Import the files to Wiser.
+    /// </summary>
+    /// <param name="wiserImport">The AIS information for handling the imports.</param>
+    /// <param name="import">The data to import.</param>
+    /// <param name="databaseConnection">The connection to the database.</param>
+    /// <param name="wiserItemsService">The WiserItemsService to use to import the data.</param>
+    /// <param name="usernameForLogs">The username to use for the logs in Wiser.</param>
+    /// <param name="errors">The list of errors.</param>
+    /// <param name="importRow">The information of the import itself.</param>
+    /// <param name="configurationServiceName">The name of the configuration the import is executed within.</param>
+    private async Task ImportFilesAsync(WiserImportModel wiserImport, ImportDataModel import, IDatabaseConnection databaseConnection, IWiserItemsService wiserItemsService, string usernameForLogs, List<string> errors, ImportRowModel importRow, string configurationServiceName)
+    {
+        var basePath = $@"C:\temp\AIS Import\{importRow.CustomerId}\{importRow.Id}\";
+        foreach (var file in import.Files)
+        {
+            try
+            {
+                var fileLocation = Path.Combine(basePath, file.FileName);
+                if (!File.Exists(fileLocation))
+                {
+                    var errorMessage = $"Could not import file '{file.FileName}' for item '{import.Item.Id}' because it was not found on the hard-disk of the server.";
+                    errors.Add(errorMessage);
+                    await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, errorMessage, configurationServiceName, wiserImport.TimeId, wiserImport.Order);
+                            
+                    continue;
+                }
+
+                file.ItemId = import.Item.Id;
+                file.Content = await File.ReadAllBytesAsync(fileLocation);
+                if (fileExtensionContentTypeProvider.TryGetContentType(file.FileName, out var contentType))
+                {
+                    file.ContentType = contentType;
+                }
+
+                file.Id = await wiserItemsService.AddItemFileAsync(file, usernameForLogs, importRow.UserId);
+            }
+            catch (Exception e)
+            {
+                await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Error while trying to import an item file:\n{e}\n\nFile details:\n{JsonConvert.SerializeObject(file, serializerSettings)}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
+                errors.Add(e.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cleanup all links that have not been included in this import if it is requested.
+    /// </summary>
+    /// <param name="wiserImport">The AIS information for handling the imports.</param>
+    /// <param name="databaseConnection">The connection to the database.</param>
+    /// <param name="wiserItemsService">The WiserItemsService to use to import the data.</param>
+    /// <param name="errors">The list of errors.</param>
+    /// <param name="destinationLinksToKeep">The list of destination links to keep.</param>
+    /// <param name="itemParentIdsToKeep">The list of item parent ids to keep.</param>
+    /// <param name="sourceLinksToKeep">The list of source links to keep.</param>
+    /// <param name="configurationServiceName">The name of the configuration the import is executed within.</param>
+    private async Task CleanupLinks(WiserImportModel wiserImport, IDatabaseConnection databaseConnection, IWiserItemsService wiserItemsService, List<string> errors, Dictionary<int, Dictionary<ulong, List<ulong>>> destinationLinksToKeep, Dictionary<int, Dictionary<ulong, List<ulong>>> itemParentIdsToKeep, Dictionary<int, Dictionary<ulong, List<ulong>>> sourceLinksToKeep, string configurationServiceName)
+    {
+        foreach (var destinationLink in destinationLinksToKeep)
+        {
+            var linkType = destinationLink.Key;
+            foreach (var destination in destinationLink.Value)
+            {
+                var destinatonItemId = destination.Key;
+                var linkPrefix = await wiserItemsService.GetTablePrefixForLinkAsync(linkType);
+
+                try
+                {
+                    databaseConnection.AddParameter("type", linkType);
+                    databaseConnection.AddParameter("destinationItemId", destinatonItemId);
+                    await databaseConnection.ExecuteAsync($"DELETE FROM {linkPrefix}{WiserTableNames.WiserItemLink} WHERE type = ?type AND destination_item_id = ?destinationItemId AND item_id NOT IN ({String.Join(",", destination.Value)})");
+                }
+                catch (Exception e)
+                {
+                    await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Error while trying to delete item links (destination) of type '{linkType}' due to exception:\n{e}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
+                    errors.Add(e.Message);
+                }
+            }
+        }
+
+        foreach (var parentItem in itemParentIdsToKeep)
+        {
+            var linkType = parentItem.Key;
+            foreach (var parent in parentItem.Value)
+            {
+                var parentItemId = parent.Key;
+                try
+                {
+                    databaseConnection.AddParameter("parentItemId", parentItemId);
+                    await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserItem} SET parent_item_id = 0 WHERE parent_item_id = ?parentItemId AND id NOT IN ({String.Join(",", parent.Value)})");
+                }
+                catch (Exception e)
+                {
+                    await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Error while trying to delete item links (parent) of type '{linkType}' due to exception:\n{e}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
+                    errors.Add(e.Message);
+                }
+            }
+        }
+
+        foreach (var sourceLink in sourceLinksToKeep)
+        {
+            var linkType = sourceLink.Key;
+            foreach (var source in sourceLink.Value)
+            {
+                var sourceItemId = source.Key;
+                var linkPrefix = await wiserItemsService.GetTablePrefixForLinkAsync(linkType);
+                
+                try
+                {
+                    databaseConnection.AddParameter("type", linkType);
+                    databaseConnection.AddParameter("sourceItemId", sourceItemId);
+                    await databaseConnection.ExecuteAsync($"DELETE FROM {linkPrefix}{WiserTableNames.WiserItemLink} WHERE type = ?type AND item_id = ?sourceItemId AND destination_item_id NOT IN ({String.Join(",", source.Value)})");
+                }
+                catch (Exception e)
+                {
+                    await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Error while trying to delete item links (source) of type '{linkType}' due to exception:\n{e}", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
+                    errors.Add(e.Message);
+                }
+            }
+        }
+    }
+    
+    /// <summary>
     /// Notify the user that placed the import using an email about the status of the import.
     /// </summary>
     /// <param name="wiserImport">The AIS information for handling the imports.</param>
@@ -414,7 +465,7 @@ ORDER BY added_on ASC");
     /// <param name="startDate">The date and time the import started.</param>
     /// <param name="endDate">The date and time the import stopped.</param>
     /// <param name="stopwatch">The stopwatch used to measure the passed time.</param>
-    private async Task NotifyUserByEmail(WiserImportModel wiserImport, ImportRowModel importRow, IDatabaseConnection databaseConnection, GclCommunicationsService gclCommunicationsService, string configurationServiceName, string subject, List<string> errors, DateTime startDate, DateTime endDate, Stopwatch stopwatch)
+    private async Task NotifyUserByEmailAsync(WiserImportModel wiserImport, ImportRowModel importRow, IDatabaseConnection databaseConnection, GclCommunicationsService gclCommunicationsService, string configurationServiceName, string subject, List<string> errors, DateTime startDate, DateTime endDate, Stopwatch stopwatch)
     {
         databaseConnection.AddParameter("userId", importRow.UserId);
         var userDataTable = await databaseConnection.GetAsync($"SELECT `value` AS receiver FROM {WiserTableNames.WiserItemDetail} WHERE item_id = ?userId AND `key` = 'email_address'");
@@ -447,7 +498,7 @@ ORDER BY added_on ASC");
     /// <param name="configurationServiceName">The name of the configuration the import is executed within.</param>
     /// <param name="usernameForLogs">The username to use for the logs in the database.</param>
     /// <param name="subject">The subject of the task alert.</param>
-    private async Task NotifyUserByTaskAlert(WiserImportModel wiserImport, ImportRowModel importRow, IWiserItemsService wiserItemsService, string configurationServiceName, string usernameForLogs, string subject)
+    private async Task NotifyUserByTaskAlertAsync(WiserImportModel wiserImport, ImportRowModel importRow, IWiserItemsService wiserItemsService, string configurationServiceName, string usernameForLogs, string subject)
     {
         // Create and save the task alert in the database.
         var taskAlert = new WiserItemModel()
