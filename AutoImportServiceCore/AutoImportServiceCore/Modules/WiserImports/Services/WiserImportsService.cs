@@ -83,8 +83,8 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
             return new JObject()
             {
                 {"Database", databaseName},
-                {"Processed", 0},
-                {"Failed", 0},
+                {"Success", 0},
+                {"WithWarnings", 0},
                 {"Total", 0}
             };
         }
@@ -102,6 +102,9 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
         
         var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, null, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
         var gclCommunicationsService = new GclCommunicationsService(gclSettings, gclCommunicationsServiceLogger, wiserItemsService, databaseConnection);
+
+        var successfulImports = 0;
+        var importsWithWarnings = 0;
         
         foreach (DataRow row in importDataTable.Rows)
         {
@@ -147,6 +150,11 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
             if (!errors.Any())
             {
                 await CleanupLinks(wiserImport, databaseConnection, wiserItemsService, errors, destinationLinksToKeep, itemParentIdsToKeep, sourceLinksToKeep, configurationServiceName);
+                successfulImports++;
+            }
+            else
+            {
+                importsWithWarnings++;
             }
 
             var endDate = DateTime.Now;
@@ -163,7 +171,13 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
             await NotifyUserByTaskAlertAsync(wiserImport, importRow, wiserItemsService, configurationServiceName, usernameForLogs, subject);
         }
         
-        throw new System.NotImplementedException();
+        return new JObject()
+        {
+            {"Database", databaseName},
+            {"Success", successfulImports},
+            {"WithWarnings", importsWithWarnings},
+            {"Total", successfulImports + importsWithWarnings}
+        };
     }
 
     /// <summary>
@@ -381,26 +395,45 @@ ORDER BY added_on ASC");
     /// <param name="wiserImport">The AIS information for handling the imports.</param>
     /// <param name="databaseConnection">The connection to the database.</param>
     /// <param name="wiserItemsService">The WiserItemsService to use to import the data.</param>
+    /// <param name="entityType">The type of the entity that has been imported.</param>
     /// <param name="errors">The list of errors.</param>
     /// <param name="destinationLinksToKeep">The list of destination links to keep.</param>
     /// <param name="itemParentIdsToKeep">The list of item parent ids to keep.</param>
     /// <param name="sourceLinksToKeep">The list of source links to keep.</param>
     /// <param name="configurationServiceName">The name of the configuration the import is executed within.</param>
-    private async Task CleanupLinks(WiserImportModel wiserImport, IDatabaseConnection databaseConnection, IWiserItemsService wiserItemsService, List<string> errors, Dictionary<int, Dictionary<ulong, List<ulong>>> destinationLinksToKeep, Dictionary<int, Dictionary<ulong, List<ulong>>> itemParentIdsToKeep, Dictionary<int, Dictionary<ulong, List<ulong>>> sourceLinksToKeep, string configurationServiceName)
+    private async Task CleanupLinks(WiserImportModel wiserImport, IDatabaseConnection databaseConnection, IWiserItemsService wiserItemsService, string entityType, List<string> errors, Dictionary<int, Dictionary<ulong, List<ulong>>> destinationLinksToKeep, Dictionary<int, Dictionary<ulong, List<ulong>>> itemParentIdsToKeep, Dictionary<int, Dictionary<ulong, List<ulong>>> sourceLinksToKeep, string configurationServiceName)
     {
         foreach (var destinationLink in destinationLinksToKeep)
         {
             var linkType = destinationLink.Key;
             foreach (var destination in destinationLink.Value)
             {
-                var destinatonItemId = destination.Key;
+                var destinationItemId = destination.Key;
                 var linkPrefix = await wiserItemsService.GetTablePrefixForLinkAsync(linkType);
 
                 try
                 {
                     databaseConnection.AddParameter("type", linkType);
-                    databaseConnection.AddParameter("destinationItemId", destinatonItemId);
-                    await databaseConnection.ExecuteAsync($"DELETE FROM {linkPrefix}{WiserTableNames.WiserItemLink} WHERE type = ?type AND destination_item_id = ?destinationItemId AND item_id NOT IN ({String.Join(",", destination.Value)})");
+                    databaseConnection.AddParameter("destinationEntity", entityType);
+                    databaseConnection.AddParameter("destinationItemId", destinationItemId);
+                    var sourceEntity = await databaseConnection.GetAsync($"SELECT connected_entity_type AS sourceEntity FROM {WiserTableNames.WiserLink} WHERE type = ?type AND destination_entity_type = ?destinationEntity");
+                    var destinationLinksToDelete = await databaseConnection.GetAsync($"SELECT `id`, item_id AS sourceId, destination_id AS destinationId FROM {linkPrefix}{WiserTableNames.WiserItemLink} WHERE type = ?type AND destination_item_id = ?destinationItemId AND item_id NOT IN ({String.Join(",", destination.Value)})");
+
+                    if (destinationLinksToDelete.Rows.Count > 0)
+                    {
+                        var linkIds = new HashSet<ulong>();
+                        var destinationIds = new HashSet<ulong>();
+                        var sourceIds = new HashSet<ulong>();
+                        
+                        foreach (DataRow row in destinationLinksToDelete.Rows)
+                        {
+                            linkIds.Add(row.Field<ulong>("id"));
+                            destinationIds.Add(row.Field<ulong>("destinationId"));
+                            sourceIds.Add(row.Field<ulong>("sourceId"));
+                        }
+
+                        await wiserItemsService.RemoveItemLinksByIdAsync(linkIds.ToList(), "", sourceIds.ToList(), "", destinationIds.ToList());
+                    }
                 }
                 catch (Exception e)
                 {
