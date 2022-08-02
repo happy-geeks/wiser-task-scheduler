@@ -34,7 +34,7 @@ namespace AutoImportServiceCore.Modules.WiserImports.Services;
 
 public class WiserImportsService : IWiserImportsService, IActionsService, IScopedService
 {
-    private const string DefaultSubject = "Import[if({name}!)] with the name '{name}'[endif] from {date:DateTime(dddd\\, dd MMMM yyyy, en-US)} did [if({errorCount}=0)]finish successfully[else](partially) go wrong[endif]";
+    private const string DefaultSubject = "Import[if({name}!)] with the name '{name}'[endif] from {date:DateTime(dddd\\, dd MMMM yyyy,en-US)} did [if({errorCount}=0)]finish successfully[else](partially) go wrong[endif]";
     private const string DefaultContent = "<p>The import started on {startDate:DateTime(HH\\:mm\\:ss)} and finished on {endDate:DateTime(HH\\:mm\\:ss)}. The import took a total of {hours} hour(s), {minutes} minute(s) and {seconds} second(s).</p>[if({errorCount}!0)] <br /><br />The following errors occurred during the import: {errors}[endif]";
     
     private readonly IServiceProvider serviceProvider;
