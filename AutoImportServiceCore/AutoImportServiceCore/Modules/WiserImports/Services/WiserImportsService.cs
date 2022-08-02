@@ -168,24 +168,26 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
             databaseConnection.AddParameter("errors", String.Join(Environment.NewLine, errors));
             await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserImport} SET finished_on = ?finishedOn, success = ?success, errors = ?errors WHERE id = ?id");
 
-            var replaceData = new Dictionary<string, object>();
-            replaceData.Add("name", importRow.ImportName);
-            replaceData.Add("date", DateTime.Now);
-            replaceData.Add("errorCount", errors.Count);
-            replaceData.Add("startDate", startDate);
-            replaceData.Add("endDate", endDate);
-            replaceData.Add("hours", stopwatch.Elapsed.Hours);
-            replaceData.Add("minutes", stopwatch.Elapsed.Minutes);
-            replaceData.Add("seconds", stopwatch.Elapsed.Seconds);
-            replaceData.Add("errors", $"<ul><li><pre>{String.Join("</pre></li><li><pre>", errors)}</pre></li></ul>");
-            
+            var replaceData = new Dictionary<string, object>
+            {
+                {"name", importRow.ImportName},
+                {"date", DateTime.Now},
+                {"errorCount", errors.Count},
+                {"startDate", startDate},
+                {"endDate", endDate},
+                {"hours", stopwatch.Elapsed.Hours},
+                {"minutes", stopwatch.Elapsed.Minutes},
+                {"seconds", stopwatch.Elapsed.Seconds},
+                {"errors", $"<ul><li><pre>{String.Join("</pre></li><li><pre>", errors)}</pre></li></ul>"}
+            };
+
             WiserItemModel template = null;
             if (wiserImport.TemplateId > 0)
             {
                 template = await wiserItemsService.GetItemDetailsAsync(wiserImport.TemplateId, userId: importRow.UserId);
             }
             
-            var subject = await stringReplacementsService.DoAllReplacementsAsync(stringReplacementsService.DoReplacements(template == null ? DefaultSubject : template.GetDetailValue("subject"), replaceData));
+            var subject = await stringReplacementsService.DoAllReplacementsAsync(stringReplacementsService.DoReplacements(String.IsNullOrWhiteSpace(template?.GetDetailValue("subject")) ? DefaultSubject : template.GetDetailValue("subject"), replaceData));
             await NotifyUserByEmailAsync(wiserImport, importRow, databaseConnection, gclCommunicationsService, configurationServiceName, subject, template, replaceData, stringReplacementsService);
             await NotifyUserByTaskAlertAsync(wiserImport, importRow, wiserItemsService, configurationServiceName, usernameForLogs, subject);
             
@@ -573,7 +575,7 @@ ORDER BY added_on ASC");
         }
 
         var receiver = userDataTable.Rows[0].Field<string>("receiver");
-        var content = await stringReplacementsService.DoAllReplacementsAsync(stringReplacementsService.DoReplacements(template == null ? DefaultContent : template.GetDetailValue("template"), replaceData));
+        var content = await stringReplacementsService.DoAllReplacementsAsync(stringReplacementsService.DoReplacements(String.IsNullOrWhiteSpace(template?.GetDetailValue("template")) ? DefaultContent : template.GetDetailValue("template"), replaceData));
         await gclCommunicationsService.SendEmailAsync(receiver, subject, content, importRow.Username, sendDate: DateTime.Now, sender: template?.GetDetailValue("sender_email"), senderName: template?.GetDetailValue("sender_name"));
     }
 
