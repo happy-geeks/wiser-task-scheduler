@@ -8,7 +8,11 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="GeeksCoreLibrary" Version="2.1.12" />
+        <PackageReference Include="GeeksCoreLibrary" Version="2.1.14" />
         <PackageReference Include="Microsoft.Extensions.Hosting" Version="6.0.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\HelperLibrary\HelperLibrary.csproj" />
     </ItemGroup>
 </Project>
