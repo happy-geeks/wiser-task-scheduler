@@ -1,4 +1,6 @@
+using AutoUpdater.Interfaces;
 using AutoUpdater.Models;
+using AutoUpdater.Services;
 using AutoUpdater.Workers;
 using GeeksCoreLibrary.Components.Account.Interfaces;
 using GeeksCoreLibrary.Components.Account.Services;
@@ -34,7 +36,8 @@ IHost host = Host.CreateDefaultBuilder(args)
     {
         services.Configure<UpdateSettings>(hostContext.Configuration.GetSection("Updater"));
         services.AddHostedService<UpdateWorker>();
-        
+
+        services.AddSingleton<IUpdateService, UpdateService>();
         services.AddScoped<IDatabaseConnection, MySqlDatabaseConnection>();
         services.AddScoped<IHttpContextAccessor, HttpContextAccessor>();
         services.AddScoped<IObjectsService, ObjectsService>();

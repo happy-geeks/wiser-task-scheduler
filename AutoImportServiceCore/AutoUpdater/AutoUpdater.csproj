@@ -2,7 +2,6 @@
 
     <PropertyGroup>
         <TargetFramework>net6.0</TargetFramework>
-        <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <UserSecretsId>dotnet-AutoUpdater-E9117816-DA98-4D43-9E8B-FDE0D48F866C</UserSecretsId>
     </PropertyGroup>

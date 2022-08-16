@@ -25,7 +25,6 @@ public class GclServicesHelper
     /// <returns>Returns and instance of <see cref="ICommunicationsService"/></returns>
     public static IWiserItemsService GetWiserItemsService(IServiceScope scope, IDatabaseConnection? databaseConnection, IOptions<GclSettings>? gclSettings)
     {
-        
         var objectService = scope.ServiceProvider.GetRequiredService<IObjectsService>();
         var stringReplacementsService = scope.ServiceProvider.GetRequiredService<IStringReplacementsService>();
         var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();

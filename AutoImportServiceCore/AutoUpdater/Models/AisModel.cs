@@ -18,7 +18,7 @@ public class AisModel
     public string ContactEmail { get; set; }
 
     /// <summary>
-    /// Send a mail if the AIS has been updated.
+    /// Send a email if the AIS has been updated.
     /// </summary>
-    public bool SendMailOnUpdateComplete { get; set; }
+    public bool SendEmailOnUpdateComplete { get; set; }
 }
