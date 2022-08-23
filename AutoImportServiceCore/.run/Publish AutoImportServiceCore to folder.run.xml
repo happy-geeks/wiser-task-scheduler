@@ -1,0 +1,6 @@
+﻿<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Publish AutoImportServiceCore to folder" type="DotNetFolderPublish" factoryName="Publish to folder">
+    <riderPublish configuration="Release" delete_existing_files="true" platform="Any CPU" ready_to_run="true" runtime="win-x64" self_contained="true" target_folder="$PROJECT_DIR$/AutoImportServiceCore/bin/Release/net6.0/win-x64/publish" target_framework="net6.0" uuid_high="-1392451985447762745" uuid_low="-6431043480979803991" />
+    <method v="2" />
+  </configuration>
+</component>

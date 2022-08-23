@@ -643,6 +643,15 @@ AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
                 foreach (DataRow dataRow in dataTable.Rows)
                 {
                     var historyId = Convert.ToUInt64(dataRow["id"]);
+
+                    // If this history item has a conflict and it's not accepted, skip and delete this history record.
+                    var conflict = settings.ConflictSettings.SingleOrDefault(setting => setting.Id == historyId);
+                    if (conflict != null && conflict.AcceptChange.HasValue && !conflict.AcceptChange.Value)
+                    {
+                        historyItemsSynchronised.Add(historyId);
+                        continue;
+                    }
+
                     var action = dataRow.Field<string>("action").ToUpperInvariant();
                     var tableName = dataRow.Field<string>("tablename") ?? "";
                     var originalObjectId = Convert.ToUInt64(dataRow["item_id"]);
@@ -775,9 +784,9 @@ LIMIT 1";
                                 var fileDataTable = new DataTable();
                                 using var adapter = new MySqlDataAdapter(branchCommand);
                                 await adapter.FillAsync(fileDataTable);
-                                itemId = fileDataTable.Rows[0].Field<ulong>("item_id");
+                                itemId = Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]);
                                 originalItemId = itemId;
-                                linkId = fileDataTable.Rows[0].Field<ulong>("itemlink_id");
+                                linkId = Convert.ToUInt64(fileDataTable.Rows[0]["itemlink_id"]);
                                 originalLinkId = linkId;
 
                                 break;
