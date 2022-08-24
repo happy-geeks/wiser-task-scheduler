@@ -9,6 +9,8 @@ namespace AutoImportServiceCore.Modules.Wiser.Interfaces
     /// </summary>
     public interface IWiserService
     {
+        string AccessToken { get; }
+
         /// <summary>
         /// Make a request to the API to get all XML configurations.
         /// </summary>
