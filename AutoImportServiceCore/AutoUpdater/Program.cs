@@ -15,6 +15,7 @@ using GeeksCoreLibrary.Modules.Languages.Services;
 using GeeksCoreLibrary.Modules.Objects.Interfaces;
 using GeeksCoreLibrary.Modules.Objects.Services;
 using Microsoft.AspNetCore.Http;
+using Serilog;
 
 IHost host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((hostingContext, config) =>
@@ -34,6 +35,11 @@ IHost host = Host.CreateDefaultBuilder(args)
     })
     .ConfigureServices((hostContext, services) =>
     {
+        Log.Logger = new LoggerConfiguration()
+            .ReadFrom.Configuration(hostContext.Configuration)
+            .CreateLogger();
+        services.AddLogging(builder => { builder.AddSerilog(); });
+        
         services.Configure<UpdateSettings>(hostContext.Configuration.GetSection("Updater"));
         services.AddHostedService<UpdateWorker>();
 

@@ -8,6 +8,7 @@ using AutoUpdater.Models;
 using GeeksCoreLibrary.Modules.Communication.Models;
 using HelperLibrary;
 using Microsoft.Extensions.Options;
+using Serilog;
 
 namespace AutoUpdater.Services;
 
@@ -37,15 +38,24 @@ public class UpdateService : IUpdateService
     /// <inheritdoc />
     public async Task UpdateServicesAsync()
     {
-        var versionList = await GetVersionList();
-        if (lastDownloadedVersion == null || lastDownloadedVersion != versionList[0].Version)
+        logger.LogInformation("Starting with updating the AIS services.");
+
+        try
         {
-            await DownloadUpdate(versionList[0].Version);
+            var versionList = await GetVersionList();
+            if (lastDownloadedVersion == null || lastDownloadedVersion != versionList[0].Version)
+            {
+                await DownloadUpdate(versionList[0].Version);
+            }
+
+            foreach (var ais in updateSettings.AisInstancesToUpdate)
+            {
+                new Thread(() => UpdateAis(ais, versionList)).Start();
+            }
         }
-        
-        foreach (var ais in updateSettings.AisInstancesToUpdate)
+        catch (Exception e)
         {
-            new Thread(() => UpdateAis(ais, versionList)).Start();
+            logger.LogError($"Failed to update the AIS services due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
         }
     }
 
@@ -55,6 +65,8 @@ public class UpdateService : IUpdateService
     /// <returns>Returns the list of all the versions of the AIS.</returns>
     private async Task<List<VersionModel>> GetVersionList()
     {
+        logger.LogInformation("Retrieving version list from server.");
+        
         using var request = new HttpRequestMessage(HttpMethod.Get, VersionListUrl);
         using var client = new HttpClient();
         using var response = await client.SendAsync(request);
@@ -67,6 +79,8 @@ public class UpdateService : IUpdateService
     /// <param name="version">The version being downloaded.</param>
     private async Task DownloadUpdate(Version version)
     {
+        logger.LogInformation("Download the latest update from the server.");
+        
         var filePath = Path.Combine(AisTempPath, "update", "Update.zip");
         if (File.Exists(filePath))
         {
@@ -88,6 +102,8 @@ public class UpdateService : IUpdateService
     /// <param name="versionList">All the versions of the AIS to be checked against.</param>
     private void UpdateAis(AisModel ais, List<VersionModel> versionList)
     {
+        logger.LogInformation($"Updating AIS '{ais.ServiceName}'.");
+        
         var versionInfo = FileVersionInfo.GetVersionInfo(Path.Combine(ais.PathToFolder, AisExeFile));
         var version = new Version(versionInfo.FileVersion);
         var updateState = CheckForUpdates(version, versionList);
@@ -97,6 +113,7 @@ public class UpdateService : IUpdateService
             case UpdateStates.UpToDate:
                 return;
             case UpdateStates.BreakingChanges:
+                logger.LogWarning($"Could not update AIS '{ais.ServiceName}' to version {versionList[0].Version} due to breaking changes since the current version of the AIS ({version}).{Environment.NewLine}Please check the release logs and resolve the breaking changes before manually updating the AIS.");
                 EmailAdministrator(ais.ContactEmail, "AIS Auto Updater - Manual action required", $"Could not update AIS '{ais.ServiceName}' to version {versionList[0].Version} due to breaking changes since the current version of the AIS ({version}).<br/>Please check the release logs and resolve the breaking changes before manually updating the AIS.");
                 return;
             case UpdateStates.Update:
@@ -155,7 +172,7 @@ public class UpdateService : IUpdateService
         catch (InvalidOperationException)
         {
             EmailAdministrator(ais.ContactEmail, "AIS Auto Updater - AIS not found", $"The service for AIS '{ais.ServiceName}' could not be found on the server and can therefore not be updated.");
-            logger.LogInformation($"No service found for '{ais.ServiceName}'.");
+            logger.LogWarning($"No service found for '{ais.ServiceName}'.");
             return;
         }
 
@@ -167,28 +184,36 @@ public class UpdateService : IUpdateService
             serviceController.WaitForStatus(ServiceControllerStatus.Stopped);
         }
 
-        BackupAis(ais);
-        PlaceAis(ais, Path.Combine(AisTempPath, "update", "Update.zip"));
-
-        // If the service was not running when the update started it does not need to restart.
-        if (!serviceAlreadyStopped)
+        try
         {
-            try
-            {
-                serviceController.Start();
-                serviceController.WaitForStatus(ServiceControllerStatus.Running);
-            }
-            catch (InvalidOperationException updateException)
-            {
-                RevertUpdate(ais, serviceController, currentVersion, versionToUpdateTo, updateException);
+            BackupAis(ais);
+            PlaceAis(ais, Path.Combine(AisTempPath, "update", "Update.zip"));
 
-                return;
+            // If the service was not running when the update started it does not need to restart.
+            if (!serviceAlreadyStopped)
+            {
+                try
+                {
+                    serviceController.Start();
+                    serviceController.WaitForStatus(ServiceControllerStatus.Running);
+                }
+                catch (InvalidOperationException updateException)
+                {
+                    RevertUpdate(ais, serviceController, currentVersion, versionToUpdateTo, updateException);
+
+                    return;
+                }
+            }
+
+            if (ais.SendEmailOnUpdateComplete)
+            {
+                logger.LogInformation($"AIS '{ais.ServiceName}' has been successfully updated to version {versionToUpdateTo}.");
+                EmailAdministrator(ais.ContactEmail, "AIS Auto Updater - Update installed", $"The AIS has been successfully updated to version {versionToUpdateTo}.");
             }
         }
-        
-        if (ais.SendEmailOnUpdateComplete)
+        catch (Exception e)
         {
-            EmailAdministrator(ais.ContactEmail, "AIS Auto Updater - Update installed", $"The AIS has been successfully updated to version {versionToUpdateTo}.");
+            logger.LogError($"Exception occured while updating AIS '{ais.ServiceName}'.{Environment.NewLine}{Environment.NewLine}{e}");
         }
     }
 
@@ -250,6 +275,7 @@ public class UpdateService : IUpdateService
         }
         catch (InvalidOperationException revertException)
         {
+            logger.LogError($"Failed to update AIS '{ais.ServiceName}' to version {versionToUpdateTo}, failed to restore version {currentVersion}.{Environment.NewLine}{Environment.NewLine}Error when reverting:{Environment.NewLine}{revertException}{Environment.NewLine}{Environment.NewLine}Error when updating:<br/>{updateException}");
             EmailAdministrator(ais.ContactEmail, "AIS Auto Updater - Updating and reverting failed!", $"Failed to update AIS '{ais.ServiceName}' to version {versionToUpdateTo}, failed to restore version {currentVersion}.<br/><br/>Error when reverting:<br/>{revertException.ToString().ReplaceLineEndings("<br/>")}<br/><br/>Error when updating:<br/>{updateException.ToString().ReplaceLineEndings("<br/>")}");
         }
     }
