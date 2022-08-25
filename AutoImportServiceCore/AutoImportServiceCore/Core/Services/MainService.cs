@@ -16,6 +16,7 @@ using AutoImportServiceCore.Modules.Wiser.Interfaces;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -42,6 +43,8 @@ namespace AutoImportServiceCore.Core.Services
         private readonly ConcurrentDictionary<string, ActiveConfigurationModel> activeConfigurations;
 
         private long oAuthConfigurationVersion;
+        
+        private bool updatedServiceTable;
 
         /// <inheritdoc />
         public LogSettings LogSettings { get; set; }
@@ -66,6 +69,17 @@ namespace AutoImportServiceCore.Core.Services
         /// <inheritdoc />
         public async Task ManageConfigurations()
         {
+            using var scope = serviceProvider.CreateScope();
+            var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+            
+            // Update service table if it has not already been done since launch. The table definitions can only change when the AIS restarts with a new update.
+            if (!updatedServiceTable)
+            {
+                var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+                await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.AisServices});
+                updatedServiceTable = true;
+            }
+            
             var configurations = await GetConfigurations();
 
             if (configurations == null)
@@ -99,6 +113,20 @@ namespace AutoImportServiceCore.Core.Services
                 {
                     runScheme.LogSettings ??= configuration.LogSettings ?? LogSettings;
 
+                    if (runScheme.Id == 0)
+                    {
+                        // TODO get inserted ID and check if the combination is already in the database.
+                        databaseConnection.AddParameter("configuration", configuration.ServiceName);
+                        databaseConnection.AddParameter("timeId", runScheme.TimeId);
+                        var insertedIdData = await databaseConnection.GetAsync($"INSERT INTO {WiserTableNames.AisServices} (configuration, time_id) VALUES (?configuration, ?timeId); SELECT LAST_INSERT_ID();");
+                    }
+                    
+                    // TODO update information.
+                    databaseConnection.AddParameter("action", runScheme.Action);
+                    databaseConnection.AddParameter("schema", runScheme.Type.ToString().ToLower());
+                    databaseConnection.AddParameter("state", "active");
+                    await databaseConnection.ExecuteAsync($"");
+
                     var thread = new Thread(() => StartConfiguration(runScheme, configuration));
                     thread.Start();
                 }
@@ -130,6 +158,8 @@ namespace AutoImportServiceCore.Core.Services
                 var configurationStopTasks = StopConfiguration(activeConfiguration.Key);
                 await WaitTillConfigurationsStopped(configurationStopTasks);
                 activeConfigurations.TryRemove(new KeyValuePair<string, ActiveConfigurationModel>(activeConfiguration.Key, activeConfigurations[activeConfiguration.Key]));
+                
+                // TODO remove service from database.
             }
         }
 
@@ -156,6 +186,8 @@ namespace AutoImportServiceCore.Core.Services
             {
                 configurationStopTasks.Add(worker.Value.StopAsync(cancellationToken));
             }
+            
+            // TODO Set service on stopped.
 
             return configurationStopTasks;
         }

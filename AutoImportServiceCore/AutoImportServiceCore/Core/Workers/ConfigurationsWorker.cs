@@ -45,6 +45,7 @@ namespace AutoImportServiceCore.Core.Workers
         /// <inheritdoc />
         protected override async Task ExecuteActionAsync()
         {
+            // TODO set start and end times and duration.
             await configurationsService.ExecuteAsync();
         }
     }
