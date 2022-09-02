@@ -70,7 +70,7 @@ namespace AutoImportServiceCore.Core.Services
         public async Task ManageConfigurations()
         {
             using var scope = serviceProvider.CreateScope();
-            var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+            var wiserDashboardService = scope.ServiceProvider.GetRequiredService<IWiserDashboardService>();
             
             // Update service table if it has not already been done since launch. The table definitions can only change when the AIS restarts with a new update.
             if (!updatedServiceTable)
@@ -115,17 +115,14 @@ namespace AutoImportServiceCore.Core.Services
 
                     if (runScheme.Id == 0)
                     {
-                        // TODO get inserted ID and check if the combination is already in the database.
-                        databaseConnection.AddParameter("configuration", configuration.ServiceName);
-                        databaseConnection.AddParameter("timeId", runScheme.TimeId);
-                        var insertedIdData = await databaseConnection.GetAsync($"INSERT INTO {WiserTableNames.AisServices} (configuration, time_id) VALUES (?configuration, ?timeId); SELECT LAST_INSERT_ID();");
+                        var existingService = await wiserDashboardService.GetServiceAsync(configuration.ServiceName, runScheme.TimeId);
+                        if (existingService == null)
+                        {
+                            await wiserDashboardService.CreateServiceAsync(configuration.ServiceName, runScheme.TimeId);
+                        }
                     }
                     
-                    // TODO update information.
-                    databaseConnection.AddParameter("action", runScheme.Action);
-                    databaseConnection.AddParameter("schema", runScheme.Type.ToString().ToLower());
-                    databaseConnection.AddParameter("state", "active");
-                    await databaseConnection.ExecuteAsync($"");
+                    await wiserDashboardService.UpdateServiceAsync(configuration.ServiceName, runScheme.TimeId, runScheme.Action, runScheme.Type.ToString().ToLower(), state: "active");
 
                     var thread = new Thread(() => StartConfiguration(runScheme, configuration));
                     thread.Start();
