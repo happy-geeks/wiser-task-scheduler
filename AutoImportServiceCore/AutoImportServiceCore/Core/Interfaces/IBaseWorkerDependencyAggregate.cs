@@ -1,5 +1,7 @@
-﻿using AutoImportServiceCore.Core.Workers;
+﻿using System;
+using AutoImportServiceCore.Core.Workers;
 using AutoImportServiceCore.Modules.RunSchemes.Interfaces;
+using AutoImportServiceCore.Modules.Wiser.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace AutoImportServiceCore.Core.Interfaces
@@ -20,8 +22,13 @@ namespace AutoImportServiceCore.Core.Interfaces
         ILogger<BaseWorker> Logger { get; }
 
         /// <summary>
-        /// Gets the <see cref="RunSchemesService"/>.
+        /// Gets the <see cref="IRunSchemesService"/>.
         /// </summary>
         IRunSchemesService RunSchemesService { get; }
+        
+        /// <summary>
+        /// Gets the <see cref="IWiserDashboardService"/>.
+        /// </summary>
+        IWiserDashboardService WiserDashboardService { get; }
     }
 }

@@ -1,6 +1,7 @@
 ﻿using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Workers;
 using AutoImportServiceCore.Modules.RunSchemes.Interfaces;
+using AutoImportServiceCore.Modules.Wiser.Interfaces;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.Logging;
 
@@ -20,16 +21,22 @@ namespace AutoImportServiceCore.Core.Aggregates
         /// <inheritdoc />
         public IRunSchemesService RunSchemesService { get; }
 
+        /// <inheritdoc />
+        public IWiserDashboardService WiserDashboardService { get; }
+
         /// <summary>
         /// Creates a new instance of <see cref="BaseWorkerDependencyAggregate"/>.
         /// </summary>
+        /// <param name="logService"></param>
         /// <param name="logger"></param>
         /// <param name="runSchemesService"></param>
-        public BaseWorkerDependencyAggregate(ILogService logService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService)
+        /// <param name="wiserDashboardService"></param>
+        public BaseWorkerDependencyAggregate(ILogService logService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService, IWiserDashboardService wiserDashboardService)
         {
             LogService = logService;
             Logger = logger;
             RunSchemesService = runSchemesService;
+            WiserDashboardService = wiserDashboardService;
         }
     }
 }

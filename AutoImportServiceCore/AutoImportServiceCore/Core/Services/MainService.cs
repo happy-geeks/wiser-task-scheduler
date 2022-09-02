@@ -37,6 +37,7 @@ namespace AutoImportServiceCore.Core.Services
         private readonly IServiceProvider serviceProvider;
         private readonly IWiserService wiserService;
         private readonly IOAuthService oAuthService;
+        private readonly IWiserDashboardService wiserDashboardService;
         private readonly ILogService logService;
         private readonly ILogger<MainService> logger;
 
@@ -52,7 +53,7 @@ namespace AutoImportServiceCore.Core.Services
         /// <summary>
         /// Creates a new instance of <see cref="MainService"/>.
         /// </summary>
-        public MainService(IOptions<AisSettings> aisSettings, IOptions<GclSettings> gclSettings, IServiceProvider serviceProvider, IWiserService wiserService, IOAuthService oAuthService, ILogService logService, ILogger<MainService> logger)
+        public MainService(IOptions<AisSettings> aisSettings, IOptions<GclSettings> gclSettings, IServiceProvider serviceProvider, IWiserService wiserService, IOAuthService oAuthService, IWiserDashboardService wiserDashboardService, ILogService logService, ILogger<MainService> logger)
         {
             localConfiguration = aisSettings.Value.MainService.LocalConfiguration;
             localOAuthConfiguration = aisSettings.Value.MainService.LocalOAuthConfiguration;
@@ -60,6 +61,7 @@ namespace AutoImportServiceCore.Core.Services
             this.serviceProvider = serviceProvider;
             this.wiserService = wiserService;
             this.oAuthService = oAuthService;
+            this.wiserDashboardService = wiserDashboardService;
             this.logService = logService;
             this.logger = logger;
 
@@ -70,7 +72,6 @@ namespace AutoImportServiceCore.Core.Services
         public async Task ManageConfigurations()
         {
             using var scope = serviceProvider.CreateScope();
-            var wiserDashboardService = scope.ServiceProvider.GetRequiredService<IWiserDashboardService>();
             
             // Update service table if it has not already been done since launch. The table definitions can only change when the AIS restarts with a new update.
             if (!updatedServiceTable)

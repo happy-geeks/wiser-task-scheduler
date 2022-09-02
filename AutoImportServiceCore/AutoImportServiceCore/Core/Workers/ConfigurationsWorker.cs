@@ -34,7 +34,7 @@ namespace AutoImportServiceCore.Core.Workers
         /// <param name="runScheme">The run scheme of the worker.</param>
         public void Initialize(ConfigurationModel configuration, string name, RunSchemeModel runScheme)
         {
-            Initialize(name, runScheme, runScheme.RunImmediately);
+            Initialize(name, runScheme, runScheme.RunImmediately, configuration.ServiceName);
 
             configurationsService.Name = Name;
             configurationsService.LogSettings = RunScheme.LogSettings;
@@ -45,7 +45,6 @@ namespace AutoImportServiceCore.Core.Workers
         /// <inheritdoc />
         protected override async Task ExecuteActionAsync()
         {
-            // TODO set start and end times and duration.
             await configurationsService.ExecuteAsync();
         }
     }

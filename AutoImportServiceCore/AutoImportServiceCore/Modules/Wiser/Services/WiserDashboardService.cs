@@ -12,7 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace AutoImportServiceCore.Modules.Wiser.Services;
 
-public class WiserDashboardService : IWiserDashboardService, IScopedService
+public class WiserDashboardService : IWiserDashboardService, ISingletonService
 {
     private readonly IServiceProvider serviceProvider;
 
@@ -89,7 +89,7 @@ AND time_id = ?timeId";
         if (runTime != null)
         {
             querySetParts.Add("run_time = ?runTime");
-            parameters.Add("runTime", runTime);
+            parameters.Add("runTime", runTime.ToString());
         }
         
         if (state != null)
@@ -139,16 +139,18 @@ AND time_id = ?timeId";
         if (data.Rows.Count == 0)
             return default;
 
+        var runTime = data.Rows[0].Field<string>("run_time");
+        
         return new Service()
         {
             Id = data.Rows[0].Field<int>("id"),
             Configuration = data.Rows[0].Field<string>("configuration"),
-            TimeId = data.Rows[0].Field<int>("row_id"),
+            TimeId = data.Rows[0].Field<int>("time_id"),
             Action = data.Rows[0].Field<string>("action"),
             Scheme = data.Rows[0].Field<string>("scheme"),
-            LastRun = data.Rows[0].Field<DateTime>("last_run"),
-            NextRun = data.Rows[0].Field<DateTime>("next_run"),
-            RunTime = data.Rows[0].Field<TimeSpan>("last_run"),
+            LastRun = data.Rows[0].Field<DateTime?>("last_run"),
+            NextRun = data.Rows[0].Field<DateTime?>("next_run"),
+            RunTime = String.IsNullOrWhiteSpace(runTime) ? TimeSpan.Zero : TimeSpan.Parse(runTime),
             State = data.Rows[0].Field<string>("state")
         };
     }

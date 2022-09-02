@@ -6,6 +6,7 @@ using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Modules.RunSchemes.Interfaces;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
+using AutoImportServiceCore.Modules.Wiser.Interfaces;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -28,9 +29,12 @@ namespace AutoImportServiceCore.Core.Workers
 
         private bool RunImmediately { get; set; }
 
+        private string ConfigurationName { get; set; }
+
         private readonly ILogService logService;
         private readonly ILogger<BaseWorker> logger;
         private readonly IRunSchemesService runSchemesService;
+        private readonly IWiserDashboardService wiserDashboardService;
 
         /// <summary>
         /// Creates a new instance of <see cref="BaseWorker"/>.
@@ -41,6 +45,7 @@ namespace AutoImportServiceCore.Core.Workers
             logService = baseWorkerDependencyAggregate.LogService;
             logger = baseWorkerDependencyAggregate.Logger;
             runSchemesService = baseWorkerDependencyAggregate.RunSchemesService;
+            wiserDashboardService = baseWorkerDependencyAggregate.WiserDashboardService;
         }
 
         /// <summary>
@@ -49,7 +54,8 @@ namespace AutoImportServiceCore.Core.Workers
         /// <param name="name">The name of the worker.</param>
         /// <param name="runScheme">The run scheme of the worker.</param>
         /// <param name="runImmediately">True to run the action immediately, false to run at first delayed time.</param>
-        public void Initialize(string name, RunSchemeModel runScheme, bool runImmediately = false)
+        /// <param name="configurationName">The name of the configuration, default <see langword="null"/>. If set it will update the service information.</param>
+        public void Initialize(string name, RunSchemeModel runScheme, bool runImmediately = false, string configurationName = null)
         {
             if (!String.IsNullOrWhiteSpace(Name))
                 return;
@@ -57,6 +63,7 @@ namespace AutoImportServiceCore.Core.Workers
             Name = name;
             RunScheme = runScheme;
             RunImmediately = runImmediately;
+            ConfigurationName = configurationName;
         }
 
         /// <summary>
@@ -70,6 +77,11 @@ namespace AutoImportServiceCore.Core.Workers
             {
                 await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} started, first run on: {runSchemesService.GetDateTimeTillNextRun(RunScheme)}", Name, RunScheme.TimeId);
 
+                if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                {
+                    await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme));
+                }
+                
                 if (!RunImmediately)
                 {
                     await WaitTillNextRun(stoppingToken);
@@ -87,6 +99,11 @@ namespace AutoImportServiceCore.Core.Workers
                     stopWatch.Stop();
 
                     await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}", Name, RunScheme.TimeId);
+
+                    if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                    {
+                        await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme), lastRun: DateTime.Now, runTime: stopWatch.Elapsed);
+                    }
 
                     await WaitTillNextRun(stoppingToken);
                 }
