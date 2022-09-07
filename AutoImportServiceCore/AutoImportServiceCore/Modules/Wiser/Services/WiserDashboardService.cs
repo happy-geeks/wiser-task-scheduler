@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using AutoImportServiceCore.Modules.Wiser.Interfaces;
@@ -89,7 +90,7 @@ AND time_id = ?timeId";
         if (runTime != null)
         {
             querySetParts.Add("run_time = ?runTime");
-            parameters.Add("runTime", runTime.ToString());
+            parameters.Add("runTime", runTime.Value.TotalMinutes);
         }
         
         if (state != null)
@@ -138,8 +139,6 @@ AND time_id = ?timeId";
     {
         if (data.Rows.Count == 0)
             return default;
-
-        var runTime = data.Rows[0].Field<string>("run_time");
         
         return new Service()
         {
@@ -150,7 +149,7 @@ AND time_id = ?timeId";
             Scheme = data.Rows[0].Field<string>("scheme"),
             LastRun = data.Rows[0].Field<DateTime?>("last_run"),
             NextRun = data.Rows[0].Field<DateTime?>("next_run"),
-            RunTime = String.IsNullOrWhiteSpace(runTime) ? TimeSpan.Zero : TimeSpan.Parse(runTime),
+            RunTime = data.Rows[0].Field<double>("run_time"),
             State = data.Rows[0].Field<string>("state")
         };
     }
