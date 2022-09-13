@@ -120,7 +120,7 @@ public class UpdateService : IUpdateService
                 PerformUpdate(ais, version, versionList[0].Version);
                 return;
             default:
-                throw new NotImplementedException($"Update state '{updateState}' is not yet implemented.");
+                throw new ArgumentOutOfRangeException(nameof(updateState), updateState.ToString());
         }
     }
 
@@ -154,7 +154,8 @@ public class UpdateService : IUpdateService
     }
 
     /// <summary>
-    /// 
+    /// Update the current AIS to the newest version.
+    /// Tries to restore to current version if the update failed.
     /// </summary>
     /// <param name="ais">The AIS information to update.</param>
     /// <param name="currentVersion"></param>
@@ -163,11 +164,12 @@ public class UpdateService : IUpdateService
     {
         var serviceController = new ServiceController();
         serviceController.ServiceName = ais.ServiceName;
-        
+        bool serviceAlreadyStopped;
+
         // Check if the service has been found. If the status throws an invalid operation exception the service does not exist.
         try
         {
-            _ = serviceController.Status;
+            serviceAlreadyStopped = serviceController.Status == ServiceControllerStatus.Stopped;
         }
         catch (InvalidOperationException)
         {
@@ -176,8 +178,6 @@ public class UpdateService : IUpdateService
             return;
         }
 
-        var serviceAlreadyStopped = serviceController.Status == ServiceControllerStatus.Stopped;
-        
         if (!serviceAlreadyStopped)
         {
             serviceController.Stop();
