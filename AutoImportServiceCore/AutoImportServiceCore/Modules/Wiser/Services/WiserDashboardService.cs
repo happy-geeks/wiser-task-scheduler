@@ -153,4 +153,31 @@ AND time_id = ?timeId";
             State = data.Rows[0].Field<string>("state")
         };
     }
+
+    /// <inheritdoc />
+    public async Task<List<string>> GetLogStatesFromLastRun(string configuration, int timeId, DateTime runStartTime)
+    {
+        var states = new List<string>();
+        
+        using var scope = serviceProvider.CreateScope();
+        using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+
+        databaseConnection.AddParameter("runStartTime", runStartTime);
+        databaseConnection.AddParameter("configuration", configuration);
+        databaseConnection.AddParameter("timeId", timeId);
+        
+        var data = await databaseConnection.GetAsync($@"SELECT DISTINCT level
+FROM {WiserTableNames.AisLogs}
+WHERE added_on >= ?runStartTime
+AND configuration = ?configuration
+AND time_id = ?timeId
+AND is_test = 0");
+
+        foreach (DataRow row in data.Rows)
+        {
+            states.Add(row.Field<string>("level"));
+        }
+
+        return states;
+    }
 }

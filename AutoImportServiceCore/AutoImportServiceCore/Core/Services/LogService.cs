@@ -90,8 +90,15 @@ namespace AutoImportServiceCore.Core.Services
                     databaseConnection.AddParameter("timeId", timeId);
                     databaseConnection.AddParameter("order", order);
                     databaseConnection.AddParameter("addedOn", DateTime.Now);
-                    await databaseConnection.ExecuteAsync(@$"INSERT INTO {WiserTableNames.AisLogs} (message, level, scope, source, configuration, time_id, `order`, added_on)
-                                                                    VALUES(?message, ?level, ?scope, ?source, ?configuration, ?timeId, ?order, ?addedOn)");
+                    
+#if DEBUG
+                    databaseConnection.AddParameter("isTest", 1);
+#else
+                    databaseConnection.AddParameter("isTest", 0);
+#endif
+                    
+                    await databaseConnection.ExecuteAsync(@$"INSERT INTO {WiserTableNames.AisLogs} (message, level, scope, source, configuration, time_id, `order`, added_on, is_test)
+                                                                    VALUES(?message, ?level, ?scope, ?source, ?configuration, ?timeId, ?order, ?addedOn, ?isTest)");
                     break;
                 }
 
