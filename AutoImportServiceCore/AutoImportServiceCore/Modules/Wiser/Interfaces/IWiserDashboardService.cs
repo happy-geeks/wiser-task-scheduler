@@ -46,4 +46,12 @@ public interface IWiserDashboardService
     /// <param name="runStartTime">The datetime the run scheme started.</param>
     /// <returns></returns>
     Task<List<string>> GetLogStatesFromLastRun(string configuration, int timeId, DateTime runStartTime);
+
+    /// <summary>
+    /// Check if the service is paused.
+    /// </summary>
+    /// <param name="configuration">The name of the configuration.</param>
+    /// <param name="timeId">The time ID of the run scheme.</param>
+    /// <returns></returns>
+    Task<bool> IsServicePaused(string configuration, int timeId);
 }

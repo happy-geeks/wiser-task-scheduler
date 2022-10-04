@@ -77,13 +77,11 @@ namespace AutoImportServiceCore.Core.Workers
             try
             {
                 await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} started, first run on: {runSchemesService.GetDateTimeTillNextRun(RunScheme)}", Name, RunScheme.TimeId);
-
-#if !DEBUG
+                
                 if (!String.IsNullOrWhiteSpace(ConfigurationName))
                 {
                     await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme));
                 }
-#endif
                 
                 if (!RunImmediately)
                 {
@@ -92,56 +90,79 @@ namespace AutoImportServiceCore.Core.Workers
 
                 while (!stoppingToken.IsCancellationRequested)
                 {
-                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} started at: {DateTime.Now}", Name, RunScheme.TimeId);
-
-#if !DEBUG
-                    var runStartTime = DateTime.Now;
-#endif
+                    var paused = false;
                     
-                    var stopWatch = new Stopwatch();
-                    stopWatch.Start();
-
-                    await ExecuteActionAsync();
-
-                    stopWatch.Stop();
-
-                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}", Name, RunScheme.TimeId);
-
-#if !DEBUG
                     if (!String.IsNullOrWhiteSpace(ConfigurationName))
                     {
-                        var states = await wiserDashboardService.GetLogStatesFromLastRun(ConfigurationName, RunScheme.TimeId, runStartTime);
-                        
-                        var state = "success";
-                        if (states.Contains("Critical", StringComparer.OrdinalIgnoreCase) || states.Contains("Error", StringComparer.OrdinalIgnoreCase))
+                        paused = await wiserDashboardService.IsServicePaused(ConfigurationName, RunScheme.TimeId);
+                        if (paused)
                         {
-                            state = "failed";
+                            await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "paused");
                         }
-                        else if (states.Contains("Warning", StringComparer.OrdinalIgnoreCase))
-                        {
-                            state = "warning";
-                        }
-                        
-                        await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme), lastRun: DateTime.Now, runTime: stopWatch.Elapsed, state: state);
                     }
-#endif
+
+                    if (!paused)
+                    {
+                        await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} started at: {DateTime.Now}", Name, RunScheme.TimeId);
+                        if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                        {
+                            await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "running");
+                        }
+
+                        var runStartTime = DateTime.Now;
+                        var stopWatch = new Stopwatch();
+                        stopWatch.Start();
+
+                        await ExecuteActionAsync();
+
+                        stopWatch.Stop();
+
+                        await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}", Name, RunScheme.TimeId);
+
+                        if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                        {
+                            var states = await wiserDashboardService.GetLogStatesFromLastRun(ConfigurationName, RunScheme.TimeId, runStartTime);
+
+                            var state = "success";
+                            if (await wiserDashboardService.IsServicePaused(ConfigurationName, RunScheme.TimeId))
+                            {
+                                state = "paused";
+                            }
+                            else if (states.Contains("Critical", StringComparer.OrdinalIgnoreCase) || states.Contains("Error", StringComparer.OrdinalIgnoreCase))
+                            {
+                                state = "failed";
+                            }
+                            else if (states.Contains("Warning", StringComparer.OrdinalIgnoreCase))
+                            {
+                                state = "warning";
+                            }
+
+                            await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme), lastRun: DateTime.Now, runTime: stopWatch.Elapsed, state: state);
+                        }
+                    }
+                    else
+                    {
+                        await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme));
+                    }
 
                     await WaitTillNextRun(stoppingToken);
                 }
             }
             catch (TaskCanceledException)
             {
-                await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} has been stopped after cancel was called.", Name, RunScheme.TimeId);
-#if !DEBUG
-                await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "stopped");
-#endif
+                await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{ConfigurationName ?? Name} has been stopped after cancel was called.", ConfigurationName ?? Name, RunScheme.TimeId);
+                if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                {
+                    await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "stopped");
+                }
             }
             catch (Exception e)
             {
-                await logService.LogError(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} stopped with exception {e}", Name, RunScheme.TimeId);
-#if !DEBUG
-                await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "crashed");
-#endif
+                await logService.LogError(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{ConfigurationName ?? Name} stopped with exception {e}", ConfigurationName ?? Name, RunScheme.TimeId);
+                if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                {
+                    await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "crashed");
+                }
             }
         }
 

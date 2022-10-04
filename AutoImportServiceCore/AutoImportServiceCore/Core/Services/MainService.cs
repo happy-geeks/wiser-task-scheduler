@@ -113,8 +113,7 @@ namespace AutoImportServiceCore.Core.Services
                 foreach (var runScheme in configuration.GetAllRunSchemes())
                 {
                     runScheme.LogSettings ??= configuration.LogSettings ?? LogSettings;
-
-#if !DEBUG
+                    
                     if (runScheme.Id == 0)
                     {
                         var existingService = await wiserDashboardService.GetServiceAsync(configuration.ServiceName, runScheme.TimeId);
@@ -125,7 +124,6 @@ namespace AutoImportServiceCore.Core.Services
                     }
                     
                     await wiserDashboardService.UpdateServiceAsync(configuration.ServiceName, runScheme.TimeId, runScheme.Action, runScheme.Type.ToString().ToLower(), state: "active");
-#endif
 
                     var thread = new Thread(() => StartConfiguration(runScheme, configuration));
                     thread.Start();

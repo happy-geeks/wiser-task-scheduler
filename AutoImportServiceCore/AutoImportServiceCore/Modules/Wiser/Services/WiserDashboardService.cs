@@ -180,4 +180,27 @@ AND is_test = 0");
 
         return states;
     }
+
+    /// <inheritdoc />
+    public async Task<bool> IsServicePaused(string configuration, int timeId)
+    {
+        using var scope = serviceProvider.CreateScope();
+        using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+
+        databaseConnection.AddParameter("configuration", configuration);
+        databaseConnection.AddParameter("timeId", timeId);
+
+        var dataTable = await databaseConnection.GetAsync($@"SELECT paused
+FROM {WiserTableNames.AisServices}
+WHERE configuration = ?configuration
+AND time_id = ?timeId");
+
+        // If no service is found for this combination treat it as paused to prevent unwanted executions.
+        if (dataTable.Rows.Count == 0)
+        {
+            return true;
+        }
+
+        return dataTable.Rows[0].Field<bool>("paused");
+    }
 }
