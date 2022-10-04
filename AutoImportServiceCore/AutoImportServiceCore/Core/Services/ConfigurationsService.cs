@@ -90,7 +90,9 @@ namespace AutoImportServiceCore.Core.Services
                 configuration.CleanupItemGroup,
                 configuration.CleanupItems,
                 configuration.CommunicationGroup,
-                configuration.Communications
+                configuration.Communications,
+                configuration.WiserImportGroup,
+                configuration.WiserImports
             };
 
             var allActions = new List<ActionModel>();

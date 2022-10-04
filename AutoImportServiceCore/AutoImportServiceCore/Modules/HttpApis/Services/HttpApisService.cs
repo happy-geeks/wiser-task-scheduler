@@ -191,7 +191,8 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
             var resultSet = new JObject
             {
-                { "StatusCode", ((int)response.StatusCode).ToString() }
+                {"Url", url},
+                {"StatusCode", ((int) response.StatusCode).ToString()}
             };
 
             // Add all headers to the result set.

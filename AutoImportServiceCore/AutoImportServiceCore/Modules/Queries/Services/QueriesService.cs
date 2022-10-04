@@ -54,6 +54,9 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             var query = (QueryModel)action;
             await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
             databaseConnection.ClearParameters();
+            await databaseConnection.EnsureOpenConnectionForWritingAsync();
+            await databaseConnection.EnsureOpenConnectionForReadingAsync();
+            databaseConnection.SetCommandTimeout(query.Timeout);
 
             // Enforce the set character set and collation that is used during the execution of this action.
             databaseConnection.AddParameter("characterSet", query.CharacterEncoding.CharacterSet);
@@ -105,8 +108,15 @@ namespace AutoImportServiceCore.Modules.Queries.Services
 
                 if (keyWithSecondLayer != null)
                 {
-                    var secondLayerArray = ResultSetHelper.GetCorrectObject<JArray>($"{query.UseResultSet}[i].{keyWithSecondLayer.Substring(0, keyWithSecondLayer.IndexOf("[j]"))}", rows, resultSets);
+                    var secondLayerKey = keyWithSecondLayer.Substring(0, keyWithSecondLayer.IndexOf("[j]"));
+                    var secondLayerArray = ResultSetHelper.GetCorrectObject<JArray>($"{query.UseResultSet}[i].{secondLayerKey}", rows, resultSets);
 
+                    if (secondLayerArray == null)
+                    {
+                        await logService.LogWarning(logger, LogScopes.RunBody, query.LogSettings, $"Could not find second layer array with key '{secondLayerKey}' in result set '{query.UseResultSet}' at index '{i}', referring to object:\n{ResultSetHelper.GetCorrectObject<JObject>($"{query.UseResultSet}[i]", rows, resultSets)}", configurationServiceName, query.TimeId, query.Order);
+                        continue;
+                    }
+                    
                     for (var j = 0; j < secondLayerArray.Count; j++)
                     {
                         rows[1] = j;
@@ -140,7 +150,14 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             databaseConnection.ClearParameters();
             foreach (var parameter in parameters)
             {
-                databaseConnection.AddParameter(parameter.Key, parameter.Value);
+                if (parameter.Value == null || parameter.Value.Equals("DBNull", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    databaseConnection.AddParameter(parameter.Key, DBNull.Value);
+                }
+                else
+                {
+                    databaseConnection.AddParameter(parameter.Key, parameter.Value);
+                }
             }
 
             var dataTable = await databaseConnection.GetAsync(queryString, cleanUp: lastQuery);

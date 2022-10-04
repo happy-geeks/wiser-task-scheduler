@@ -9,6 +9,7 @@ using AutoImportServiceCore.Modules.HttpApis.Models;
 using AutoImportServiceCore.Modules.ImportFiles.Models;
 using AutoImportServiceCore.Modules.Queries.Models;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
+using AutoImportServiceCore.Modules.WiserImports.Models;
 
 namespace AutoImportServiceCore.Core.Models
 {
@@ -136,6 +137,19 @@ namespace AutoImportServiceCore.Core.Models
         /// </summary>
         [XmlElement("BranchQueue")]
         public BranchQueueModel BranchQueueModel { get; set; }
+
+        /// <summary>
+        /// Gets or sets the Wiser the imports need to be handled for that have been placed in the group.
+        /// </summary>
+        [XmlArray("WiserImports")]
+        [XmlArrayItem(typeof(WiserImportModel))]
+        public WiserImportModel[] WiserImportGroup { get; set; }
+
+        /// <summary>
+        /// Gets or sets the Wiser the imports need to be handled for that have been placed outside the group.
+        /// </summary>
+        [XmlElement("WiserImport")]
+        public WiserImportModel[] WiserImports { get; set; }
 
         /// <summary>
         /// Get all run schemes that are defined in this configuration.
