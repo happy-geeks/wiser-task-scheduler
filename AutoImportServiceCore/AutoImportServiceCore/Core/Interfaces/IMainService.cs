@@ -23,6 +23,6 @@ namespace AutoImportServiceCore.Core.Interfaces
         /// Stops all configurations that are currently running.
         /// </summary>
         /// <returns></returns>
-        Task StopAllConfigurations();
+        Task StopAllConfigurationsAsync();
     }
 }

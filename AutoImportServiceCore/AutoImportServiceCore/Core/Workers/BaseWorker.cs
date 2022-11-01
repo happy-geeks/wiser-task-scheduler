@@ -30,6 +30,8 @@ namespace AutoImportServiceCore.Core.Workers
 
         private bool RunImmediately { get; set; }
 
+        private bool SingleRun { get; set; }
+
         private string ConfigurationName { get; set; }
 
         private readonly ILogService logService;
@@ -56,7 +58,8 @@ namespace AutoImportServiceCore.Core.Workers
         /// <param name="runScheme">The run scheme of the worker.</param>
         /// <param name="runImmediately">True to run the action immediately, false to run at first delayed time.</param>
         /// <param name="configurationName">The name of the configuration, default <see langword="null"/>. If set it will update the service information.</param>
-        public void Initialize(string name, RunSchemeModel runScheme, bool runImmediately = false, string configurationName = null)
+        /// <param name="singleRun">The configuration is only run once, ignoring paused state and run time.</param>
+        public void Initialize(string name, RunSchemeModel runScheme, bool runImmediately = false, string configurationName = null, bool singleRun = false)
         {
             if (!String.IsNullOrWhiteSpace(Name))
                 return;
@@ -65,6 +68,7 @@ namespace AutoImportServiceCore.Core.Workers
             RunScheme = runScheme;
             RunImmediately = runImmediately;
             ConfigurationName = configurationName;
+            SingleRun = singleRun;
         }
 
         /// <summary>
@@ -83,7 +87,7 @@ namespace AutoImportServiceCore.Core.Workers
                     await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme));
                 }
                 
-                if (!RunImmediately)
+                if (!RunImmediately && !SingleRun)
                 {
                     await WaitTillNextRun(stoppingToken);
                 }
@@ -91,58 +95,69 @@ namespace AutoImportServiceCore.Core.Workers
                 while (!stoppingToken.IsCancellationRequested)
                 {
                     var paused = false;
+                    var alreadyRunning = false;
                     
                     if (!String.IsNullOrWhiteSpace(ConfigurationName))
                     {
+                        alreadyRunning = await wiserDashboardService.IsServiceRunning(ConfigurationName, RunScheme.TimeId);
                         paused = await wiserDashboardService.IsServicePaused(ConfigurationName, RunScheme.TimeId);
-                        if (paused)
+                        if (paused && !alreadyRunning)
                         {
                             await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "paused");
                         }
                     }
 
-                    if (!paused)
+                    if (!alreadyRunning)
                     {
-                        await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} started at: {DateTime.Now}", Name, RunScheme.TimeId);
-                        if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                        if (!paused || SingleRun)
                         {
-                            await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "running");
+                            await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} started at: {DateTime.Now}", Name, RunScheme.TimeId);
+                            if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                            {
+                                await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "running");
+                            }
+
+                            var runStartTime = DateTime.Now;
+                            var stopWatch = new Stopwatch();
+                            stopWatch.Start();
+
+                            await ExecuteActionAsync();
+
+                            stopWatch.Stop();
+
+                            await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}", Name, RunScheme.TimeId);
+
+                            if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                            {
+                                var states = await wiserDashboardService.GetLogStatesFromLastRun(ConfigurationName, RunScheme.TimeId, runStartTime);
+
+                                var state = "success";
+                                if (await wiserDashboardService.IsServicePaused(ConfigurationName, RunScheme.TimeId))
+                                {
+                                    state = "paused";
+                                }
+                                else if (states.Contains("Critical", StringComparer.OrdinalIgnoreCase) || states.Contains("Error", StringComparer.OrdinalIgnoreCase))
+                                {
+                                    state = "failed";
+                                }
+                                else if (states.Contains("Warning", StringComparer.OrdinalIgnoreCase))
+                                {
+                                    state = "warning";
+                                }
+
+                                await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme), lastRun: DateTime.Now, runTime: stopWatch.Elapsed, state: state, extraRun: false);
+                            }
                         }
-
-                        var runStartTime = DateTime.Now;
-                        var stopWatch = new Stopwatch();
-                        stopWatch.Start();
-
-                        await ExecuteActionAsync();
-
-                        stopWatch.Stop();
-
-                        await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}", Name, RunScheme.TimeId);
-
-                        if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                        else
                         {
-                            var states = await wiserDashboardService.GetLogStatesFromLastRun(ConfigurationName, RunScheme.TimeId, runStartTime);
-
-                            var state = "success";
-                            if (await wiserDashboardService.IsServicePaused(ConfigurationName, RunScheme.TimeId))
-                            {
-                                state = "paused";
-                            }
-                            else if (states.Contains("Critical", StringComparer.OrdinalIgnoreCase) || states.Contains("Error", StringComparer.OrdinalIgnoreCase))
-                            {
-                                state = "failed";
-                            }
-                            else if (states.Contains("Warning", StringComparer.OrdinalIgnoreCase))
-                            {
-                                state = "warning";
-                            }
-
-                            await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme), lastRun: DateTime.Now, runTime: stopWatch.Elapsed, state: state);
+                            await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme));
                         }
                     }
-                    else
+
+                    // If the configuration only needs to be run once break out of the while loop. State will not be set on stopped because the normal configuration is still active.
+                    if (SingleRun)
                     {
-                        await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme));
+                        break;
                     }
 
                     await WaitTillNextRun(stoppingToken);

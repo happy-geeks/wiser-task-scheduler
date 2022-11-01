@@ -13,6 +13,8 @@ namespace AutoImportServiceCore.Core.Workers
     {
         private readonly ILogger<ConfigurationsWorker> logger;
         private readonly IConfigurationsService configurationsService;
+        
+        public ConfigurationModel Configuration { get; private set; }
 
         /// <summary>
         /// Creates a new instance of <see cref="ConfigurationsWorker"/>.
@@ -32,9 +34,11 @@ namespace AutoImportServiceCore.Core.Workers
         /// <param name="configuration">The configuration to retrieve the correct information from.</param>
         /// <param name="name">The name of the worker.</param>
         /// <param name="runScheme">The run scheme of the worker.</param>
-        public void Initialize(ConfigurationModel configuration, string name, RunSchemeModel runScheme)
+        /// <param name="singleRun">The configuration is only run once, ignoring paused state and run time.</param>
+        public void Initialize(ConfigurationModel configuration, string name, RunSchemeModel runScheme, bool singleRun = false)
         {
-            Initialize(name, runScheme, runScheme.RunImmediately, configuration.ServiceName);
+            Initialize(name, runScheme, runScheme.RunImmediately, configuration.ServiceName, singleRun);
+            Configuration = configuration;
 
             configurationsService.Name = Name;
             configurationsService.LogSettings = RunScheme.LogSettings;

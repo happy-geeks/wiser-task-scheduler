@@ -81,7 +81,7 @@ namespace AutoImportServiceCore.Core.Services
                 updatedServiceTable = true;
             }
             
-            var configurations = await GetConfigurations();
+            var configurations = await GetConfigurationsAsync();
 
             if (configurations == null)
             {
@@ -100,7 +100,7 @@ namespace AutoImportServiceCore.Core.Services
 
                     // If the configuration is already running but on a different version stop the current active one.
                     var configurationStopTasks = StopConfiguration(configuration.ServiceName);
-                    await WaitTillConfigurationsStopped(configurationStopTasks);
+                    await WaitTillConfigurationsStoppedAsync(configurationStopTasks);
                     activeConfigurations.TryRemove(new KeyValuePair<string, ActiveConfigurationModel>(configuration.ServiceName, activeConfigurations[configuration.ServiceName]));
                 }
 
@@ -125,15 +125,17 @@ namespace AutoImportServiceCore.Core.Services
                     
                     await wiserDashboardService.UpdateServiceAsync(configuration.ServiceName, runScheme.TimeId, runScheme.Action, runScheme.Type.ToString().ToLower(), state: "active");
 
-                    var thread = new Thread(() => StartConfiguration(runScheme, configuration));
+                    var thread = new Thread(() => StartConfigurationAsync(runScheme, configuration));
                     thread.Start();
                 }
             }
             
-            await StopRemovedConfigurations(configurations);
+            await StopRemovedConfigurationsAsync(configurations);
+
+            await StartExtraRunsAsync();
         }
 
-        private async Task SetOAuthConfiguration(string oAuthConfiguration)
+        private async Task SetOAuthConfigurationAsync(string oAuthConfiguration)
         {
             var serializer = new XmlSerializer(typeof(OAuthConfigurationModel));
             using var reader = new StringReader(oAuthConfiguration);
@@ -144,7 +146,7 @@ namespace AutoImportServiceCore.Core.Services
             await oAuthService.SetConfigurationAsync(configuration);
         }
 
-        private async Task StopRemovedConfigurations(List<ConfigurationModel> configurations)
+        private async Task StopRemovedConfigurationsAsync(List<ConfigurationModel> configurations)
         {
             foreach (var activeConfiguration in activeConfigurations)
             {
@@ -154,7 +156,7 @@ namespace AutoImportServiceCore.Core.Services
                 }
 
                 var configurationStopTasks = StopConfiguration(activeConfiguration.Key);
-                await WaitTillConfigurationsStopped(configurationStopTasks);
+                await WaitTillConfigurationsStoppedAsync(configurationStopTasks);
                 activeConfigurations.TryRemove(new KeyValuePair<string, ActiveConfigurationModel>(activeConfiguration.Key, activeConfigurations[activeConfiguration.Key]));
                 
                 // TODO remove service from database.
@@ -162,7 +164,7 @@ namespace AutoImportServiceCore.Core.Services
         }
 
         /// <inheritdoc />
-        public async Task StopAllConfigurations()
+        public async Task StopAllConfigurationsAsync()
         {
             var configurationStopTasks = new List<Task>();
 
@@ -171,7 +173,7 @@ namespace AutoImportServiceCore.Core.Services
                 configurationStopTasks.AddRange(StopConfiguration(configuration.Key));
             }
 
-            await WaitTillConfigurationsStopped(configurationStopTasks);
+            await WaitTillConfigurationsStoppedAsync(configurationStopTasks);
         }
 
         private List<Task> StopConfiguration(string configurationName)
@@ -190,7 +192,7 @@ namespace AutoImportServiceCore.Core.Services
             return configurationStopTasks;
         }
 
-        private async Task WaitTillConfigurationsStopped(List<Task> configurationStopTasks)
+        private async Task WaitTillConfigurationsStoppedAsync(List<Task> configurationStopTasks)
         {
             for (var i = 0; i < configurationStopTasks.Count; i++)
             {
@@ -204,7 +206,7 @@ namespace AutoImportServiceCore.Core.Services
         /// Retrieve all configurations.
         /// </summary>
         /// <returns>Returns the configurations</returns>
-        private async Task<List<ConfigurationModel>> GetConfigurations()
+        private async Task<List<ConfigurationModel>> GetConfigurationsAsync()
         {
             var configurations = new List<ConfigurationModel>();
             
@@ -233,7 +235,7 @@ namespace AutoImportServiceCore.Core.Services
                         {
                             if (wiserConfiguration.Version != oAuthConfigurationVersion)
                             {
-                                await SetOAuthConfiguration(wiserConfiguration.EditorValue);
+                                await SetOAuthConfigurationAsync(wiserConfiguration.EditorValue);
                                 oAuthConfigurationVersion = wiserConfiguration.Version;
                             }
                         }
@@ -266,7 +268,7 @@ namespace AutoImportServiceCore.Core.Services
                 var fileVersion = File.GetLastWriteTimeUtc(localOAuthConfiguration).Ticks;
                 if (fileVersion != oAuthConfigurationVersion)
                 {
-                    await SetOAuthConfiguration(await File.ReadAllTextAsync(localOAuthConfiguration));
+                    await SetOAuthConfigurationAsync(await File.ReadAllTextAsync(localOAuthConfiguration));
                     oAuthConfigurationVersion = fileVersion;
                 }
             }
@@ -319,14 +321,47 @@ namespace AutoImportServiceCore.Core.Services
         /// </summary>
         /// <param name="runScheme">The run scheme of the worker.</param>
         /// <param name="configuration">The configuration the run scheme is within.</param>
-        private async void StartConfiguration(RunSchemeModel runScheme, ConfigurationModel configuration)
+        /// <param name="singleRun">Optional: If the configuration only needs to be ran once. Will ignore paused state and run time.</param>
+        private async void StartConfigurationAsync(RunSchemeModel runScheme, ConfigurationModel configuration, bool singleRun = false)
         {
             using var scope = serviceProvider.CreateScope();
             var worker = scope.ServiceProvider.GetRequiredService<ConfigurationsWorker>();
-            worker.Initialize(configuration, $"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme);
-            activeConfigurations[configuration.ServiceName].WorkerPerTimeId.TryAdd(runScheme.TimeId, worker);
+            worker.Initialize(configuration, $"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme, singleRun);
+            
+            if (!singleRun)
+            {
+                activeConfigurations[configuration.ServiceName].WorkerPerTimeId.TryAdd(runScheme.TimeId, worker);
+            }
+
             await worker.StartAsync(new CancellationToken());
             await worker.ExecuteTask; // Keep scope alive until worker stops.
+        }
+
+        private async Task StartExtraRunsAsync()
+        {
+            var services = await wiserDashboardService.GetServices(true);
+
+            foreach (var service in services)
+            {
+                // If the service is currently running no extra run will be started.
+                if (service.State.Equals("running", StringComparison.CurrentCultureIgnoreCase))
+                {
+                    await wiserDashboardService.UpdateServiceAsync(service.Configuration, service.TimeId, extraRun: false);
+                    continue;
+                }
+
+                // If the service is not normally running by this AIS we don't have the configuration for a single run so we skip it.
+                if (!activeConfigurations.ContainsKey(service.Configuration) || !activeConfigurations[service.Configuration].WorkerPerTimeId.ContainsKey(service.TimeId))
+                {
+                    continue;
+                }
+                
+                var configuration = activeConfigurations[service.Configuration].WorkerPerTimeId[service.TimeId].Configuration;
+                var runScheme = activeConfigurations[service.Configuration].WorkerPerTimeId[service.TimeId].RunScheme;
+                
+                var thread = new Thread(() => StartConfigurationAsync(runScheme, configuration, true));
+                thread.Start();
+            }
         }
     }
 }
