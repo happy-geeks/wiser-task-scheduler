@@ -16,8 +16,6 @@ public class UpdateService : IUpdateService
 {
     private const string AisTempPath = "C:/temp/ais";
     private const string AisExeFile = "AutoImportServiceCore.exe";
-    private const string VersionListUrl = "https://localhost:44306/versions.json";
-    private const string VersionDownloadUrl = "https://localhost:44306/Update.zip";
 
     private readonly UpdateSettings updateSettings;
     private readonly ILogger<UpdateService> logger;
@@ -67,7 +65,7 @@ public class UpdateService : IUpdateService
     {
         logger.LogInformation("Retrieving version list from server.");
         
-        using var request = new HttpRequestMessage(HttpMethod.Get, VersionListUrl);
+        using var request = new HttpRequestMessage(HttpMethod.Get, updateSettings.VersionListUrl);
         using var client = new HttpClient();
         using var response = await client.SendAsync(request);
         return await response.Content.ReadFromJsonAsync<List<VersionModel>>();
@@ -87,7 +85,7 @@ public class UpdateService : IUpdateService
             File.Delete(filePath);
         }
         
-        using var request = new HttpRequestMessage(HttpMethod.Get, VersionDownloadUrl);
+        using var request = new HttpRequestMessage(HttpMethod.Get, updateSettings.VersionDownloadUrl);
         using var client = new HttpClient();
         using var response = await client.SendAsync(request);
         await File.WriteAllBytesAsync(filePath, await response.Content.ReadAsByteArrayAsync());

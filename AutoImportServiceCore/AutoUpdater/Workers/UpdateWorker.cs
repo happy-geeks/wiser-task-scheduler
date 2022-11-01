@@ -17,8 +17,8 @@ public class UpdateWorker : BackgroundService
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            await updateService.UpdateServicesAsync();
             await Task.Delay(DateTime.Now.Date.AddDays(1) - DateTime.Now, stoppingToken);
+            await updateService.UpdateServicesAsync();
         }
     }
 }
