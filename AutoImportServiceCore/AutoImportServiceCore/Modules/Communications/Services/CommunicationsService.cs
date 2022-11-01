@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Globalization;
 using System.Linq;
 using System.Net.Mail;
 using System.Threading.Tasks;
@@ -10,6 +11,7 @@ using AutoImportServiceCore.Core.Models;
 using AutoImportServiceCore.Modules.Communications.Interfaces;
 using AutoImportServiceCore.Modules.Communications.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Core.Services;
 using GeeksCoreLibrary.Modules.Communication.Enums;
@@ -22,6 +24,11 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using GclCommunicationsService = GeeksCoreLibrary.Modules.Communication.Services.CommunicationsService;
+using GeeksCoreLibrary.Modules.Communication.Extensions;
+using GeeksCoreLibrary.Modules.DataSelector.Models;
+using GeeksCoreLibrary.Modules.DataSelector.Services;
+using GeeksCoreLibrary.Modules.Templates.Services;
+using Newtonsoft.Json;
 
 namespace AutoImportServiceCore.Modules.Communications.Services;
 
@@ -68,19 +75,233 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
         var gclSettings = scope.ServiceProvider.GetRequiredService<IOptions<GclSettings>>();
         var wiserItemsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<WiserItemsService>>();
         var gclCommunicationsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<GclCommunicationsService>>();
-        
-        var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, null, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
-        var gclCommunicationsService = new GclCommunicationsService(gclSettings, gclCommunicationsServiceLogger, wiserItemsService, databaseConnection);
+        var dataSelectorsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<DataSelectorsService>>();
 
+        var templatesService = new TemplatesService(null, gclSettings, databaseConnection, stringReplacementsService, null, null, null, null, null, null, null, null, null);
+        var dataSelectorsService = new DataSelectorsService(gclSettings, databaseConnection, stringReplacementsService, templatesService, null, null, dataSelectorsServiceLogger, null);
+        var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, dataSelectorsService, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
+        var gclCommunicationsService = new GclCommunicationsService(gclSettings, gclCommunicationsServiceLogger, wiserItemsService, databaseConnection, databaseHelpersService);
+
+        await GenerateCommunicationsAsync(communication, databaseConnection, gclCommunicationsService, dataSelectorsService, stringReplacementsService, configurationServiceName);
+        
         switch (communication.Type)
         {
             case CommunicationTypes.Email:
                 return await ProcessMailsAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName);
             case CommunicationTypes.Sms:
 	            return await ProcessSmsAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName);
+            case CommunicationTypes.WhatsApp:
+	            throw new NotImplementedException();
             default:
                 throw new ArgumentOutOfRangeException(nameof(communication.Type), communication.Type.ToString());
         }
+    }
+
+    /// <summary>
+    /// Generate communications that need to be send.
+    /// </summary>
+    /// <param name="communication">The communication information.</param>
+    /// <param name="databaseConnection">The database connection to use.</param>
+    /// <param name="gclCommunicationsService">The communications service from the GCL to store the generated communications.</param>
+    /// <param name="dataSelectorsService">The data selectors service to use.</param>
+    /// <param name="configurationServiceName">The name of the configuration that is being executed.</param>
+    private async Task GenerateCommunicationsAsync(CommunicationModel communication, IDatabaseConnection databaseConnection, GclCommunicationsService gclCommunicationsService, DataSelectorsService dataSelectorsService, IStringReplacementsService stringReplacementsService, string configurationServiceName)
+    {
+	    var communicationSettings = await gclCommunicationsService.GetSettingsAsync(communication.Type);
+
+	    foreach (var communicationSetting in communicationSettings)
+	    {
+		    var contentSettings = communicationSetting.Settings.Single(x => x.Type == communication.Type);
+		    var lastProcessed = communicationSetting.LastProcessed.SingleOrDefault(x => x.Type == communication.Type);
+		    if (lastProcessed == null)
+		    {
+			    await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, $"There is no 'LastProcessed' for '{communication.Type}' with ID '{communicationSetting.Id}'. No communication has been generated.", configurationServiceName, communication.TimeId, communication.Order);
+			    continue;
+		    }
+
+		    // Check if the communication needs to be generated based on it's type and associated settings.
+		    switch (communicationSetting.SendTriggerType)
+		    {
+			    case SendTriggerTypes.Direct:
+			    case SendTriggerTypes.Fixed:
+				    if (!communicationSetting.TriggerStart.HasValue ||
+				        communicationSetting.TriggerStart > DateTime.Now ||
+				        lastProcessed.DateTime >= communicationSetting.TriggerStart)
+				    {
+					    continue;
+				    }
+
+				    break;
+			    case SendTriggerTypes.Recurring:
+				    var currentDate = DateTime.Now;
+
+				    // Don't send the communication if we don't have all required values or if today is not between the start and end date. 
+				    if (!communicationSetting.TriggerStart.HasValue ||
+				        !communicationSetting.TriggerEnd.HasValue ||
+				        !communicationSetting.TriggerTime.HasValue ||
+				        communicationSetting.TriggerStart > currentDate ||
+				        communicationSetting.TriggerEnd < currentDate)
+				    {
+					    continue;
+				    }
+
+				    // Calculate the next date and time that this should be processed.
+				    var nextDateTimeToProcess = new DateTime(lastProcessed.DateTime.Year, lastProcessed.DateTime.Month, lastProcessed.DateTime.Day, communicationSetting.TriggerTime.Value.Hours, communicationSetting.TriggerTime.Value.Minutes, 0);
+				    switch (communicationSetting.TriggerPeriodType)
+				    {
+					    case TriggerPeriodTypes.Week:
+						    // Always start at the next day, because we never send communication more than once a day and that makes the calculations below easier.
+						    nextDateTimeToProcess = nextDateTimeToProcess.AddDays(1);
+						    while (!communicationSetting.TriggerWeekDays.Value.IsWeekday(nextDateTimeToProcess.DayOfWeek))
+						    {
+							    nextDateTimeToProcess = nextDateTimeToProcess.AddDays(1);
+						    }
+
+						    // Now we need to check the week of year. If the next date to process is in the same week, we can always handle that communication because then it's been set to run at multiple days per week.
+						    // If it's not the same week, we need to check if it's the correct week, because it's possible to set the communication to be sent every 3 weeks for example.
+						    var newWeekNumber = CultureInfo.CurrentCulture.Calendar.GetWeekOfYear(nextDateTimeToProcess, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
+						    var lastProcessedWeekNumber = CultureInfo.CurrentCulture.Calendar.GetWeekOfYear(lastProcessed.DateTime, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
+						    if (newWeekNumber != lastProcessedWeekNumber)
+						    {
+							    // If the next date to process is a new week, add the amount of weeks that the user indicated, minus 1 because we are already 1 week ahead at this point.
+							    nextDateTimeToProcess = nextDateTimeToProcess.AddDays(7 * (communicationSetting.TriggerPeriodValue - 1));
+						    }
+
+						    break;
+					    case TriggerPeriodTypes.Month:
+						    nextDateTimeToProcess = nextDateTimeToProcess.AddMonths(communicationSetting.TriggerPeriodValue);
+						    nextDateTimeToProcess = new DateTime(nextDateTimeToProcess.Year, nextDateTimeToProcess.Month, Math.Min(DateTime.DaysInMonth(currentDate.Year, currentDate.Month), communicationSetting.TriggerDayOfMonth));
+						    break;
+					    default:
+						    throw new ArgumentOutOfRangeException(nameof(communicationSetting.TriggerPeriodType), communicationSetting.TriggerPeriodType.ToString());
+				    }
+
+				    // Don't send the communication if the next date and time is in the future.
+				    if (nextDateTimeToProcess > currentDate)
+				    {
+					    continue;
+				    }
+
+				    break;
+			    default:
+				    throw new ArgumentOutOfRangeException(nameof(communicationSetting.SendTriggerType), communicationSetting.SendTriggerType.ToString());
+		    }
+
+		    var receivers = new Dictionary<string, JToken>();
+
+		    // Retrieve all receivers based on settings.
+		    if (communicationSetting.ReceiversQueryId > 0 || communicationSetting.ReceiversDataSelectorId > 0)
+		    {
+			    if (String.IsNullOrWhiteSpace(contentSettings.Selector))
+			    {
+				    await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, $"No selector has been provided for communication with ID '{communicationSetting.Id}'. No communication has been generated.", configurationServiceName, communication.TimeId, communication.Order);
+				    continue;
+			    }
+
+			    var dataSelectorSettings = new DataSelectorRequestModel
+			    {
+				    DataSelectorId = communicationSetting.ReceiversDataSelectorId,
+				    QueryId = communicationSetting.ReceiversQueryId.ToString().EncryptWithAesWithSalt(withDateTime: true)
+			    };
+
+			    var (results, _, _) = await dataSelectorsService.GetJsonResponseAsync(dataSelectorSettings, true);
+
+			    foreach (var item in results)
+			    {
+				    var receiver = item.Value<string>(contentSettings.Selector);
+				    if (String.IsNullOrWhiteSpace(receiver))
+				    {
+					    await logService.LogWarning(logger, LogScopes.RunBody, communication.LogSettings, $"Could not get receiver from data for communication with ID '{communicationSetting.Id}'. Skipped line: {JsonConvert.SerializeObject(item)}", configurationServiceName, communication.TimeId, communication.Order);
+					    continue;
+				    }
+
+				    receivers.Add(receiver, item);
+			    }
+		    }
+		    else if (communicationSetting.ReceiversList.Any())
+		    {
+			    foreach (var receiver in communicationSetting.ReceiversList)
+			    {
+				    receivers.Add(receiver, null);
+			    }
+		    }
+
+		    if (!receivers.Any())
+		    {
+			    await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, $"There are no receivers for the communication with ID communication. No communication has been generated.", configurationServiceName, communication.TimeId, communication.Order);
+			    continue;
+		    }
+
+		    // Generate communication for each receiver.
+		    foreach (var receiver in receivers)
+		    {
+			    var subject = contentSettings.Subject;
+			    var content = contentSettings.Content;
+
+			    var dataSelectorSettings = new DataSelectorRequestModel
+			    {
+				    DataSelectorId = communicationSetting.ContentDataSelectorId,
+				    QueryId = communicationSetting.ContentQueryId.ToString().EncryptWithAesWithSalt(withDateTime: true)
+			    };
+
+			    if (!String.IsNullOrWhiteSpace(subject))
+			    {
+				    if (receiver.Value != null)
+				    {
+					    subject = stringReplacementsService.DoReplacements(subject, receiver.Value);
+				    }
+
+				    // Replace content data selector or query for each receiver.
+				    if (communicationSetting.ContentDataSelectorId > 0 || communicationSetting.ContentQueryId > 0)
+				    {
+					    dataSelectorSettings.OutputTemplate = subject;
+					    var (result, _, _) = await dataSelectorsService.ToHtmlAsync(dataSelectorSettings);
+					    if (!String.IsNullOrWhiteSpace(result))
+					    {
+						    subject = result;
+					    }
+				    }
+			    }
+
+			    if (!String.IsNullOrWhiteSpace(content))
+			    {
+				    if (receiver.Value != null)
+				    {
+					    content = stringReplacementsService.DoReplacements(content, receiver.Value);
+				    }
+
+				    // Replace content data selector or query for each receiver.
+				    if (communicationSetting.ContentDataSelectorId > 0 || communicationSetting.ContentQueryId > 0)
+				    {
+					    dataSelectorSettings.OutputTemplate = content;
+					    var (result, _, _) = await dataSelectorsService.ToHtmlAsync(dataSelectorSettings);
+					    if (!String.IsNullOrWhiteSpace(result))
+					    {
+						    content = result;
+					    }
+				    }
+			    }
+
+			    switch (communication.Type)
+			    {
+				    case CommunicationTypes.Email:
+					    await gclCommunicationsService.SendEmailAsync(receiver.Key, subject, content);
+					    break;
+				    case CommunicationTypes.Sms:
+					    await gclCommunicationsService.SendSmsAsync(receiver.Key, content);
+					    break;
+				    case CommunicationTypes.WhatsApp:
+					    throw new NotImplementedException();
+				    default:
+					    throw new ArgumentOutOfRangeException(nameof(communication.Type), communication.Type.ToString());
+			    }
+		    }
+
+		    lastProcessed.DateTime = DateTime.Now;
+		    databaseConnection.AddParameter("id", communicationSetting.Id);
+		    databaseConnection.AddParameter("lastProcessed", JsonConvert.SerializeObject(communicationSetting.LastProcessed, Formatting.Indented));
+		    await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserCommunication} SET last_processed = ?lastProcessed WHERE id = ?id");
+	    }
     }
 
     /// <summary>

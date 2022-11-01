@@ -102,7 +102,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
         var gclCommunicationsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<GclCommunicationsService>>();
 
         var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, null, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
-        var gclCommunicationsService = new GclCommunicationsService(gclSettings, gclCommunicationsServiceLogger, wiserItemsService, databaseConnection);
+        var gclCommunicationsService = new GclCommunicationsService(gclSettings, gclCommunicationsServiceLogger, wiserItemsService, databaseConnection, databaseHelpersService);
 
         var successfulImports = 0;
         var importsWithWarnings = 0;
