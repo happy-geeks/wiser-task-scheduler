@@ -39,7 +39,7 @@ namespace AutoImportServiceCore.Modules.Wiser.Services
             wiserSettings = aisSettings.Value.Wiser;
             this.logService = logService;
             this.logger = logger;
-            logSettings = wiserSettings.LogSettings ?? new LogSettings();
+            logSettings = wiserSettings?.LogSettings ?? new LogSettings();
 
             accessToken = "";
             accessTokenExpireTime = DateTime.MinValue;

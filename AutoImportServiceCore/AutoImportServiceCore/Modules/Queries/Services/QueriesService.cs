@@ -54,6 +54,9 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             var query = (QueryModel)action;
             await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
             databaseConnection.ClearParameters();
+            await databaseConnection.EnsureOpenConnectionForWritingAsync();
+            await databaseConnection.EnsureOpenConnectionForReadingAsync();
+            databaseConnection.SetCommandTimeout(query.Timeout);
 
             // Enforce the set character set and collation that is used during the execution of this action.
             databaseConnection.AddParameter("characterSet", query.CharacterEncoding.CharacterSet);
@@ -147,7 +150,14 @@ namespace AutoImportServiceCore.Modules.Queries.Services
             databaseConnection.ClearParameters();
             foreach (var parameter in parameters)
             {
-                databaseConnection.AddParameter(parameter.Key, parameter.Value);
+                if (parameter.Value == null || parameter.Value.Equals("DBNull", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    databaseConnection.AddParameter(parameter.Key, DBNull.Value);
+                }
+                else
+                {
+                    databaseConnection.AddParameter(parameter.Key, parameter.Value);
+                }
             }
 
             var dataTable = await databaseConnection.GetAsync(queryString, cleanUp: lastQuery);

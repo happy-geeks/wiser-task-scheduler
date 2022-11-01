@@ -151,7 +151,25 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <returns></returns>
         public static string GetValue(string key, List<int> rows, JObject usingResultSet, bool htmlEncode)
         {
-            var value = (string)ResultSetHelper.GetCorrectObject<JValue>(key, rows, usingResultSet);
+            var keySplit = key.Split('?');
+            var defaultValue = keySplit.Length == 2 ? keySplit[1] : null;
+            
+            string value;
+
+            try
+            {
+                var result = ResultSetHelper.GetCorrectObject<JToken>(keySplit[0], rows, usingResultSet);
+                value = result?.GetType() == typeof(JValue) ? (string) result : result?.ToString();
+            }
+            catch (Exception)
+            {
+                if (defaultValue == null)
+                {
+                    throw;
+                }
+
+                value = defaultValue;
+            }
 
             if (htmlEncode)
             {
