@@ -158,8 +158,6 @@ namespace AutoImportServiceCore.Core.Services
                 var configurationStopTasks = StopConfiguration(activeConfiguration.Key);
                 await WaitTillConfigurationsStoppedAsync(configurationStopTasks);
                 activeConfigurations.TryRemove(new KeyValuePair<string, ActiveConfigurationModel>(activeConfiguration.Key, activeConfigurations[activeConfiguration.Key]));
-                
-                // TODO remove service from database.
             }
         }
 
@@ -186,8 +184,6 @@ namespace AutoImportServiceCore.Core.Services
             {
                 configurationStopTasks.Add(worker.Value.StopAsync(cancellationToken));
             }
-            
-            // TODO Set service on stopped.
 
             return configurationStopTasks;
         }
