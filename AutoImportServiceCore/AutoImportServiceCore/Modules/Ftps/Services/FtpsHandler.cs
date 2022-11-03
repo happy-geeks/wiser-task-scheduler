@@ -24,9 +24,10 @@ public class FtpsHandler : IFtpHandler
     }
 
     /// <inheritdoc />
-    public async Task CloseConnectionAsync()
+    public Task CloseConnectionAsync()
     {
         client.Dispose();
+        return Task.CompletedTask;
     }
 
     public async Task<bool> UploadAsync(FtpModel ftpAction, string uploadPath, string fromPath)

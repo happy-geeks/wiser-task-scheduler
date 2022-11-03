@@ -1,8 +1,11 @@
 ﻿using System;
 using System.IO;
+using System.Text;
 using System.Threading.Tasks;
+using AutoImportServiceCore.Core.Helpers;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
+using AutoImportServiceCore.Modules.Body.Interfaces;
 using AutoImportServiceCore.Modules.Ftps.Enums;
 using AutoImportServiceCore.Modules.Ftps.Interfaces;
 using AutoImportServiceCore.Modules.Ftps.Models;
@@ -13,6 +16,13 @@ namespace AutoImportServiceCore.Modules.Ftps.Services;
 
 public class FtpsService : IFtpsService, IActionsService, IScopedService
 {
+    private readonly IBodyService bodyService;
+
+    public FtpsService(IBodyService bodyService)
+    {
+        this.bodyService = bodyService;
+    }
+    
     /// <inheritdoc />
     public async Task Initialize(ConfigurationModel configuration)
     {
@@ -50,8 +60,9 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
                 if (String.IsNullOrWhiteSpace(ftpAction.From))
                 {
                     // TODO use Body.
-                    throw new NotImplementedException();
-                    fileUploaded = await ftpHandler.UploadAsync(ftpAction, toPath, fileBytes);
+
+                    var body = bodyService.GenerateBody(ftpAction.Body, ReplacementHelper.EmptyRows, resultSets);
+                    fileUploaded = await ftpHandler.UploadAsync(ftpAction, toPath, Encoding.UTF8.GetBytes(body));
                 }
                 else
                 {
@@ -68,7 +79,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
         }
 
         await ftpHandler.CloseConnectionAsync();
-        
-        throw new NotImplementedException();
+
+        return null;
     }
 }
