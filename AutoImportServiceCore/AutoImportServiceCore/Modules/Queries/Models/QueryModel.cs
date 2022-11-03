@@ -16,6 +16,11 @@ namespace AutoImportServiceCore.Modules.Queries.Models
         [Required]
         public string Query { get; set; }
 
+        /// <summary>
+        /// Gets or sets the seconds the query has before timeout.
+        /// </summary>
+        public int Timeout { get; set; } = 30;
+
         public CharacterEncodingModel CharacterEncoding { get; set; } = new CharacterEncodingModel();
     }
 }

@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using AutoImportServiceCore.Core.Enums;
 using AutoImportServiceCore.Core.Interfaces;
 using AutoImportServiceCore.Core.Models;
+using AutoImportServiceCore.Core.Models.Cleanup;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
@@ -90,7 +91,7 @@ namespace AutoImportServiceCore.Core.Services
         }
 
         /// <summary>
-        /// Cleanup logs in the database older than the set number of days in the given folders.
+        /// Cleanup logs in the database older than the set number of days in the AIS logs.
         /// </summary>
         private async Task CleanupDatabaseLogsAsync()
         {

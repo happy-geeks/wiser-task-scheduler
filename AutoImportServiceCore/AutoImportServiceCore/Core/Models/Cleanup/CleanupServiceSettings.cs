@@ -2,7 +2,7 @@
 using AutoImportServiceCore.Modules.RunSchemes.Enums;
 using AutoImportServiceCore.Modules.RunSchemes.Models;
 
-namespace AutoImportServiceCore.Core.Models
+namespace AutoImportServiceCore.Core.Models.Cleanup
 {
     public class CleanupServiceSettings
     {

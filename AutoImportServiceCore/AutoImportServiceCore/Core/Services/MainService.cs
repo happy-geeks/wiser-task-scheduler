@@ -95,7 +95,7 @@ namespace AutoImportServiceCore.Core.Services
                     WorkerPerTimeId = new ConcurrentDictionary<int, ConfigurationsWorker>()
                 });
                 
-                foreach (var runScheme in configuration.RunSchemes)
+                foreach (var runScheme in configuration.GetAllRunSchemes())
                 {
                     runScheme.LogSettings ??= configuration.LogSettings ?? LogSettings;
 

@@ -7,7 +7,7 @@ using AutoImportServiceCore.Modules.Body.Models;
 namespace AutoImportServiceCore.Modules.HttpApis.Models
 {
     /// <summary>
-    /// A model for a HTTP API.
+    /// A model for an HTTP API.
     /// </summary>
     [XmlType("HttpApi")]
     public class HttpApiModel : ActionModel
@@ -51,5 +51,11 @@ namespace AutoImportServiceCore.Modules.HttpApis.Models
         /// Gets or sets the body to send with the request.
         /// </summary>
         public BodyModel Body { get; set; }
+
+        /// <summary>
+        /// Gets or sets the expected content type. This will force the result to be cast to this object.
+        /// Set to null or an empty string to use the Content-Type header of the result (if there is one). 
+        /// </summary>
+        public string ResultContentType { get; set; }
     }
 }
