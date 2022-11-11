@@ -617,8 +617,6 @@ WHERE
 	        AttemptCount = row.Field<int>("attempt_count"),
 	        LastAttempt = row.Field<DateTime?>("last_attempt")
         };
-        
-        //TODO attachments
 
         return singleCommunication;
     }
