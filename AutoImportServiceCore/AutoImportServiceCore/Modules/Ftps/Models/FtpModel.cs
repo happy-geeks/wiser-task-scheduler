@@ -14,10 +14,13 @@ public class FtpModel : ActionModel
     public FtpTypes Type { get; set; } = FtpTypes.Ftps;
 
     /// <summary>
-    /// Gets or sets if the FTP is used for upload or download.
+    /// Gets or sets the action that needs to be performed.
     /// </summary>
     public FtpActionTypes Action { get; set; } = FtpActionTypes.Download;
 
+    /// <summary>
+    /// Gets or sets the encryption mode.
+    /// </summary>
     public EncryptionModes EncryptionMode { get; set; } = EncryptionModes.Auto;
 
     /// <summary>

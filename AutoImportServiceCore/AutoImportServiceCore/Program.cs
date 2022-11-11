@@ -5,6 +5,7 @@ using AutoImportServiceCore.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using AutoImportServiceCore.Core.Workers;
+using AutoImportServiceCore.Modules.Ftps.Services;
 using GeeksCoreLibrary.Components.Account.Interfaces;
 using GeeksCoreLibrary.Components.Account.Services;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
@@ -83,6 +84,8 @@ namespace AutoImportServiceCore
         private static void ConfigureAisServices(IServiceCollection services)
         {
             services.AddScoped<ConfigurationsWorker>();
+            services.AddScoped<FtpsHandler>();
+            
             services.AddScoped<IDatabaseConnection, MySqlDatabaseConnection>();
             services.AddScoped<IHttpContextAccessor, HttpContextAccessor>();
             services.AddScoped<IObjectsService, ObjectsService>();

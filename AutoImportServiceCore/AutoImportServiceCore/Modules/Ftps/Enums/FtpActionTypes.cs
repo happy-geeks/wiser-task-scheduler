@@ -3,5 +3,7 @@
 public enum FtpActionTypes
 {
     Upload,
-    Download
+    Download,
+    FilesInDirectory,
+    Delete
 }
