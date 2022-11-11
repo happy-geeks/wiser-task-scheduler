@@ -97,7 +97,7 @@ namespace AutoImportServiceCore.Core.Workers
             }
             catch (Exception e)
             {
-                await logService.LogError(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} stopped with exception {e}", Name, RunScheme.TimeId);
+                await logService.LogCritical(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} stopped with exception {e}", Name, RunScheme.TimeId);
             }
         }
 

@@ -68,30 +68,47 @@ namespace AutoImportServiceCore.Core.Services
                 case LogScopes.RunStartAndStop when logSettings.LogRunStartAndStop || logLevel > LogLevel.Information:
                 case LogScopes.RunBody when logSettings.LogRunBody || logLevel > LogLevel.Information:
                 {
-                    using var scope = serviceProvider.CreateScope();
-                    using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
-
-                    // Update log table if it has not already been done since launch. The table definitions can only change when the AIS restarts with a new update.
-                    if (!updatedLogTable)
+                    try
                     {
-                        var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
-                        await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.AisLogs});
-                        updatedLogTable = true;
-                    }
-                    
-                    logger.Log(logLevel, message);
+                        // Try writing the log to the database.
+                        try
+                        {
+                            using var scope = serviceProvider.CreateScope();
+                            using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
-                    databaseConnection.ClearParameters();
-                    databaseConnection.AddParameter("message", message);
-                    databaseConnection.AddParameter("level", logLevel.ToString());
-                    databaseConnection.AddParameter("scope", logScope.ToString());
-                    databaseConnection.AddParameter("source", typeof(T).Name);
-                    databaseConnection.AddParameter("configuration", configurationName);
-                    databaseConnection.AddParameter("timeId", timeId);
-                    databaseConnection.AddParameter("order", order);
-                    databaseConnection.AddParameter("addedOn", DateTime.Now);
-                    await databaseConnection.ExecuteAsync(@$"INSERT INTO {WiserTableNames.AisLogs} (message, level, scope, source, configuration, time_id, `order`, added_on)
+                            // Update log table if it has not already been done since launch. The table definitions can only change when the AIS restarts with a new update.
+                            if (!updatedLogTable)
+                            {
+                                var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+                                await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.AisLogs});
+                                updatedLogTable = true;
+                            }
+
+                            databaseConnection.ClearParameters();
+                            databaseConnection.AddParameter("message", message);
+                            databaseConnection.AddParameter("level", logLevel.ToString());
+                            databaseConnection.AddParameter("scope", logScope.ToString());
+                            databaseConnection.AddParameter("source", typeof(T).Name);
+                            databaseConnection.AddParameter("configuration", configurationName);
+                            databaseConnection.AddParameter("timeId", timeId);
+                            databaseConnection.AddParameter("order", order);
+                            databaseConnection.AddParameter("addedOn", DateTime.Now);
+                            await databaseConnection.ExecuteAsync(@$"INSERT INTO {WiserTableNames.AisLogs} (message, level, scope, source, configuration, time_id, `order`, added_on)
                                                                     VALUES(?message, ?level, ?scope, ?source, ?configuration, ?timeId, ?order, ?addedOn)");
+                        }
+                        catch (Exception e)
+                        {
+                            // If writing to the database fails log its error.
+                            logger.Log(logLevel, $"Failed to write log to database due to exception: ${e}");
+                        }
+
+                        logger.Log(logLevel, message);
+                    }
+                    catch
+                    {
+                        // If writing to the log file fails ignore it. We can't write it somewhere else and the application needs to continue.
+                    }
+
                     break;
                 }
 
