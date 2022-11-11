@@ -8,7 +8,6 @@ using AutoUpdater.Models;
 using GeeksCoreLibrary.Modules.Communication.Models;
 using HelperLibrary;
 using Microsoft.Extensions.Options;
-using Serilog;
 
 namespace AutoUpdater.Services;
 

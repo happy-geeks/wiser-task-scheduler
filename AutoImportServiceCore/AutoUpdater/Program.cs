@@ -18,6 +18,10 @@ using Microsoft.AspNetCore.Http;
 using Serilog;
 
 IHost host = Host.CreateDefaultBuilder(args)
+    .UseWindowsService((options) =>
+    {
+        options.ServiceName = "WTS Auto Updater";
+    })
     .ConfigureAppConfiguration((hostingContext, config) =>
     {
         config.SetBasePath(AppContext.BaseDirectory);
@@ -39,7 +43,7 @@ IHost host = Host.CreateDefaultBuilder(args)
             .ReadFrom.Configuration(hostContext.Configuration)
             .CreateLogger();
         services.AddLogging(builder => { builder.AddSerilog(); });
-        
+
         services.Configure<UpdateSettings>(hostContext.Configuration.GetSection("Updater"));
         services.AddHostedService<UpdateWorker>();
 

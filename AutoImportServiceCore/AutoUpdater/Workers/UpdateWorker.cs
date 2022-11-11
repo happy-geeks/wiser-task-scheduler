@@ -11,10 +11,14 @@ public class UpdateWorker : BackgroundService
     {
         this.updateService = updateService;
         this.logger = logger;
+        
+        logger.LogInformation("Auto Updater started.");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        logger.LogInformation("Execution has started.");
+        
         while (!stoppingToken.IsCancellationRequested)
         {
             await Task.Delay(DateTime.Now.Date.AddDays(1) - DateTime.Now, stoppingToken);
