@@ -26,6 +26,7 @@ namespace AutoImportServiceCore.Core.Services
         private readonly Dictionary<string, IActionsService> actionsServices;
 
         private string configurationServiceName;
+        private int timeId;
 
         /// <inheritdoc />
         public LogSettings LogSettings { get; set; }
@@ -53,6 +54,7 @@ namespace AutoImportServiceCore.Core.Services
         public void ExtractActionsFromConfiguration(int timeId, ConfigurationModel configuration)
         {
             configurationServiceName = configuration.ServiceName;
+            this.timeId = timeId;
             var allActions = GetAllActionsFromConfiguration(configuration);
 
             foreach (ActionModel action in allActions.Where(action => action.TimeId == timeId))
@@ -161,19 +163,26 @@ namespace AutoImportServiceCore.Core.Services
         {
             var resultSets = new JObject();
 
-            foreach (var action in actions)
+            try
             {
-                if (SkipAction(resultSets, action.Value))
+                foreach (var action in actions)
                 {
-                    continue;
-                }
+                    if (await SkipAction(resultSets, action.Value))
+                    {
+                        continue;
+                    }
 
-                var resultSet = await actionsServices[action.Value.GetType().ToString()].Execute(action.Value, resultSets, configurationServiceName);
+                    var resultSet = await actionsServices[action.Value.GetType().ToString()].Execute(action.Value, resultSets, configurationServiceName);
 
-                if (!String.IsNullOrWhiteSpace(action.Value.ResultSetName))
-                {
-                    resultSets.Add(action.Value.ResultSetName, resultSet);
+                    if (!String.IsNullOrWhiteSpace(action.Value.ResultSetName))
+                    {
+                        resultSets.Add(action.Value.ResultSetName, resultSet);
+                    }
                 }
+            }
+            catch (Exception e)
+            {
+                await logService.LogCritical(logger, LogScopes.StartAndStop, LogSettings, $"Aborted {configurationServiceName}, will try again next time. Exception {e}", configurationServiceName, timeId);
             }
         }
 
@@ -183,14 +192,22 @@ namespace AutoImportServiceCore.Core.Services
         /// <param name="resultSets">The result sets of the previous actions within the run to reference.</param>
         /// <param name="action">The action to perform the check on.</param>
         /// <returns></returns>
-        private bool SkipAction(JObject resultSets, ActionModel action)
+        private async Task<bool> SkipAction(JObject resultSets, ActionModel action)
         {
             if (!String.IsNullOrWhiteSpace(action.OnlyWithStatusCode))
             {
                 var parts = action.OnlyWithStatusCode.Split(",");
 
-                if ((string)ResultSetHelper.GetCorrectObject<JObject>(parts[0], ReplacementHelper.EmptyRows, resultSets)["StatusCode"] != parts[1])
+                try
                 {
+                    if ((string)ResultSetHelper.GetCorrectObject<JObject>($"{parts[0]}", ReplacementHelper.EmptyRows, resultSets)["StatusCode"] != parts[1])
+                    {
+                        return true;
+                    }
+                }
+                catch (Exception e)
+                {
+                    await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to validate status code, skipping action. Exception: {e}", configurationServiceName, action.TimeId, action.Order);
                     return true;
                 }
             }
@@ -199,8 +216,16 @@ namespace AutoImportServiceCore.Core.Services
             {
                 var parts = action.OnlyWithSuccessState.Split(",");
 
-                if ((string) ResultSetHelper.GetCorrectObject<JObject>(parts[0], ReplacementHelper.EmptyRows, resultSets)["Success"] != parts[1])
+                try
                 {
+                    if ((string) ResultSetHelper.GetCorrectObject<JObject>($"{parts[0]}", ReplacementHelper.EmptyRows, resultSets)["Success"] != parts[1])
+                    {
+                        return true;
+                    }
+                }
+                catch (Exception e)
+                {
+                    await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to validate action success, skipping action. Exception: {e}", configurationServiceName, action.TimeId, action.Order);
                     return true;
                 }
             }

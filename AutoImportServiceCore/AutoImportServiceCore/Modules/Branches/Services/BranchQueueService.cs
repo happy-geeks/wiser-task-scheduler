@@ -410,8 +410,25 @@ JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id
                         continue;
                     }
 
+                    // Get all columns that are not generated. We need to do this to support document store tables.
+                    query = @"SELECT COLUMN_NAME
+FROM INFORMATION_SCHEMA.COLUMNS 
+WHERE TABLE_NAME = ?tableName
+AND TABLE_SCHEMA = ?currentSchema
+AND EXTRA NOT LIKE '%GENERATED'";
+                    databaseConnection.AddParameter("tableName", tableName);
+                    var columnsDataTable = await databaseConnection.GetAsync(query);
+                    if (columnsDataTable.Rows.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var columns = columnsDataTable.Rows.Cast<DataRow>().Select(row => $"`{row.Field<string>("COLUMN_NAME")}`").ToList();
+
                     // For all other tables, always copy everything to the new branch.
-                    await databaseConnection.ExecuteAsync($"INSERT INTO `{branchDatabase}`.`{tableName}` SELECT * FROM `{originalDatabase}`.`{tableName}`");
+                    query = $@"INSERT INTO `{branchDatabase}`.`{tableName}` ({String.Join(", ", columns)})
+SELECT {String.Join(", ", columns)} FROM `{originalDatabase}`.`{tableName}`";
+                    await databaseConnection.ExecuteAsync(query);
                 }
                 
                 // Add triggers (and stored procedures) to the new database, after inserting all data, so that the wiser_history table will still be empty.
