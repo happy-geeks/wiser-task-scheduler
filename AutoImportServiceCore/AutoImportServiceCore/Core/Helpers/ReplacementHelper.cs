@@ -50,7 +50,7 @@ namespace AutoImportServiceCore.Core.Helpers
                     var usingResultSetArray = ResultSetHelper.GetCorrectObject<JArray>(keyToArray.ToString(), emptyRows, usingResultSet);
                     for (var i = 0; i < usingResultSetArray.Count; i++)
                     {
-                        values.Add(GetValue(key.Substring(lastKeyIndex + 1), new List<int>() {i}, (JObject)usingResultSetArray[i], htmlEncode));
+                        values.Add(GetValue(key.Substring(lastKeyIndex + 1), new List<int>() {i}, (JObject) usingResultSetArray[i], htmlEncode));
                     }
 
                     if (insertValues)
@@ -81,8 +81,18 @@ namespace AutoImportServiceCore.Core.Helpers
                 }
                 else
                 {
-                    var parameterName = DatabaseHelpers.CreateValidParameterName(key);
-                    result = result.Replace($"[{{{key}}}]", $"?{parameterName}");
+                    var value = GetValue(key, emptyRows, usingResultSet, htmlEncode) ?? "";
+                    if (insertValues)
+                    {
+                        result = result.Replace($"[{{{key}}}]", value);
+                    }
+                    else
+                    {
+                        var parameterName = DatabaseHelpers.CreateValidParameterName(key);
+                        result = result.Replace($"[{{{key}}}]", $"?{parameterName}");
+                        insertedParameters.Add(new KeyValuePair<string, string>(parameterName, value));
+                    }
+                    
                     parameterKeys.Add(key);
                 }
             }
