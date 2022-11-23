@@ -16,7 +16,7 @@ namespace AutoImportServiceCore.Core.Helpers
         /// <returns></returns>
         public static T GetCorrectObject<T>(string key, List<int> rows, JObject usingResultSet) where T : JToken
         {
-            if (key == "")
+            if (String.IsNullOrWhiteSpace(key) || usingResultSet == null)
             {
                 return usingResultSet as T;
             }
@@ -28,12 +28,12 @@ namespace AutoImportServiceCore.Core.Helpers
             {
                 if (!key.EndsWith(']'))
                 {
-                    return (T) usingResultSet[key];
+                    return usingResultSet[key] as T;
                 }
 
                 var arrayKey = key.Substring(0, key.IndexOf('['));
                 var indexKey = GetIndex(keyParts, rows);
-                return (T) usingResultSet[arrayKey][indexKey];
+                return usingResultSet[arrayKey][indexKey] as T;
             }
 
             var remainingKey = key.Substring(key.IndexOf(".") + 1);
@@ -41,21 +41,46 @@ namespace AutoImportServiceCore.Core.Helpers
             // Object to step into is not an array.
             if (!keyParts[0].EndsWith("]"))
             {
-                return GetCorrectObject<T>(remainingKey, rows, (JObject)usingResultSet[keyParts[0]]);
+                switch (usingResultSet[keyParts[0]])
+                {
+                    case JValue valueAsJValue:
+                        return valueAsJValue as T;
+                    case JObject valueAsJObject:
+                        return GetCorrectObject<T>(remainingKey, rows, valueAsJObject);
+                }
             }
             
             var index = GetIndex(keyParts, rows);
-            return GetCorrectObject<T>(remainingKey, rows, (JObject)((JArray)usingResultSet[keyParts[0].Substring(0, keyParts[0].IndexOf('['))])[index]);
+            var bracketIndexOf = keyParts[0].IndexOf('[');
+            var firstPartKey = keyParts[0];
+            if (bracketIndexOf > -1)
+            {
+                firstPartKey = firstPartKey[..bracketIndexOf];
+            }
+
+            if (usingResultSet[firstPartKey] is not JArray resultSetArray || index < 0 || index >= resultSetArray.Count)
+            {
+                return null;
+            }
+
+            var resultObject = resultSetArray[index] as JObject;
+
+            return GetCorrectObject<T>(remainingKey, rows, resultObject);
         }
 
         private static int GetIndex(string[] keyParts, List<int> rows)
         {
             var indexLetter = keyParts[0][keyParts[0].Length - 2];
             var index = 0;
+            
             // If an index letter is used get the correct value based on letter, starting from 'i'.
-            if (char.IsLetter(indexLetter))
+            if (Char.IsLetter(indexLetter))
             {
-                index = rows[(int)indexLetter - 105];
+                var rowIndex = (int) indexLetter - 105;
+                if (rowIndex > 0 && rowIndex < rows.Count)
+                {
+                    index = rows[rowIndex];
+                }
             }
             // If a specific value is used for the array index use that instead.
             else
