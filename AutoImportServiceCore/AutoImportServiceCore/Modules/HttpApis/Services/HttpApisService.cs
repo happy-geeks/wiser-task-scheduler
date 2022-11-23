@@ -239,6 +239,11 @@ namespace AutoImportServiceCore.Modules.HttpApis.Services
 
             // Always add the body as plain text.
             resultSet.Add("BodyPlainText", responseBody);
+            
+            
+            var useResultSetKeyParts = useResultSet.Split('.');
+            var usedResultSet = ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? useResultSetKeyParts[0] : useResultSet, ReplacementHelper.EmptyRows, resultSets);
+            resultSet.Add("UsedResultSet", usedResultSet);
 
             await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Status: {resultSet["StatusCode"]}, Result body:\n{responseBody}", configurationServiceName, httpApi.TimeId, httpApi.Order);
 
