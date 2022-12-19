@@ -162,11 +162,14 @@ namespace WiserTaskScheduler.Core.Services
         public async Task ExecuteAsync()
         {
             var resultSets = new JObject();
+            var currentOrder = 0;
 
             try
             {
                 foreach (var action in actions)
                 {
+                    currentOrder = action.Value.Order;
+                    
                     if (await SkipAction(resultSets, action.Value))
                     {
                         continue;
@@ -182,7 +185,7 @@ namespace WiserTaskScheduler.Core.Services
             }
             catch (Exception e)
             {
-                await logService.LogCritical(logger, LogScopes.StartAndStop, LogSettings, $"Aborted {configurationServiceName}, will try again next time. Exception {e}", configurationServiceName, timeId);
+                await logService.LogCritical(logger, LogScopes.StartAndStop, LogSettings, $"Aborted {configurationServiceName} due to exception in time ID '{timeId}' and order '{currentOrder}', will try again next time. Exception {e}", configurationServiceName, timeId, currentOrder);
             }
         }
 

@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using AutoImportServiceCore.Core.Models;
+using WiserTaskScheduler.Core.Models;
 using Newtonsoft.Json.Linq;
 
 namespace WiserTaskScheduler.Core.Helpers
@@ -34,7 +34,7 @@ namespace WiserTaskScheduler.Core.Helpers
                 {
                     if (!key.EndsWith(']'))
                     {
-                        return (T) usingResultSet[key];
+                        return usingResultSet[key] as T;
                     }
 
                     var arrayKey = key.Substring(0, key.IndexOf('['));
@@ -66,7 +66,9 @@ namespace WiserTaskScheduler.Core.Helpers
 
                 if (usingResultSet[firstPartKey] is not JArray resultSetArray || index < 0 || index >= resultSetArray.Count)
                 {
-                    return null;
+                    var fullKey = $"{processedKey}.{key}";
+                    fullKey = fullKey.StartsWith('.') ? fullKey.Substring(1) : fullKey;
+                    throw new ResultSetException($"Failed to get array from result set. The key being processed is '{fullKey}' at part '{currentPart}'. Already processed '{processedKey}'. If they key is correct but the value is not always present it is recommended to use a default value.");
                 }
 
                 var resultObject = resultSetArray[index] as JObject;
@@ -82,7 +84,7 @@ namespace WiserTaskScheduler.Core.Helpers
                 var fullKey = $"{processedKey}.{key}";
                 fullKey = fullKey.StartsWith('.') ? fullKey.Substring(1) : fullKey;
                 
-                throw new ResultSetException($"Something went wrong while processing the key in the result set. The key being processed is '{fullKey}' at part '{currentPart}'. Already processed '{processedKey}'.", e);
+                throw new ResultSetException($"Something went wrong while processing the key in the result set. The key being processed is '{fullKey}' at part '{currentPart}'. Already processed '{processedKey}'. If they key is correct but the value is not always present it is recommended to use a default value.", e);
             }
         }
 
