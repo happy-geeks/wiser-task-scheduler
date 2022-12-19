@@ -57,7 +57,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
     }
 
     /// <inheritdoc />
-    public Task Initialize(ConfigurationModel configuration)
+    public Task InitializeAsync(ConfigurationModel configuration)
     {
         connectionString = configuration.ConnectionString;
         return Task.CompletedTask;

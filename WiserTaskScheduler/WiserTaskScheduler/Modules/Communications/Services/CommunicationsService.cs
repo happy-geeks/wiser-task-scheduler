@@ -51,9 +51,10 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
     }
 
     /// <inheritdoc />
-    public async Task Initialize(ConfigurationModel configuration)
+    public Task InitializeAsync(ConfigurationModel configuration)
     {
 	    connectionString = configuration.ConnectionString;
+	    return Task.CompletedTask;
     }
 
     /// <inheritdoc />

@@ -40,9 +40,10 @@ namespace WiserTaskScheduler.Modules.Queries.Services
         }
 
         /// <inheritdoc />
-        public async Task Initialize(ConfigurationModel configuration)
+        public Task InitializeAsync(ConfigurationModel configuration)
         {
             connectionString = configuration.ConnectionString;
+            return Task.CompletedTask;
         }
 
         /// <inheritdoc />

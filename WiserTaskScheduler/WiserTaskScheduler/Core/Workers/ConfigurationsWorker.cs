@@ -32,14 +32,14 @@ namespace WiserTaskScheduler.Core.Workers
         /// <param name="configuration">The configuration to retrieve the correct information from.</param>
         /// <param name="name">The name of the worker.</param>
         /// <param name="runScheme">The run scheme of the worker.</param>
-        public void Initialize(ConfigurationModel configuration, string name, RunSchemeModel runScheme)
+        public async Task InitializeAsync(ConfigurationModel configuration, string name, RunSchemeModel runScheme)
         {
             Initialize(name, runScheme, runScheme.RunImmediately);
 
             configurationsService.Name = Name;
             configurationsService.LogSettings = RunScheme.LogSettings;
 
-            configurationsService.ExtractActionsFromConfiguration(RunScheme.TimeId, configuration);
+            await configurationsService.ExtractActionsFromConfigurationAsync(RunScheme.TimeId, configuration);
         }
 
         /// <inheritdoc />

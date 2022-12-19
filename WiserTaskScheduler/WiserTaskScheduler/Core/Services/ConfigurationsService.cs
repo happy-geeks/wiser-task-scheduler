@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using WiserTaskScheduler.Modules.RunSchemes.Models;
@@ -51,7 +52,7 @@ namespace WiserTaskScheduler.Core.Services
         }
 
         /// <inheritdoc />
-        public void ExtractActionsFromConfiguration(int timeId, ConfigurationModel configuration)
+        public async Task ExtractActionsFromConfigurationAsync(int timeId, ConfigurationModel configuration)
         {
             configurationServiceName = configuration.ServiceName;
             this.timeId = timeId;
@@ -65,12 +66,12 @@ namespace WiserTaskScheduler.Core.Services
                 if (!actionsServices.ContainsKey(action.GetType().ToString()))
                 {
                     var actionsService = actionsServiceFactory.GetActionsServiceForAction(action);
-                    actionsService.Initialize(configuration);
+                    await actionsService.InitializeAsync(configuration);
                     actionsServices.Add(action.GetType().ToString(), actionsService);
                 }
             }
 
-            logService.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"{Name} has {actions.Count} action(s).", configurationServiceName, timeId);
+            await logService.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"{Name} has {actions.Count} action(s).", configurationServiceName, timeId);
         }
 
         /// <summary>
@@ -121,7 +122,7 @@ namespace WiserTaskScheduler.Core.Services
         }
 
         /// <inheritdoc />
-        public bool IsValidConfiguration(ConfigurationModel configuration)
+        public async Task<bool> IsValidConfigurationAsync(ConfigurationModel configuration)
         {
             var conflicts = 0;
 
@@ -138,7 +139,7 @@ namespace WiserTaskScheduler.Core.Services
             if (duplicateTimeIds.Count > 0)
             {
                 conflicts++;
-                logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate run scheme time ids: {String.Join(", ", duplicateTimeIds)}", configuration.ServiceName);
+                await logService.LogError(logger, LogScopes.StartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate run scheme time ids: {String.Join(", ", duplicateTimeIds)}", configuration.ServiceName);
             }
 
             // Check for duplicate order in a single time id.
@@ -151,7 +152,7 @@ namespace WiserTaskScheduler.Core.Services
                 if (duplicateOrders.Count > 0)
                 {
                     conflicts++;
-                    logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate orders within run scheme {timeId}. Orders: {String.Join(", ", duplicateOrders)}", configuration.ServiceName, timeId);
+                    await logService.LogError(logger, LogScopes.StartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate orders within run scheme {timeId}. Orders: {String.Join(", ", duplicateOrders)}", configuration.ServiceName, timeId);
                 }
             }
 
@@ -163,24 +164,31 @@ namespace WiserTaskScheduler.Core.Services
         {
             var resultSets = new JObject();
             var currentOrder = 0;
+            var stopwatch = new Stopwatch();
 
             try
             {
                 foreach (var action in actions)
                 {
+                    stopwatch.Reset();
+                    
                     currentOrder = action.Value.Order;
                     
                     if (await SkipAction(resultSets, action.Value))
                     {
                         continue;
                     }
-
+                    
+                    stopwatch.Start();
                     var resultSet = await actionsServices[action.Value.GetType().ToString()].Execute(action.Value, resultSets, configurationServiceName);
 
                     if (!String.IsNullOrWhiteSpace(action.Value.ResultSetName))
                     {
                         resultSets.Add(action.Value.ResultSetName, resultSet);
                     }
+                    
+                    stopwatch.Stop();
+                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Action finished in {stopwatch.Elapsed}", configurationServiceName, timeId, action.Value.Order);
                 }
             }
             catch (Exception e)
@@ -203,8 +211,11 @@ namespace WiserTaskScheduler.Core.Services
 
                 try
                 {
-                    if ((string)ResultSetHelper.GetCorrectObject<JObject>($"{parts[0]}", ReplacementHelper.EmptyRows, resultSets)["StatusCode"] != parts[1])
+                    var statusCode = (string) ResultSetHelper.GetCorrectObject<JObject>($"{parts[0]}", ReplacementHelper.EmptyRows, resultSets)["StatusCode"];
+                    
+                    if (statusCode != parts[1])
                     {
+                        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Skipped action because status code was '{statusCode}'.", configurationServiceName, action.TimeId, action.Order);
                         return true;
                     }
                 }
@@ -221,8 +232,11 @@ namespace WiserTaskScheduler.Core.Services
 
                 try
                 {
-                    if ((string) ResultSetHelper.GetCorrectObject<JObject>($"{parts[0]}", ReplacementHelper.EmptyRows, resultSets)["Success"] != parts[1])
+                    var state = (string) ResultSetHelper.GetCorrectObject<JObject>($"{parts[0]}", ReplacementHelper.EmptyRows, resultSets)["Success"];
+                    
+                    if (state != parts[1])
                     {
+                        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Skipped action because success state was '{state}'.", configurationServiceName, action.TimeId, action.Order);
                         return true;
                     }
                 }

@@ -14,12 +14,18 @@ namespace WiserTaskScheduler.Core.Helpers
         /// <param name="key">The key, separated by comma, to the required object.</param>
         /// <param name="rows">The indexes/rows of the array, to be used if for example '[i]' is used in the key.</param>
         /// <param name="usingResultSet">The result set from where to start te search.</param>
+        /// <param name="processedKey"></param>
         /// <returns></returns>
         public static T GetCorrectObject<T>(string key, List<int> rows, JObject usingResultSet, string processedKey = "") where T : JToken
         {
-            if (String.IsNullOrWhiteSpace(key) || usingResultSet == null)
+            if (String.IsNullOrWhiteSpace(key))
             {
-                return usingResultSet[key] as T;
+                return usingResultSet as T;
+            }
+            
+            if (usingResultSet == null)
+            {
+                throw new ResultSetException($"Failed to get correct object because no result set was given. The key being processed is '{key}', already processed '{processedKey}'. If the key is correct but the value is not always present it is recommended to use a default value.");
             }
             
             var currentPart = "";
@@ -52,7 +58,7 @@ namespace WiserTaskScheduler.Core.Helpers
                         case JValue valueAsJValue:
                             return valueAsJValue as T;
                         case JObject valueAsJObject:
-                            return GetCorrectObject<T>(remainingKey, rows, valueAsJObject);
+                            return GetCorrectObject<T>(remainingKey, rows, valueAsJObject, $"{processedKey}.{currentPart}");
                     }
                 }
             
@@ -68,12 +74,12 @@ namespace WiserTaskScheduler.Core.Helpers
                 {
                     var fullKey = $"{processedKey}.{key}";
                     fullKey = fullKey.StartsWith('.') ? fullKey.Substring(1) : fullKey;
-                    throw new ResultSetException($"Failed to get array from result set. The key being processed is '{fullKey}' at part '{currentPart}'. Already processed '{processedKey}'. If they key is correct but the value is not always present it is recommended to use a default value.");
+                    throw new ResultSetException($"Failed to get array from result set. The key being processed is '{fullKey}' at part '{currentPart}'. Already processed '{processedKey}'. If the key is correct but the value is not always present it is recommended to use a default value.");
                 }
 
                 var resultObject = resultSetArray[index] as JObject;
 
-                return GetCorrectObject<T>(remainingKey, rows, resultObject);
+                return GetCorrectObject<T>(remainingKey, rows, resultObject, $"{processedKey}.{currentPart}");
             }
             catch (ResultSetException)
             {
@@ -84,7 +90,7 @@ namespace WiserTaskScheduler.Core.Helpers
                 var fullKey = $"{processedKey}.{key}";
                 fullKey = fullKey.StartsWith('.') ? fullKey.Substring(1) : fullKey;
                 
-                throw new ResultSetException($"Something went wrong while processing the key in the result set. The key being processed is '{fullKey}' at part '{currentPart}'. Already processed '{processedKey}'. If they key is correct but the value is not always present it is recommended to use a default value.", e);
+                throw new ResultSetException($"Something went wrong while processing the key in the result set. The key being processed is '{fullKey}' at part '{currentPart}'. Already processed '{processedKey}'. If the key is correct but the value is not always present it is recommended to use a default value.", e);
             }
         }
 

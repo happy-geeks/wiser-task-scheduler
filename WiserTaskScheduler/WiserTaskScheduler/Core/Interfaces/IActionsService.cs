@@ -14,7 +14,7 @@ namespace WiserTaskScheduler.Core.Interfaces
         /// </summary>
         /// <param name="configuration">The configuration the service is based on.</param>
         /// <returns></returns>
-        Task Initialize(ConfigurationModel configuration);
+        Task InitializeAsync(ConfigurationModel configuration);
 
         /// <summary>
         /// Execute the action based on the type.

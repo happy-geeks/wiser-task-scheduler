@@ -166,7 +166,7 @@ namespace WiserTaskScheduler.Core.Services
             {
                 await configurationStopTasks[i];
 
-                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.", LogName);
+                await logService.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.", LogName);
             }
         }
 
@@ -211,7 +211,7 @@ namespace WiserTaskScheduler.Core.Services
                         continue;
                     }
 
-                    var configuration = DeserializeConfiguration(wiserConfiguration.EditorValue, wiserConfiguration.Name);
+                    var configuration = await DeserializeConfigurationAsync(wiserConfiguration.EditorValue, wiserConfiguration.Name);
 
                     if (configuration != null)
                     {
@@ -222,7 +222,7 @@ namespace WiserTaskScheduler.Core.Services
             }
             else
             {
-                var configuration = DeserializeConfiguration(await File.ReadAllTextAsync(localConfiguration), $"Local file {localConfiguration}");
+                var configuration = await DeserializeConfigurationAsync(await File.ReadAllTextAsync(localConfiguration), $"Local file {localConfiguration}");
 
                 if (configuration != null)
                 {
@@ -250,7 +250,7 @@ namespace WiserTaskScheduler.Core.Services
         /// <param name="serializedConfiguration">The serialized configuration.</param>
         /// <param name="configurationFileName">The name of the configuration, either the template name of the file path.</param>
         /// <returns></returns>
-        private ConfigurationModel DeserializeConfiguration(string serializedConfiguration, string configurationFileName)
+        private async Task<ConfigurationModel> DeserializeConfigurationAsync(string serializedConfiguration, string configurationFileName)
         {
             ConfigurationModel configuration;
 
@@ -266,7 +266,7 @@ namespace WiserTaskScheduler.Core.Services
             }
             else
             {
-                logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Configuration '{configurationFileName}' is not in supported format.", configurationFileName);
+                await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Configuration '{configurationFileName}' is not in supported format.", configurationFileName);
                 return null;
             }
 
@@ -275,12 +275,12 @@ namespace WiserTaskScheduler.Core.Services
             configurationsService.LogSettings = LogSettings;
 
             // Only add configurations to run when they are valid.
-            if (configurationsService.IsValidConfiguration(configuration))
+            if (await configurationsService.IsValidConfigurationAsync(configuration))
             {
                 return configuration;
             }
 
-            logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Did not start configuration {configuration.ServiceName} due to conflicts.", configurationFileName);
+            await logService.LogError(logger, LogScopes.StartAndStop, LogSettings, $"Did not start configuration {configuration.ServiceName} due to conflicts.", configurationFileName);
             return null;
         }
 
@@ -293,7 +293,7 @@ namespace WiserTaskScheduler.Core.Services
         {
             using var scope = serviceProvider.CreateScope();
             var worker = scope.ServiceProvider.GetRequiredService<ConfigurationsWorker>();
-            worker.Initialize(configuration, $"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme);
+            await worker.InitializeAsync(configuration, $"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme);
             activeConfigurations[configuration.ServiceName].WorkerPerTimeId.TryAdd(runScheme.TimeId, worker);
             await worker.StartAsync(new CancellationToken());
             await worker.ExecuteTask; // Keep scope alive until worker stops.

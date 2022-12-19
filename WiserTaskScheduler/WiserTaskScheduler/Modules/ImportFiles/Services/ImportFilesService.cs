@@ -26,7 +26,10 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
         }
 
         /// <inheritdoc />
-        public async Task Initialize(ConfigurationModel configuration) { }
+        public Task InitializeAsync(ConfigurationModel configuration)
+        {
+            return Task.CompletedTask;
+        }
 
         /// <inheritdoc />
         public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
