@@ -1,7 +1,7 @@
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Workers;
 using WiserTaskScheduler.Modules.RunSchemes.Interfaces;
-using AutoImportServiceCore.Modules.Wiser.Interfaces;
+using WiserTaskScheduler.Modules.Wiser.Interfaces;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.Logging;
 

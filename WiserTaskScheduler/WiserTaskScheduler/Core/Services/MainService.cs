@@ -123,7 +123,7 @@ namespace WiserTaskScheduler.Core.Services
                         }
                     }
                     
-                    await wiserDashboardService.UpdateServiceAsync(configuration.ServiceName, runScheme.TimeId, runScheme.Action, runScheme.Type.ToString().ToLower(), state: "active");
+                    await wiserDashboardService.UpdateServiceAsync(configuration.ServiceName, runScheme.TimeId, runScheme.Action, runScheme.Type.ToString().ToLower(), state: "active", templateId: configuration.TemplateId);
 
                     var thread = new Thread(() => StartConfigurationAsync(runScheme, configuration));
                     thread.Start();
@@ -243,6 +243,7 @@ namespace WiserTaskScheduler.Core.Services
 
                     if (configuration != null)
                     {
+                        configuration.TemplateId = wiserConfiguration.TemplateId;
                         configuration.Version = wiserConfiguration.Version;
                         configurations.Add(configuration);
                     }
@@ -254,6 +255,7 @@ namespace WiserTaskScheduler.Core.Services
 
                 if (configuration != null)
                 {
+                    configuration.TemplateId = 0;
                     configuration.Version = File.GetLastWriteTimeUtc(localConfiguration).Ticks;
                     configurations.Add(configuration);
                 }

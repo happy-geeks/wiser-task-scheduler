@@ -70,7 +70,7 @@ FROM {WiserTableNames.WtsServices}
     }
 
     /// <inheritdoc />
-    public async Task UpdateServiceAsync(string configuration, int timeId, string action = null, string scheme = null, DateTime? lastRun = null, DateTime? nextRun = null, TimeSpan? runTime = null, string state = null, bool? paused = null, bool? extraRun = null)
+    public async Task UpdateServiceAsync(string configuration, int timeId, string action = null, string scheme = null, DateTime? lastRun = null, DateTime? nextRun = null, TimeSpan? runTime = null, string state = null, bool? paused = null, bool? extraRun = null, int templateId = -1)
     {
         var querySetParts = new List<string>();
         var parameters = new Dictionary<string, object>()
@@ -132,6 +132,12 @@ FROM {WiserTableNames.WtsServices}
             return;
         }
 
+        if (templateId >= 0)
+        {
+            querySetParts.Add("template_id = ?templateId");
+            parameters.Add("templateId", templateId);
+        }
+
         var query = $"UPDATE {WiserTableNames.WtsServices} SET {String.Join(',', querySetParts)} WHERE configuration = ?configuration AND time_id = ?timeId";
         await ExecuteQueryAsync(query, parameters);
     }
@@ -175,7 +181,8 @@ FROM {WiserTableNames.WtsServices}
             LastRun = row.Field<DateTime?>("last_run"),
             NextRun = row.Field<DateTime?>("next_run"),
             RunTime = row.Field<double>("run_time"),
-            State = row.Field<string>("state")
+            State = row.Field<string>("state"),
+            TemplateId = row.Field<int>("template_id")
         };
     }
 
@@ -205,8 +212,7 @@ FROM {WiserTableNames.WtsServices}
 FROM {WiserTableNames.WtsLogs}
 WHERE added_on >= ?runStartTime
 AND configuration = ?configuration
-AND time_id = ?timeId
-AND is_test = 0");
+AND time_id = ?timeId");
 
         foreach (DataRow row in data.Rows)
         {
@@ -249,7 +255,7 @@ AND time_id = ?timeId");
         databaseConnection.AddParameter("timeId", timeId);
 
         var dataTable = await databaseConnection.GetAsync($@"SELECT state
-FROM {WiserTableNames.AisServices}
+FROM {WiserTableNames.WtsServices}
 WHERE configuration = ?configuration
 AND time_id = ?timeId");
         

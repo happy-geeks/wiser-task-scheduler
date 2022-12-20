@@ -26,6 +26,11 @@ namespace WiserTaskScheduler.Core.Models
         public string ServiceName { get; set; }
 
         /// <summary>
+        /// The ID of the template that holds this configuration in Wiser.
+        /// </summary>
+        public int TemplateId { get; set; }
+
+        /// <summary>
         /// Version will be automatically set, either to the template version or the ticks of the last write time for a local file.
         /// </summary>
         public long Version { get; set; }

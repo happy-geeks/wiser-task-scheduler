@@ -44,8 +44,9 @@ public interface IWiserDashboardService
     /// <param name="state">Optional: The current state of the service.</param>
     /// <param name="paused">Optional: The paused state of the service. Leave null to keep the current value.</param>
     /// <param name="extraRun">Optional: If the service need to be run an extra time. Leave null to keep the current value.</param>
+    /// <param name="templateId">Optional: The ID of the template that of the service</param>
     /// <returns></returns>
-    Task UpdateServiceAsync(string configuration, int timeId, string action = null, string scheme = null, DateTime? lastRun = null, DateTime? nextRun = null, TimeSpan? runTime = null, string state = null, bool? paused = null, bool? extraRun = null);
+    Task UpdateServiceAsync(string configuration, int timeId, string action = null, string scheme = null, DateTime? lastRun = null, DateTime? nextRun = null, TimeSpan? runTime = null, string state = null, bool? paused = null, bool? extraRun = null, int templateId = -1);
 
     /// <summary>
     /// Get the unique states that logs have been written to since a certain time for a run scheme.
