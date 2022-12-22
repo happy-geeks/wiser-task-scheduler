@@ -1,2 +1,2 @@
-# autoimportservice_core
-Auto import service in .NET Core.
+# Wiser Task Scheduler
+Wiser Task Scheduler in .NET Core.
