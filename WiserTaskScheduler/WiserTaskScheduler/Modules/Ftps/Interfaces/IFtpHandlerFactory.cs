@@ -1,6 +1,6 @@
-﻿using AutoImportServiceCore.Modules.Ftps.Enums;
+﻿using WiserTaskScheduler.Modules.Ftps.Enums;
 
-namespace AutoImportServiceCore.Modules.Ftps.Interfaces;
+namespace WiserTaskScheduler.Modules.Ftps.Interfaces;
 
 /// <summary>
 /// A factory to create the correct handler for the FTP.

@@ -1,9 +1,9 @@
 ﻿using System.Xml.Serialization;
-using AutoImportServiceCore.Core.Models;
-using AutoImportServiceCore.Modules.Body.Models;
-using AutoImportServiceCore.Modules.Ftps.Enums;
+using WiserTaskScheduler.Core.Models;
+using WiserTaskScheduler.Modules.Body.Models;
+using WiserTaskScheduler.Modules.Ftps.Enums;
 
-namespace AutoImportServiceCore.Modules.Ftps.Models;
+namespace WiserTaskScheduler.Modules.Ftps.Models;
 
 [XmlType("Ftp")]
 public class FtpModel : ActionModel

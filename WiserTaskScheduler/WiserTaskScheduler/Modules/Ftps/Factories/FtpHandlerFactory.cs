@@ -1,11 +1,11 @@
 ﻿using System;
-using AutoImportServiceCore.Modules.Ftps.Enums;
-using AutoImportServiceCore.Modules.Ftps.Interfaces;
-using AutoImportServiceCore.Modules.Ftps.Services;
+using WiserTaskScheduler.Modules.Ftps.Enums;
+using WiserTaskScheduler.Modules.Ftps.Interfaces;
+using WiserTaskScheduler.Modules.Ftps.Services;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace AutoImportServiceCore.Modules.Ftps.Factories;
+namespace WiserTaskScheduler.Modules.Ftps.Factories;
 
 public class FtpHandlerFactory : IFtpHandlerFactory, IScopedService
 {

@@ -1,4 +1,4 @@
-﻿namespace AutoImportServiceCore.Modules.Ftps.Enums;
+﻿namespace WiserTaskScheduler.Modules.Ftps.Enums;
 
 public enum FtpActionTypes
 {

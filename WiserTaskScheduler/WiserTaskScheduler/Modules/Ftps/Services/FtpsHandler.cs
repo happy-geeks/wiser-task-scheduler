@@ -2,16 +2,12 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using AutoImportServiceCore.Core.Enums;
-using AutoImportServiceCore.Core.Interfaces;
-using AutoImportServiceCore.Modules.Ftps.Extensions;
-using AutoImportServiceCore.Modules.Ftps.Interfaces;
-using AutoImportServiceCore.Modules.Ftps.Models;
+using WiserTaskScheduler.Modules.Ftps.Extensions;
+using WiserTaskScheduler.Modules.Ftps.Interfaces;
+using WiserTaskScheduler.Modules.Ftps.Models;
 using FluentFTP;
-using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
-using Microsoft.Extensions.Logging;
 
-namespace AutoImportServiceCore.Modules.Ftps.Services;
+namespace WiserTaskScheduler.Modules.Ftps.Services;
 
 public class FtpsHandler : IFtpHandler
 {

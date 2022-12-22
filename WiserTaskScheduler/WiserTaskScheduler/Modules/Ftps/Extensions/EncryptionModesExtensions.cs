@@ -1,8 +1,8 @@
 ﻿using System;
-using AutoImportServiceCore.Modules.Ftps.Enums;
+using WiserTaskScheduler.Modules.Ftps.Enums;
 using FluentFTP;
 
-namespace AutoImportServiceCore.Modules.Ftps.Extensions;
+namespace WiserTaskScheduler.Modules.Ftps.Extensions;
 
 public static class EncryptionModesExtensions
 {

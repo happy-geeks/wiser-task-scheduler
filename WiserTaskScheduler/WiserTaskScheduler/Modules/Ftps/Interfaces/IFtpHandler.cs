@@ -1,8 +1,8 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
-using AutoImportServiceCore.Modules.Ftps.Models;
+using WiserTaskScheduler.Modules.Ftps.Models;
 
-namespace AutoImportServiceCore.Modules.Ftps.Interfaces;
+namespace WiserTaskScheduler.Modules.Ftps.Interfaces;
 
 public interface IFtpHandler
 {

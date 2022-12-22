@@ -2,19 +2,19 @@
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
-using AutoImportServiceCore.Core.Enums;
-using AutoImportServiceCore.Core.Helpers;
-using AutoImportServiceCore.Core.Interfaces;
-using AutoImportServiceCore.Core.Models;
-using AutoImportServiceCore.Modules.Body.Interfaces;
-using AutoImportServiceCore.Modules.Ftps.Enums;
-using AutoImportServiceCore.Modules.Ftps.Interfaces;
-using AutoImportServiceCore.Modules.Ftps.Models;
+using WiserTaskScheduler.Core.Enums;
+using WiserTaskScheduler.Core.Helpers;
+using WiserTaskScheduler.Core.Interfaces;
+using WiserTaskScheduler.Core.Models;
+using WiserTaskScheduler.Modules.Body.Interfaces;
+using WiserTaskScheduler.Modules.Ftps.Enums;
+using WiserTaskScheduler.Modules.Ftps.Interfaces;
+using WiserTaskScheduler.Modules.Ftps.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
 
-namespace AutoImportServiceCore.Modules.Ftps.Services;
+namespace WiserTaskScheduler.Modules.Ftps.Services;
 
 public class FtpsService : IFtpsService, IActionsService, IScopedService
 {
@@ -32,9 +32,9 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
     }
     
     /// <inheritdoc />
-    public async Task Initialize(ConfigurationModel configuration)
+    public Task InitializeAsync(ConfigurationModel configuration)
     {
-        throw new NotImplementedException();
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
