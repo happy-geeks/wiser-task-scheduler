@@ -73,7 +73,7 @@ namespace WiserTaskScheduler.Core.Services
         {
             using var scope = serviceProvider.CreateScope();
             
-            // Update service table if it has not already been done since launch. The table definitions can only change when the AIS restarts with a new update.
+            // Update service table if it has not already been done since launch. The table definitions can only change when the WTS restarts with a new update.
             if (!updatedServiceTable)
             {
                 var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
@@ -348,7 +348,7 @@ namespace WiserTaskScheduler.Core.Services
                     continue;
                 }
 
-                // If the service is not normally running by this AIS we don't have the configuration for a single run so we skip it.
+                // If the service is not normally running by this WTS we don't have the configuration for a single run so we skip it.
                 if (!activeConfigurations.ContainsKey(service.Configuration) || !activeConfigurations[service.Configuration].WorkerPerTimeId.ContainsKey(service.TimeId))
                 {
                     continue;
