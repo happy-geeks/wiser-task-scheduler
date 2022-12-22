@@ -1,11 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using WiserTaskScheduler.Modules.Ftps.Extensions;
 using WiserTaskScheduler.Modules.Ftps.Interfaces;
 using WiserTaskScheduler.Modules.Ftps.Models;
 using FluentFTP;
+using FluentFTP.Helpers;
 
 namespace WiserTaskScheduler.Modules.Ftps.Services;
 
@@ -16,9 +18,10 @@ public class FtpsHandler : IFtpHandler
     /// <inheritdoc />
     public async Task OpenConnectionAsync(FtpModel ftpAction)
     {
-        client = new FtpClient(ftpAction.Host, ftpAction.User, ftpAction.Password);
+        client = new FtpClient(ftpAction.Host, ftpAction.Port, ftpAction.User, ftpAction.Password);
         client.EncryptionMode = ftpAction.EncryptionMode.ConvertToFtpsEncryptionMode();
         client.ValidateAnyCertificate = ftpAction.Host.StartsWith("localhost", StringComparison.OrdinalIgnoreCase);
+        client.DataConnectionType = ftpAction.UsePassive ? FtpDataConnectionType.AutoPassive : FtpDataConnectionType.AutoActive;
 
         await client.ConnectAsync();
     }
@@ -32,42 +35,52 @@ public class FtpsHandler : IFtpHandler
 
     public async Task<bool> UploadAsync(FtpModel ftpAction, string uploadPath, string fromPath)
     {
-        if (ftpAction.AllFilesInFolder)
+        if (!ftpAction.AllFilesInFolder)
         {
-            await client.UploadDirectoryAsync(fromPath, uploadPath, existsMode: FtpRemoteExists.Overwrite);
-            return true;
+            return (await client.UploadAsync(await File.ReadAllBytesAsync(fromPath), uploadPath, createRemoteDir: true)).IsSuccess();
         }
         
-        await client.UploadAsync(await File.ReadAllBytesAsync(fromPath), uploadPath, createRemoteDir: true);
-        return true;
+        var ftpResults = await client.UploadDirectoryAsync(fromPath, uploadPath, existsMode: FtpRemoteExists.Overwrite);
+        return ftpResults.Any(ftpResult => ftpResult.IsSuccess);
     }
 
     /// <inheritdoc />
     public async Task<bool> UploadAsync(FtpModel ftpAction, string uploadPath, byte[] fileBytes)
     {
-        await client.UploadAsync(fileBytes, uploadPath, createRemoteDir: true);
-        return true;
+        return (await client.UploadAsync(fileBytes, uploadPath, createRemoteDir: true)).IsSuccess();
     }
 
     /// <inheritdoc />
-    public async Task<byte[]> DownloadAsync(FtpModel ftpAction, string downloadPath)
+    public async Task<bool> DownloadAsync(FtpModel ftpAction, string downloadPath, string writePath)
     {
-        return await client.DownloadAsync(downloadPath, default);
+        if (!ftpAction.AllFilesInFolder)
+        {
+            return (await client.DownloadFileAsync(writePath, downloadPath)).IsSuccess();
+        }
+        
+        // Get the names of the files that need to be downloaded.
+        var filesToDownload = await GetFilesInFolderAsync(ftpAction, downloadPath);
+        if (!filesToDownload.Any())
+        {
+            return true;
+        }
+            
+        // Combine the name with the path to the folder.
+        for (var i = 0; i < filesToDownload.Count; i++)
+        {
+            filesToDownload[i] = Path.Combine(downloadPath, filesToDownload[i]);
+        }
+        
+        var downloadCount = await client.DownloadFilesAsync(writePath, filesToDownload);
+        return downloadCount == filesToDownload.Count;
     }
 
     /// <inheritdoc />
     public async Task<List<string>> GetFilesInFolderAsync(FtpModel ftpAction, string folderPath)
     {
-        var filesInFolder = new List<string>();
-        
         var listing = await client.GetListingAsync(folderPath);
 
-        foreach (var file in listing)
-        {
-            filesInFolder.Add(file.Name);
-        }
-
-        return filesInFolder;
+        return listing.Select(file => file.Name).ToList();
     }
 
     /// <inheritdoc />

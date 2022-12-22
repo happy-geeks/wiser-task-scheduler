@@ -34,9 +34,10 @@ public interface IFtpHandler
     /// Download a file from an FTP server.
     /// </summary>
     /// <param name="ftpAction">The <see cref="FtpModel"/> containing the information.</param>
-    /// <param name="downloadPath">The full path to download the file from.</param>
-    /// <returns>Returns the bytes of the file.</returns>
-    Task<byte[]> DownloadAsync(FtpModel ftpAction, string downloadPath);
+    /// <param name="downloadPath">The full path to download the file from or the folder path if all files are downloaded.</param>
+    /// <param name="writePath">The full path to write the file to or the folder path if all files are downloaded.</param>
+    /// <returns>If the file is downloaded.</returns>
+    Task<bool> DownloadAsync(FtpModel ftpAction, string downloadPath, string writePath);
 
     /// <summary>
     /// Get all names of files in a folder in an FTP server.

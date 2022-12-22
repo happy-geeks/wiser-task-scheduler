@@ -48,50 +48,132 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
         var fromPath = ftpAction.From;
         var toPath = ftpAction.To;
 
+        var result = new JObject()
+        {
+            {"FromPath", fromPath},
+            {"ToPath", toPath},
+            {"Action", ftpAction.Action.ToString()}
+        };
+
         switch (ftpAction.Action)
         {
             case FtpActionTypes.Upload:
                 try
                 {
+                    bool success;
+
+                    // If there is no from path a file will be generated from the body and uploaded to the server.
                     if (String.IsNullOrWhiteSpace(ftpAction.From))
                     {
                         var body = bodyService.GenerateBody(ftpAction.Body, ReplacementHelper.EmptyRows, resultSets);
-                        await ftpHandler.UploadAsync(ftpAction, toPath, Encoding.UTF8.GetBytes(body));
+                        success = await ftpHandler.UploadAsync(ftpAction, toPath, Encoding.UTF8.GetBytes(body));
+                        result.Add("Success", success);
+
+                        if (success)
+                        {
+                            await logService.LogInformation(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Upload of generated files to '{toPath}' was successful.", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                        }
+                        else
+                        {
+                            await logService.LogWarning(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Upload of generated files to '{toPath}' was not successful.", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                        }
                     }
                     else
                     {
-                        await ftpHandler.UploadAsync(ftpAction, toPath, fromPath);
+                        success = await ftpHandler.UploadAsync(ftpAction, toPath, fromPath);
+                        result.Add("Success", success);
+
+                        if (success)
+                        {
+                            await logService.LogInformation(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Upload of file(s) from '{fromPath}' to '{toPath}' was successful.", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                        }
+                        else
+                        {
+                            await logService.LogWarning(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Upload of file(s) from '{fromPath}' to '{toPath}' was not successful.", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                        }
+                    }
+
+                    // Only delete the file(s) if a success state was given.
+                    if (success && ftpAction.DeleteFileAfterAction)
+                    {
+                        try
+                        {
+                            if (!ftpAction.AllFilesInFolder)
+                            {
+                                await logService.LogInformation(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Deleting file '{fromPath}' after successful upload", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                                File.Delete(fromPath);
+                            }
+                            else
+                            {
+                                var files = Directory.GetFiles(fromPath);
+                                foreach (var file in files)
+                                {
+                                    await logService.LogInformation(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Deleting file '{fromPath}' after successful folder upload.", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                                    File.Delete(Path.Combine(fromPath, file));
+                                }
+                            }
+                        }
+                        catch (Exception e)
+                        {
+                            await logService.LogError(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Failed to delete file(s) after action was successful upload due to exception: {e}", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                        }
                     }
                 }
                 catch (Exception e)
                 {
-                    await logService.LogError(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Failed to upload file from '{fromPath}' to '{toPath} due to exception: {e}", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                    await logService.LogError(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Failed to upload file(s) from '{fromPath}' to '{toPath} due to exception: {e}", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                    result.Add("Success", false);
                 }
 
                 break;
             case FtpActionTypes.Download:
                 try
                 {
-                    var fileBytes = await ftpHandler.DownloadAsync(ftpAction, fromPath);
-                    if (fileBytes != null)
+                    var success = await ftpHandler.DownloadAsync(ftpAction, fromPath, toPath);
+                    result.Add("Success", success);
+
+                    if (success)
                     {
-                        await File.WriteAllBytesAsync(toPath, fileBytes);
+                        await logService.LogInformation(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Download of file(s) from '{fromPath}' to '{toPath}' was successful.", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                    }
+                    else
+                    {
+                        await logService.LogWarning(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Download of file(s) from '{fromPath}' to '{toPath}' was not successful.", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                    }
+
+                    // Only delete the file(s) if a success state was given.
+                    if (success && ftpAction.DeleteFileAfterAction)
+                    {
+                        try
+                        {
+                            await logService.LogInformation(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Deleting file(s) '{fromPath}' after successful download", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                            await ftpHandler.DeleteFileAsync(ftpAction, fromPath);
+                        }
+                        catch (Exception e)
+                        {
+                            await logService.LogError(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Failed to delete file(s) after action was successful download due to exception: {e}", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                        }
                     }
                 }
                 catch (Exception e)
                 {
-                    await logService.LogError(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Failed to download file from '{fromPath}' to '{toPath} due to exception: {e}", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                    await logService.LogError(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Failed to download file(s) from '{fromPath}' to '{toPath} due to exception: {e}", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                    result.Add("Success", false);
                 }
                 
                 break;
             case FtpActionTypes.FilesInDirectory:
                 try
                 {
-                    var filesInDirectory = await ftpHandler.GetFilesInFolderAsync(ftpAction, fromPath);
+                    var filesOnServer = await ftpHandler.GetFilesInFolderAsync(ftpAction, fromPath);
+                    result.Add("FilesInDirectory", new JArray(filesOnServer));
+                    result.Add("FilesInDirectoryCount", filesOnServer.Count);
+                    result.Add("Success", true);
                 }
                 catch (Exception e)
                 {
                     await logService.LogError(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Failed to get file listing from '{fromPath}' due to exception: {e}", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                    result.Add("Success", false);
                 }
 
                 break;
@@ -103,6 +185,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
                 catch (Exception e)
                 {
                     await logService.LogError(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Failed to delete file{(ftpAction.AllFilesInFolder ? "s" : "")} from '{fromPath}' due to exception: {e}", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
+                    result.Add("Success", false);
                 }
 
                 break;
@@ -112,6 +195,6 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
 
         await ftpHandler.CloseConnectionAsync();
 
-        return null;
+        return result;
     }
 }
