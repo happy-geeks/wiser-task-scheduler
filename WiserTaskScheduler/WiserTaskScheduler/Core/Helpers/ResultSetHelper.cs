@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using WiserTaskScheduler.Core.Models;
 using Newtonsoft.Json.Linq;
 
 namespace WiserTaskScheduler.Core.Helpers
@@ -13,59 +14,84 @@ namespace WiserTaskScheduler.Core.Helpers
         /// <param name="key">The key, separated by comma, to the required object.</param>
         /// <param name="rows">The indexes/rows of the array, to be used if for example '[i]' is used in the key.</param>
         /// <param name="usingResultSet">The result set from where to start te search.</param>
+        /// <param name="processedKey"></param>
         /// <returns></returns>
-        public static T GetCorrectObject<T>(string key, List<int> rows, JObject usingResultSet) where T : JToken
+        public static T GetCorrectObject<T>(string key, List<int> rows, JObject usingResultSet, string processedKey = "") where T : JToken
         {
-            if (String.IsNullOrWhiteSpace(key) || usingResultSet == null)
+            if (String.IsNullOrWhiteSpace(key))
             {
                 return usingResultSet as T;
             }
-
-            var keyParts = key.Split(".");
-
-            // No next step left, return object as requested type.
-            if (keyParts.Length == 1)
+            
+            if (usingResultSet == null)
             {
-                if (!key.EndsWith(']'))
-                {
-                    return usingResultSet[key] as T;
-                }
-
-                var arrayKey = key.Substring(0, key.IndexOf('['));
-                var indexKey = GetIndex(keyParts, rows);
-                return usingResultSet[arrayKey][indexKey] as T;
-            }
-
-            var remainingKey = key.Substring(key.IndexOf(".") + 1);
-
-            // Object to step into is not an array.
-            if (!keyParts[0].EndsWith("]"))
-            {
-                switch (usingResultSet[keyParts[0]])
-                {
-                    case JValue valueAsJValue:
-                        return valueAsJValue as T;
-                    case JObject valueAsJObject:
-                        return GetCorrectObject<T>(remainingKey, rows, valueAsJObject);
-                }
+                throw new ResultSetException($"Failed to get correct object because no result set was given. The key being processed is '{key}', already processed '{processedKey}'. If the key is correct but the value is not always present it is recommended to use a default value.");
             }
             
-            var index = GetIndex(keyParts, rows);
-            var bracketIndexOf = keyParts[0].IndexOf('[');
-            var firstPartKey = keyParts[0];
-            if (bracketIndexOf > -1)
+            var currentPart = "";
+            
+            try
             {
-                firstPartKey = firstPartKey[..bracketIndexOf];
-            }
+                var keyParts = key.Split(".");
+                currentPart = keyParts[0];
 
-            if (usingResultSet[firstPartKey] is not JArray resultSetArray || index < 0 || index >= resultSetArray.Count)
+                // No next step left, return object as requested type.
+                if (keyParts.Length == 1)
+                {
+                    if (!key.EndsWith(']'))
+                    {
+                        return usingResultSet[key] as T;
+                    }
+
+                    var arrayKey = key.Substring(0, key.IndexOf('['));
+                    var indexKey = GetIndex(keyParts, rows);
+                    return usingResultSet[arrayKey][indexKey] as T;
+                }
+
+                var remainingKey = key.Substring(key.IndexOf(".") + 1);
+
+                // Object to step into is not an array.
+                if (!currentPart.EndsWith("]"))
+                {
+                    switch (usingResultSet[keyParts[0]])
+                    {
+                        case JValue valueAsJValue:
+                            return valueAsJValue as T;
+                        case JObject valueAsJObject:
+                            return GetCorrectObject<T>(remainingKey, rows, valueAsJObject, $"{processedKey}.{currentPart}");
+                    }
+                }
+            
+                var index = GetIndex(keyParts, rows);
+                var bracketIndexOf = currentPart.IndexOf('[');
+                var firstPartKey = currentPart;
+                if (bracketIndexOf > -1)
+                {
+                    firstPartKey = firstPartKey[..bracketIndexOf];
+                }
+
+                if (usingResultSet[firstPartKey] is not JArray resultSetArray || index < 0 || index >= resultSetArray.Count)
+                {
+                    var fullKey = $"{processedKey}.{key}";
+                    fullKey = fullKey.StartsWith('.') ? fullKey.Substring(1) : fullKey;
+                    throw new ResultSetException($"Failed to get array from result set. The key being processed is '{fullKey}' at part '{currentPart}'. Already processed '{processedKey}'. If the key is correct but the value is not always present it is recommended to use a default value.");
+                }
+
+                var resultObject = resultSetArray[index] as JObject;
+
+                return GetCorrectObject<T>(remainingKey, rows, resultObject, $"{processedKey}.{currentPart}");
+            }
+            catch (ResultSetException)
             {
-                return null;
+                throw;
             }
-
-            var resultObject = resultSetArray[index] as JObject;
-
-            return GetCorrectObject<T>(remainingKey, rows, resultObject);
+            catch (Exception e)
+            {
+                var fullKey = $"{processedKey}.{key}";
+                fullKey = fullKey.StartsWith('.') ? fullKey.Substring(1) : fullKey;
+                
+                throw new ResultSetException($"Something went wrong while processing the key in the result set. The key being processed is '{fullKey}' at part '{currentPart}'. Already processed '{processedKey}'. If the key is correct but the value is not always present it is recommended to use a default value.", e);
+            }
         }
 
         private static int GetIndex(string[] keyParts, List<int> rows)

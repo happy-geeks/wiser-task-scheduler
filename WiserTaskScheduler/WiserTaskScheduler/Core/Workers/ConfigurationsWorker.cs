@@ -35,7 +35,7 @@ namespace WiserTaskScheduler.Core.Workers
         /// <param name="name">The name of the worker.</param>
         /// <param name="runScheme">The run scheme of the worker.</param>
         /// <param name="singleRun">The configuration is only run once, ignoring paused state and run time.</param>
-        public void Initialize(ConfigurationModel configuration, string name, RunSchemeModel runScheme, bool singleRun = false)
+        public async Task InitializeAsync(ConfigurationModel configuration, string name, RunSchemeModel runScheme, bool singleRun = false)
         {
             Initialize(name, runScheme, runScheme.RunImmediately, configuration.ServiceName, singleRun);
             Configuration = configuration;
@@ -43,7 +43,7 @@ namespace WiserTaskScheduler.Core.Workers
             configurationsService.Name = Name;
             configurationsService.LogSettings = RunScheme.LogSettings;
 
-            configurationsService.ExtractActionsFromConfiguration(RunScheme.TimeId, configuration);
+            await configurationsService.ExtractActionsFromConfigurationAsync(RunScheme.TimeId, configuration);
         }
 
         /// <inheritdoc />

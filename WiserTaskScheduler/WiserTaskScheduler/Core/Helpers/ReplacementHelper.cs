@@ -4,6 +4,7 @@ using System.Text;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Helpers;
 using Newtonsoft.Json.Linq;
+using WiserTaskScheduler.Core.Models;
 
 namespace WiserTaskScheduler.Core.Helpers
 {
@@ -160,6 +161,11 @@ namespace WiserTaskScheduler.Core.Helpers
             {
                 var result = ResultSetHelper.GetCorrectObject<JToken>(keySplit[0], rows, usingResultSet);
                 value = result?.GetType() == typeof(JValue) ? (string) result : result?.ToString();
+
+                if (value == null)
+                {
+                    throw new ResultSetException($"No value was found while processing the key in the result set and no default value is set. The key being processed is '{key}'.");
+                }
             }
             catch (Exception)
             {
