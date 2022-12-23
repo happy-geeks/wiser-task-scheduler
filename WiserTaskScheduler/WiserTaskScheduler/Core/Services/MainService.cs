@@ -325,7 +325,7 @@ namespace WiserTaskScheduler.Core.Services
             using var scope = serviceProvider.CreateScope();
             var worker = scope.ServiceProvider.GetRequiredService<ConfigurationsWorker>();
 
-            await worker.InitializeAsync(configuration, $"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme);
+            await worker.InitializeAsync(configuration, $"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme, singleRun);
             
             if (!singleRun)
             {
