@@ -82,4 +82,9 @@ public class FtpModel : ActionModel
     /// Gets or sets the passphrase for the SSH private key.
     /// </summary>
     public string SshPrivateKeyPassphrase { get; set; }
+
+    /// <summary>
+    /// Gets or sets if it is a single action that needs to be executed.
+    /// </summary>
+    public bool SingleAction = true;
 }

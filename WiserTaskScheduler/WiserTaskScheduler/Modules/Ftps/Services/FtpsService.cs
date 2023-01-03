@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
@@ -42,11 +43,65 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
     {
         var ftpAction = (FtpModel) action;
         var ftpHandler = ftpHandlerFactory.GetFtpHandler(ftpAction.Type);
-
         await ftpHandler.OpenConnectionAsync(ftpAction);
 
+        JObject result;
+
+        if (ftpAction.SingleAction)
+        {
+            result = await ExecuteFtpAction(ftpAction, ftpHandler, resultSets, ReplacementHelper.EmptyRows, ftpAction.UseResultSet, configurationServiceName);
+        }
+        else
+        {
+            var rows = ResultSetHelper.GetCorrectObject<JArray>(ftpAction.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
+            var jArray = new JArray();
+            
+            // Execute the action for each result in the stated result set.
+            for (var i = 0; i < rows.Count; i++)
+            {
+                var indexRows = new List<int> { i };
+                jArray.Add(await ExecuteFtpAction(ftpAction, ftpHandler, resultSets, indexRows, $"{ftpAction.UseResultSet}[{i}]", configurationServiceName));
+            }
+            
+            result = new JObject
+            {
+                {"Results", jArray}
+            };
+        }
+
+        await ftpHandler.CloseConnectionAsync();
+
+        return result;
+    }
+    
+    /// <summary>
+    /// Execute an FTP action based on the information.
+    /// </summary>
+    /// <param name="ftpAction">The information for the FTP action.</param>
+    /// <param name="ftpHandler">The handler to be used for the correct protocol of FTP.</param>
+    /// <param name="resultSets">The result sets from previous actions in the same run.</param>
+    /// <param name="rows">The indexes/rows of the array, passed to be used if '[i]' is used in the key.</param>
+    /// <param name="useResultSet">The key for the result set. Will be modified for index when not a single action.</param>
+    /// <param name="configurationServiceName">The name of the service in the configuration, used for logging.</param>
+    /// <returns></returns>
+    private async Task<JObject> ExecuteFtpAction(FtpModel ftpAction, IFtpHandler ftpHandler, JObject resultSets, List<int> rows, string useResultSet, string configurationServiceName)
+    {
         var fromPath = ftpAction.From;
         var toPath = ftpAction.To;
+
+        // Replace the from and to paths if a result set is used.
+        if (!String.IsNullOrWhiteSpace(useResultSet))
+        {
+            var keyParts = useResultSet.Split('.');
+            var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(useResultSet, ReplacementHelper.EmptyRows, resultSets);
+            var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
+
+            var fromPathTuple = ReplacementHelper.PrepareText(fromPath, usingResultSet, remainingKey);
+            var toPathTuple = ReplacementHelper.PrepareText(toPath, usingResultSet, remainingKey);
+
+            fromPath = ReplacementHelper.ReplaceText(fromPathTuple.Item1, rows, fromPathTuple.Item2, usingResultSet);
+            toPath = ReplacementHelper.ReplaceText(toPathTuple.Item1, rows, toPathTuple.Item2, usingResultSet);
+        }
 
         var result = new JObject()
         {
@@ -192,8 +247,6 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
             default:
                 throw new NotImplementedException($"FTP action '{ftpAction.Action}' is not yet implemented.");
         }
-
-        await ftpHandler.CloseConnectionAsync();
 
         return result;
     }
