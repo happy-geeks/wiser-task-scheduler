@@ -85,6 +85,7 @@ namespace WiserTaskScheduler
         {
             services.AddScoped<ConfigurationsWorker>();
             services.AddScoped<FtpsHandler>();
+            services.AddScoped<SftpHandler>();
             
             services.AddScoped<IDatabaseConnection, MySqlDatabaseConnection>();
             services.AddScoped<IHttpContextAccessor, HttpContextAccessor>();

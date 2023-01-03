@@ -91,7 +91,7 @@ public class FtpsHandler : IFtpHandler
             var files = await GetFilesInFolderAsync(ftpAction, filePath);
             foreach (var file in files)
             {
-                await client.DeleteFileAsync($"{filePath}{file}");
+                await client.DeleteFileAsync(Path.Combine(filePath, file));
             }
 
             return true;

@@ -23,7 +23,7 @@ public class FtpHandlerFactory : IFtpHandlerFactory, IScopedService
             case FtpTypes.Ftps:
                 return serviceProvider.GetRequiredService<FtpsHandler>();
             case FtpTypes.Sftp:
-            //break;
+                return serviceProvider.GetRequiredService<SftpHandler>();
             default:
                 throw new NotImplementedException($"FTP type '{ftpType}' is not yet implemented.");
         }
