@@ -9,6 +9,7 @@ using System.Xml.Serialization;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -36,12 +37,15 @@ namespace WiserTaskScheduler.Core.Services
         private readonly IServiceProvider serviceProvider;
         private readonly IWiserService wiserService;
         private readonly IOAuthService oAuthService;
+        private readonly IWiserDashboardService wiserDashboardService;
         private readonly ILogService logService;
         private readonly ILogger<MainService> logger;
 
         private readonly ConcurrentDictionary<string, ActiveConfigurationModel> activeConfigurations;
 
         private long oAuthConfigurationVersion;
+        
+        private bool updatedServiceTable;
 
         /// <inheritdoc />
         public LogSettings LogSettings { get; set; }
@@ -49,7 +53,7 @@ namespace WiserTaskScheduler.Core.Services
         /// <summary>
         /// Creates a new instance of <see cref="MainService"/>.
         /// </summary>
-        public MainService(IOptions<WtsSettings> wtsSettings, IOptions<GclSettings> gclSettings, IServiceProvider serviceProvider, IWiserService wiserService, IOAuthService oAuthService, ILogService logService, ILogger<MainService> logger)
+        public MainService(IOptions<WtsSettings> wtsSettings, IOptions<GclSettings> gclSettings, IServiceProvider serviceProvider, IWiserService wiserService, IOAuthService oAuthService, IWiserDashboardService wiserDashboardService, ILogService logService, ILogger<MainService> logger)
         {
             localConfiguration = wtsSettings.Value.MainService.LocalConfiguration;
             localOAuthConfiguration = wtsSettings.Value.MainService.LocalOAuthConfiguration;
@@ -57,6 +61,7 @@ namespace WiserTaskScheduler.Core.Services
             this.serviceProvider = serviceProvider;
             this.wiserService = wiserService;
             this.oAuthService = oAuthService;
+            this.wiserDashboardService = wiserDashboardService;
             this.logService = logService;
             this.logger = logger;
 
@@ -66,7 +71,17 @@ namespace WiserTaskScheduler.Core.Services
         /// <inheritdoc />
         public async Task ManageConfigurations()
         {
-            var configurations = await GetConfigurations();
+            using var scope = serviceProvider.CreateScope();
+            
+            // Update service table if it has not already been done since launch. The table definitions can only change when the WTS restarts with a new update.
+            if (!updatedServiceTable)
+            {
+                var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+                await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WtsServices});
+                updatedServiceTable = true;
+            }
+            
+            var configurations = await GetConfigurationsAsync();
 
             if (configurations == null)
             {
@@ -85,7 +100,7 @@ namespace WiserTaskScheduler.Core.Services
 
                     // If the configuration is already running but on a different version stop the current active one.
                     var configurationStopTasks = StopConfiguration(configuration.ServiceName);
-                    await WaitTillConfigurationsStopped(configurationStopTasks);
+                    await WaitTillConfigurationsStoppedAsync(configurationStopTasks);
                     activeConfigurations.TryRemove(new KeyValuePair<string, ActiveConfigurationModel>(configuration.ServiceName, activeConfigurations[configuration.ServiceName]));
                 }
 
@@ -98,16 +113,29 @@ namespace WiserTaskScheduler.Core.Services
                 foreach (var runScheme in configuration.GetAllRunSchemes())
                 {
                     runScheme.LogSettings ??= configuration.LogSettings ?? LogSettings;
+                    
+                    if (runScheme.Id == 0)
+                    {
+                        var existingService = await wiserDashboardService.GetServiceAsync(configuration.ServiceName, runScheme.TimeId);
+                        if (existingService == null)
+                        {
+                            await wiserDashboardService.CreateServiceAsync(configuration.ServiceName, runScheme.TimeId);
+                        }
+                    }
+                    
+                    await wiserDashboardService.UpdateServiceAsync(configuration.ServiceName, runScheme.TimeId, runScheme.Action, runScheme.Type.ToString().ToLower(), state: "active", templateId: configuration.TemplateId);
 
-                    var thread = new Thread(() => StartConfiguration(runScheme, configuration));
+                    var thread = new Thread(() => StartConfigurationAsync(runScheme, configuration));
                     thread.Start();
                 }
             }
             
-            await StopRemovedConfigurations(configurations);
+            await StopRemovedConfigurationsAsync(configurations);
+
+            await StartExtraRunsAsync();
         }
 
-        private async Task SetOAuthConfiguration(string oAuthConfiguration)
+        private async Task SetOAuthConfigurationAsync(string oAuthConfiguration)
         {
             var serializer = new XmlSerializer(typeof(OAuthConfigurationModel));
             using var reader = new StringReader(oAuthConfiguration);
@@ -118,7 +146,7 @@ namespace WiserTaskScheduler.Core.Services
             await oAuthService.SetConfigurationAsync(configuration);
         }
 
-        private async Task StopRemovedConfigurations(List<ConfigurationModel> configurations)
+        private async Task StopRemovedConfigurationsAsync(List<ConfigurationModel> configurations)
         {
             foreach (var activeConfiguration in activeConfigurations)
             {
@@ -128,13 +156,13 @@ namespace WiserTaskScheduler.Core.Services
                 }
 
                 var configurationStopTasks = StopConfiguration(activeConfiguration.Key);
-                await WaitTillConfigurationsStopped(configurationStopTasks);
+                await WaitTillConfigurationsStoppedAsync(configurationStopTasks);
                 activeConfigurations.TryRemove(new KeyValuePair<string, ActiveConfigurationModel>(activeConfiguration.Key, activeConfigurations[activeConfiguration.Key]));
             }
         }
 
         /// <inheritdoc />
-        public async Task StopAllConfigurations()
+        public async Task StopAllConfigurationsAsync()
         {
             var configurationStopTasks = new List<Task>();
 
@@ -143,7 +171,7 @@ namespace WiserTaskScheduler.Core.Services
                 configurationStopTasks.AddRange(StopConfiguration(configuration.Key));
             }
 
-            await WaitTillConfigurationsStopped(configurationStopTasks);
+            await WaitTillConfigurationsStoppedAsync(configurationStopTasks);
         }
 
         private List<Task> StopConfiguration(string configurationName)
@@ -160,7 +188,7 @@ namespace WiserTaskScheduler.Core.Services
             return configurationStopTasks;
         }
 
-        private async Task WaitTillConfigurationsStopped(List<Task> configurationStopTasks)
+        private async Task WaitTillConfigurationsStoppedAsync(List<Task> configurationStopTasks)
         {
             for (var i = 0; i < configurationStopTasks.Count; i++)
             {
@@ -174,7 +202,7 @@ namespace WiserTaskScheduler.Core.Services
         /// Retrieve all configurations.
         /// </summary>
         /// <returns>Returns the configurations</returns>
-        private async Task<List<ConfigurationModel>> GetConfigurations()
+        private async Task<List<ConfigurationModel>> GetConfigurationsAsync()
         {
             var configurations = new List<ConfigurationModel>();
             
@@ -203,7 +231,7 @@ namespace WiserTaskScheduler.Core.Services
                         {
                             if (wiserConfiguration.Version != oAuthConfigurationVersion)
                             {
-                                await SetOAuthConfiguration(wiserConfiguration.EditorValue);
+                                await SetOAuthConfigurationAsync(wiserConfiguration.EditorValue);
                                 oAuthConfigurationVersion = wiserConfiguration.Version;
                             }
                         }
@@ -215,6 +243,7 @@ namespace WiserTaskScheduler.Core.Services
 
                     if (configuration != null)
                     {
+                        configuration.TemplateId = wiserConfiguration.TemplateId;
                         configuration.Version = wiserConfiguration.Version;
                         configurations.Add(configuration);
                     }
@@ -226,6 +255,7 @@ namespace WiserTaskScheduler.Core.Services
 
                 if (configuration != null)
                 {
+                    configuration.TemplateId = 0;
                     configuration.Version = File.GetLastWriteTimeUtc(localConfiguration).Ticks;
                     configurations.Add(configuration);
                 }
@@ -236,7 +266,7 @@ namespace WiserTaskScheduler.Core.Services
                 var fileVersion = File.GetLastWriteTimeUtc(localOAuthConfiguration).Ticks;
                 if (fileVersion != oAuthConfigurationVersion)
                 {
-                    await SetOAuthConfiguration(await File.ReadAllTextAsync(localOAuthConfiguration));
+                    await SetOAuthConfigurationAsync(await File.ReadAllTextAsync(localOAuthConfiguration));
                     oAuthConfigurationVersion = fileVersion;
                 }
             }
@@ -289,14 +319,47 @@ namespace WiserTaskScheduler.Core.Services
         /// </summary>
         /// <param name="runScheme">The run scheme of the worker.</param>
         /// <param name="configuration">The configuration the run scheme is within.</param>
-        private async void StartConfiguration(RunSchemeModel runScheme, ConfigurationModel configuration)
+        /// <param name="singleRun">Optional: If the configuration only needs to be ran once. Will ignore paused state and run time.</param>
+        private async void StartConfigurationAsync(RunSchemeModel runScheme, ConfigurationModel configuration, bool singleRun = false)
         {
             using var scope = serviceProvider.CreateScope();
             var worker = scope.ServiceProvider.GetRequiredService<ConfigurationsWorker>();
-            await worker.InitializeAsync(configuration, $"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme);
-            activeConfigurations[configuration.ServiceName].WorkerPerTimeId.TryAdd(runScheme.TimeId, worker);
+
+            await worker.InitializeAsync(configuration, $"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme, singleRun);
+            
+            if (!singleRun)
+            {
+                activeConfigurations[configuration.ServiceName].WorkerPerTimeId.TryAdd(runScheme.TimeId, worker);
+            }
             await worker.StartAsync(new CancellationToken());
             await worker.ExecuteTask; // Keep scope alive until worker stops.
+        }
+
+        private async Task StartExtraRunsAsync()
+        {
+            var services = await wiserDashboardService.GetServices(true);
+
+            foreach (var service in services)
+            {
+                // If the service is currently running no extra run will be started.
+                if (service.State.Equals("running", StringComparison.CurrentCultureIgnoreCase))
+                {
+                    await wiserDashboardService.UpdateServiceAsync(service.Configuration, service.TimeId, extraRun: false);
+                    continue;
+                }
+
+                // If the service is not normally running by this WTS we don't have the configuration for a single run so we skip it.
+                if (!activeConfigurations.ContainsKey(service.Configuration) || !activeConfigurations[service.Configuration].WorkerPerTimeId.ContainsKey(service.TimeId))
+                {
+                    continue;
+                }
+                
+                var configuration = activeConfigurations[service.Configuration].WorkerPerTimeId[service.TimeId].Configuration;
+                var runScheme = activeConfigurations[service.Configuration].WorkerPerTimeId[service.TimeId].RunScheme;
+                
+                var thread = new Thread(() => StartConfigurationAsync(runScheme, configuration, true));
+                thread.Start();
+            }
         }
     }
 }

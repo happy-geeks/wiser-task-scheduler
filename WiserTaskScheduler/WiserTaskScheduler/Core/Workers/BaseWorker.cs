@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -8,6 +9,7 @@ using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Modules.RunSchemes.Interfaces;
 using WiserTaskScheduler.Modules.RunSchemes.Models;
+using WiserTaskScheduler.Modules.Wiser.Interfaces;
 
 namespace WiserTaskScheduler.Core.Workers
 {
@@ -28,9 +30,14 @@ namespace WiserTaskScheduler.Core.Workers
 
         private bool RunImmediately { get; set; }
 
+        private bool SingleRun { get; set; }
+
+        private string ConfigurationName { get; set; }
+
         private readonly ILogService logService;
         private readonly ILogger<BaseWorker> logger;
         private readonly IRunSchemesService runSchemesService;
+        private readonly IWiserDashboardService wiserDashboardService;
 
         /// <summary>
         /// Creates a new instance of <see cref="BaseWorker"/>.
@@ -41,6 +48,7 @@ namespace WiserTaskScheduler.Core.Workers
             logService = baseWorkerDependencyAggregate.LogService;
             logger = baseWorkerDependencyAggregate.Logger;
             runSchemesService = baseWorkerDependencyAggregate.RunSchemesService;
+            wiserDashboardService = baseWorkerDependencyAggregate.WiserDashboardService;
         }
 
         /// <summary>
@@ -49,7 +57,9 @@ namespace WiserTaskScheduler.Core.Workers
         /// <param name="name">The name of the worker.</param>
         /// <param name="runScheme">The run scheme of the worker.</param>
         /// <param name="runImmediately">True to run the action immediately, false to run at first delayed time.</param>
-        public void Initialize(string name, RunSchemeModel runScheme, bool runImmediately = false)
+        /// <param name="configurationName">The name of the configuration, default <see langword="null"/>. If set it will update the service information.</param>
+        /// <param name="singleRun">The configuration is only run once, ignoring paused state and run time.</param>
+        public void Initialize(string name, RunSchemeModel runScheme, bool runImmediately = false, string configurationName = null, bool singleRun = false)
         {
             if (!String.IsNullOrWhiteSpace(Name))
                 return;
@@ -57,6 +67,8 @@ namespace WiserTaskScheduler.Core.Workers
             Name = name;
             RunScheme = runScheme;
             RunImmediately = runImmediately;
+            ConfigurationName = configurationName;
+            SingleRun = singleRun;
         }
 
         /// <summary>
@@ -69,35 +81,103 @@ namespace WiserTaskScheduler.Core.Workers
             try
             {
                 await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} started, first run on: {runSchemesService.GetDateTimeTillNextRun(RunScheme)}", Name, RunScheme.TimeId);
-
-                if (!RunImmediately)
+                
+                if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                {
+                    await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme));
+                }
+                
+                if (!RunImmediately && !SingleRun)
                 {
                     await WaitTillNextRun(stoppingToken);
                 }
 
                 while (!stoppingToken.IsCancellationRequested)
                 {
-                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} started at: {DateTime.Now}", Name, RunScheme.TimeId);
+                    var paused = false;
+                    var alreadyRunning = false;
+                    
+                    if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                    {
+                        alreadyRunning = await wiserDashboardService.IsServiceRunning(ConfigurationName, RunScheme.TimeId);
+                        paused = await wiserDashboardService.IsServicePaused(ConfigurationName, RunScheme.TimeId);
+                        if (paused && !alreadyRunning)
+                        {
+                            await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "paused");
+                        }
+                    }
 
-                    var stopWatch = new Stopwatch();
-                    stopWatch.Start();
+                    if (!alreadyRunning)
+                    {
+                        if (!paused || SingleRun)
+                        {
+                            await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} started at: {DateTime.Now}", Name, RunScheme.TimeId);
+                            if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                            {
+                                await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "running");
+                            }
 
-                    await ExecuteActionAsync();
+                            var runStartTime = DateTime.Now;
+                            var stopWatch = new Stopwatch();
+                            stopWatch.Start();
 
-                    stopWatch.Stop();
+                            await ExecuteActionAsync();
 
-                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}", Name, RunScheme.TimeId);
+                            stopWatch.Stop();
+
+                            await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} finished at: {DateTime.Now}, time taken: {stopWatch.Elapsed}", Name, RunScheme.TimeId);
+
+                            if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                            {
+                                var states = await wiserDashboardService.GetLogStatesFromLastRun(ConfigurationName, RunScheme.TimeId, runStartTime);
+
+                                var state = "success";
+                                if (await wiserDashboardService.IsServicePaused(ConfigurationName, RunScheme.TimeId))
+                                {
+                                    state = "paused";
+                                }
+                                else if (states.Contains("Critical", StringComparer.OrdinalIgnoreCase) || states.Contains("Error", StringComparer.OrdinalIgnoreCase))
+                                {
+                                    state = "failed";
+                                }
+                                else if (states.Contains("Warning", StringComparer.OrdinalIgnoreCase))
+                                {
+                                    state = "warning";
+                                }
+
+                                await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme), lastRun: DateTime.Now, runTime: stopWatch.Elapsed, state: state, extraRun: false);
+                            }
+                        }
+                        else
+                        {
+                            await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme));
+                        }
+                    }
+
+                    // If the configuration only needs to be run once break out of the while loop. State will not be set on stopped because the normal configuration is still active.
+                    if (SingleRun)
+                    {
+                        break;
+                    }
 
                     await WaitTillNextRun(stoppingToken);
                 }
             }
             catch (TaskCanceledException)
             {
-                await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} has been stopped after cancel was called.", Name, RunScheme.TimeId);
+                await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{ConfigurationName ?? Name} has been stopped after cancel was called.", ConfigurationName ?? Name, RunScheme.TimeId);
+                if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                {
+                    await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "stopped");
+                }
             }
             catch (Exception e)
             {
-                await logService.LogCritical(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{Name} stopped with exception {e}", Name, RunScheme.TimeId);
+                await logService.LogCritical(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{ConfigurationName ?? Name} stopped with exception {e}", ConfigurationName ?? Name, RunScheme.TimeId);
+                if (!String.IsNullOrWhiteSpace(ConfigurationName))
+                {
+                    await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "crashed");
+                }
             }
         }
 

@@ -1,6 +1,7 @@
-﻿using Microsoft.Extensions.Logging;
 using WiserTaskScheduler.Core.Workers;
 using WiserTaskScheduler.Modules.RunSchemes.Interfaces;
+using WiserTaskScheduler.Modules.Wiser.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace WiserTaskScheduler.Core.Interfaces
 {
@@ -20,8 +21,13 @@ namespace WiserTaskScheduler.Core.Interfaces
         ILogger<BaseWorker> Logger { get; }
 
         /// <summary>
-        /// Gets the <see cref="RunSchemesService"/>.
+        /// Gets the <see cref="IRunSchemesService"/>.
         /// </summary>
         IRunSchemesService RunSchemesService { get; }
+        
+        /// <summary>
+        /// Gets the <see cref="IWiserDashboardService"/>.
+        /// </summary>
+        IWiserDashboardService WiserDashboardService { get; }
     }
 }

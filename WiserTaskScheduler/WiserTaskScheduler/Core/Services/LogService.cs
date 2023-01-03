@@ -75,7 +75,7 @@ namespace WiserTaskScheduler.Core.Services
                         {
                             using var scope = serviceProvider.CreateScope();
                             using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
-
+                            
                             // Update log table if it has not already been done since launch. The table definitions can only change when the WTS restarts with a new update.
                             if (!updatedLogTable)
                             {
@@ -93,8 +93,15 @@ namespace WiserTaskScheduler.Core.Services
                             databaseConnection.AddParameter("timeId", timeId);
                             databaseConnection.AddParameter("order", order);
                             databaseConnection.AddParameter("addedOn", DateTime.Now);
-                            await databaseConnection.ExecuteAsync(@$"INSERT INTO {WiserTableNames.WtsLogs} (message, level, scope, source, configuration, time_id, `order`, added_on)
-                                                                    VALUES(?message, ?level, ?scope, ?source, ?configuration, ?timeId, ?order, ?addedOn)");
+                            
+#if DEBUG
+                            databaseConnection.AddParameter("isTest", 1);
+#else
+                    databaseConnection.AddParameter("isTest", 0);
+#endif
+                            
+                            await databaseConnection.ExecuteAsync(@$"INSERT INTO {WiserTableNames.WtsLogs} (message, level, scope, source, configuration, time_id, `order`, added_on, is_test)
+                                                                    VALUES(?message, ?level, ?scope, ?source, ?configuration, ?timeId, ?order, ?addedOn, ?isTest)");
                         }
                         catch (Exception e)
                         {
@@ -108,7 +115,7 @@ namespace WiserTaskScheduler.Core.Services
                     {
                         // If writing to the log file fails ignore it. We can't write it somewhere else and the application needs to continue.
                     }
-
+                    
                     break;
                 }
 

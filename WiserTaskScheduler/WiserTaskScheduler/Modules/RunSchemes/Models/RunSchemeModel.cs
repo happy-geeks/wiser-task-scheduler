@@ -16,6 +16,11 @@ namespace WiserTaskScheduler.Modules.RunSchemes.Models
     public class RunSchemeModel
     {
         /// <summary>
+        /// Gets or sets the ID in the database.
+        /// </summary>
+        public uint Id { get; set; }
+
+        /// <summary>
         /// Gets or sets the type.
         /// </summary>
         [Required]
@@ -26,6 +31,11 @@ namespace WiserTaskScheduler.Modules.RunSchemes.Models
         /// </summary>
         [Required]
         public int TimeId { get; set; }
+
+        /// <summary>
+        /// Gets or sets the name of the action.
+        /// </summary>
+        public string Action { get; set; }
 
         /// <summary>
         /// Gets or sets if the run time needs to be run immediately.

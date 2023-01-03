@@ -1,8 +1,9 @@
-﻿using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
-using Microsoft.Extensions.Logging;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Workers;
 using WiserTaskScheduler.Modules.RunSchemes.Interfaces;
+using WiserTaskScheduler.Modules.Wiser.Interfaces;
+using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace WiserTaskScheduler.Core.Aggregates
 {
@@ -20,16 +21,22 @@ namespace WiserTaskScheduler.Core.Aggregates
         /// <inheritdoc />
         public IRunSchemesService RunSchemesService { get; }
 
+        /// <inheritdoc />
+        public IWiserDashboardService WiserDashboardService { get; }
+
         /// <summary>
         /// Creates a new instance of <see cref="BaseWorkerDependencyAggregate"/>.
         /// </summary>
+        /// <param name="logService"></param>
         /// <param name="logger"></param>
         /// <param name="runSchemesService"></param>
-        public BaseWorkerDependencyAggregate(ILogService logService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService)
+        /// <param name="wiserDashboardService"></param>
+        public BaseWorkerDependencyAggregate(ILogService logService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService, IWiserDashboardService wiserDashboardService)
         {
             LogService = logService;
             Logger = logger;
             RunSchemesService = runSchemesService;
+            WiserDashboardService = wiserDashboardService;
         }
     }
 }

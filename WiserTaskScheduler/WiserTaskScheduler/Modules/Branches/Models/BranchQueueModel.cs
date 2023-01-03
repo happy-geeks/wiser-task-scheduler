@@ -10,15 +10,15 @@ namespace WiserTaskScheduler.Modules.Branches.Models
     public class BranchQueueModel : ActionModel
     {
         /// <summary>
-        /// Gets or sets the username of the user that should be used for deleting branches.
-        /// Normal users should not have permissions to drop a database, only this user should.
+        /// Gets or sets the username of the user that should be used for creating and deleting branches.
+        /// Normal users should not have permissions to create or drop a database, only this user should.
         /// </summary>
-        public string UsernameForDeletingBranches { get; set; }
+        public string UsernameForManagingBranches { get; set; }
 
         /// <summary>
-        /// Gets or sets the password of the user that should be used for deleting branches.
-        /// Normal users should not have permissions to drop a database, only this user should.
+        /// Gets or sets the password of the user that should be used for creating and deleting branches.
+        /// Normal users should not have permissions to create or drop a database, only this user should.
         /// </summary>
-        public string PasswordForDeletingBranches { get; set; }
+        public string PasswordForManagingBranches { get; set; }
     }
 }

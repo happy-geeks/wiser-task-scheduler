@@ -171,11 +171,20 @@ ORDER BY start_on ASC, id ASC");
             {
                 // Some variables we'll need a lot, for easier access.
                 var connectionStringBuilder = new MySqlConnectionStringBuilder(connectionString);
+                
+                // Change connection string to one with a specific user for deleting a database.
+                if (!String.IsNullOrWhiteSpace(branchQueue.UsernameForManagingBranches) && !String.IsNullOrWhiteSpace(branchQueue.PasswordForManagingBranches))
+                {
+                    connectionStringBuilder.UserID = branchQueue.UsernameForManagingBranches;
+                    connectionStringBuilder.Password = branchQueue.PasswordForManagingBranches;
+                    await databaseConnection.ChangeConnectionStringsAsync(connectionStringBuilder.ConnectionString, connectionStringBuilder.ConnectionString);
+                }
+
+                // Create the database in the same server/cluster. We already check if the database exists before this, so we can safely do this here.
+                await databaseHelpersService.CreateDatabaseAsync(branchDatabase);
+                
                 var originalDatabase = connectionStringBuilder.Database;
                 connectionStringBuilder.Database = branchDatabase;
-
-                // Create the database in the same server/cluster.
-                await databaseHelpersService.CreateDatabaseAsync(branchDatabase);
 
                 // Get all tables that don't start with an underscore (wiser tables never start with an underscore and we often use that for temporary or backup tables).
                 var query = @"SELECT TABLE_NAME 
@@ -467,6 +476,11 @@ AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
             catch (Exception exception)
             {
                 await databaseConnection.RollbackTransactionAsync();
+                
+                // Save the error in the queue and set the finished on datetime to now.
+                databaseConnection.AddParameter("now", DateTime.Now);
+                databaseConnection.AddParameter("error", exception.ToString());
+                await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET finished_on = ?now, success = 0, errors = ?error WHERE id = ?queueId");
 
                 // Drop the new database it something went wrong, so that we can start over again later.
                 // We can safely do this, because this method will return an error if the database already exists,
@@ -1482,20 +1496,18 @@ WHERE `id` = ?id";
                 try
                 {
                     // Change connection string to one with a specific user for deleting a database.
-                    if (!String.IsNullOrWhiteSpace(branchQueue.UsernameForDeletingBranches) && !String.IsNullOrWhiteSpace(branchQueue.PasswordForDeletingBranches))
+                    if (!String.IsNullOrWhiteSpace(branchQueue.UsernameForManagingBranches) && !String.IsNullOrWhiteSpace(branchQueue.PasswordForManagingBranches))
                     {
-                        connectionStringBuilder.UserID = branchQueue.UsernameForDeletingBranches;
-                        connectionStringBuilder.Password = branchQueue.PasswordForDeletingBranches;
+                        connectionStringBuilder.UserID = branchQueue.UsernameForManagingBranches;
+                        connectionStringBuilder.Password = branchQueue.PasswordForManagingBranches;
                         await databaseConnection.ChangeConnectionStringsAsync(connectionStringBuilder.ConnectionString, connectionStringBuilder.ConnectionString);
                     }
-
-                    await databaseConnection.ExecuteAsync($"DROP DATABASE `{branchDatabase}`;");
                     
-                    // Change connection string back to the original.
-                    await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
+                    await databaseHelpersService.DropDatabaseAsync(branchDatabase);
                 }
                 catch (Exception exception)
                 {
+                    logger.LogWarning(exception, $"Dropping the branch database '{branchDatabase}' failed after successful merge.");
                     errors.Add($"Het verwijderen van de branch is niet gelukt: {exception}");
                 }
             }
