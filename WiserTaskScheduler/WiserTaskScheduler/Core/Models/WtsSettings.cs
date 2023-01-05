@@ -22,5 +22,10 @@ namespace WiserTaskScheduler.Core.Models
         /// Gets or sets the settings for the connection to Wiser 3.
         /// </summary>
         public WiserSettings Wiser { get; set; }
+        
+        /// <summary>
+        /// A semicolon (;) seperated list of email addresses to notify when a core service failed during execution.
+        /// </summary>
+        public string ServiceFailedNotificationEmails { get; set; }
     }
 }

@@ -37,7 +37,7 @@ namespace WiserTaskScheduler.Core.Workers
         /// <param name="singleRun">The configuration is only run once, ignoring paused state and run time.</param>
         public async Task InitializeAsync(ConfigurationModel configuration, string name, RunSchemeModel runScheme, bool singleRun = false)
         {
-            Initialize(name, runScheme, runScheme.RunImmediately, configuration.ServiceName, singleRun);
+            Initialize(name, runScheme, configuration.ServiceFailedNotificationEmails, runScheme.RunImmediately, configuration.ServiceName, singleRun);
             Configuration = configuration;
 
             configurationsService.Name = Name;

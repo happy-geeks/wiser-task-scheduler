@@ -22,7 +22,7 @@ namespace WiserTaskScheduler.Core.Workers
         /// <param name="baseWorkerDependencyAggregate"></param>
         public CleanupWorker(IOptions<WtsSettings> wtsSettings, ICleanupService cleanupService, ILogger<CleanupWorker> logger, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
         {
-            Initialize(LogName, wtsSettings.Value.CleanupService.RunScheme, true);
+            Initialize(LogName, wtsSettings.Value.CleanupService.RunScheme, wtsSettings.Value.ServiceFailedNotificationEmails, true);
             RunScheme.LogSettings ??= new LogSettings();
 
             this.cleanupService = cleanupService;

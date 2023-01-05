@@ -36,6 +36,11 @@ namespace WiserTaskScheduler.Core.Models
         public long Version { get; set; }
 
         /// <summary>
+        /// A semicolon (;) seperated list of email addresses to notify when the service failed during execution.
+        /// </summary>
+        public string ServiceFailedNotificationEmails { get; set; }
+
+        /// <summary>
         /// Gets or sets the connection string that is used for queries.
         /// </summary>
         public string ConnectionString { get; set; }

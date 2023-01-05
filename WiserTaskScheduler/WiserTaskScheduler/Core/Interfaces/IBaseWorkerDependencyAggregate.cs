@@ -29,5 +29,10 @@ namespace WiserTaskScheduler.Core.Interfaces
         /// Gets the <see cref="IWiserDashboardService"/>.
         /// </summary>
         IWiserDashboardService WiserDashboardService { get; }
+        
+        /// <summary>
+        /// Gets the <see cref="IErrorNotificationService"/>.
+        /// </summary>
+        IErrorNotificationService ErrorNotificationService { get; }
     }
 }

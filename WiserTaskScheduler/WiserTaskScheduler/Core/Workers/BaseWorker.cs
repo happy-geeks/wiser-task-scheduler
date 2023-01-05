@@ -38,6 +38,9 @@ namespace WiserTaskScheduler.Core.Workers
         private readonly ILogger<BaseWorker> logger;
         private readonly IRunSchemesService runSchemesService;
         private readonly IWiserDashboardService wiserDashboardService;
+        private readonly IErrorNotificationService errorNotificationService;
+        
+        private string serviceFailedNotificationEmails;
 
         /// <summary>
         /// Creates a new instance of <see cref="BaseWorker"/>.
@@ -49,6 +52,7 @@ namespace WiserTaskScheduler.Core.Workers
             logger = baseWorkerDependencyAggregate.Logger;
             runSchemesService = baseWorkerDependencyAggregate.RunSchemesService;
             wiserDashboardService = baseWorkerDependencyAggregate.WiserDashboardService;
+            errorNotificationService = baseWorkerDependencyAggregate.ErrorNotificationService;
         }
 
         /// <summary>
@@ -59,7 +63,7 @@ namespace WiserTaskScheduler.Core.Workers
         /// <param name="runImmediately">True to run the action immediately, false to run at first delayed time.</param>
         /// <param name="configurationName">The name of the configuration, default <see langword="null"/>. If set it will update the service information.</param>
         /// <param name="singleRun">The configuration is only run once, ignoring paused state and run time.</param>
-        public void Initialize(string name, RunSchemeModel runScheme, bool runImmediately = false, string configurationName = null, bool singleRun = false)
+        protected void Initialize(string name, RunSchemeModel runScheme, string serviceFailedNotificationEmails, bool runImmediately = false, string configurationName = null, bool singleRun = false)
         {
             if (!String.IsNullOrWhiteSpace(Name))
                 return;
@@ -69,6 +73,8 @@ namespace WiserTaskScheduler.Core.Workers
             RunImmediately = runImmediately;
             ConfigurationName = configurationName;
             SingleRun = singleRun;
+
+            this.serviceFailedNotificationEmails = serviceFailedNotificationEmails;
         }
 
         /// <summary>
@@ -178,6 +184,8 @@ namespace WiserTaskScheduler.Core.Workers
                 {
                     await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "crashed");
                 }
+                
+                await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} crashed.", $"Wiser Task Scheduler crashed while executing the service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} and is therefore shutdown. Please check the logs for more details. A restart is required to start the service again.", RunScheme.LogSettings, LogScopes.StartAndStop, ConfigurationName ?? Name);
             }
         }
 
