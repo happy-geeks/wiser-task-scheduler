@@ -110,7 +110,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
     {
 	    var communicationSettings = await gclCommunicationsService.GetSettingsAsync(communication.Type);
 
-	    foreach (var communicationSetting in communicationSettings)
+        foreach (var communicationSetting in communicationSettings)
 	    {
 		    var contentSettings = communicationSetting.Settings.Single(x => x.Type == communication.Type);
 		    var lastProcessed = communicationSetting.LastProcessed.SingleOrDefault(x => x.Type == communication.Type);
@@ -304,7 +304,8 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 					    await gclCommunicationsService.SendSmsAsync(receiver.Key, content);
 					    break;
 				    case CommunicationTypes.WhatsApp:
-					    throw new NotImplementedException();
+                        await gclCommunicationsService.SendWhatsAppAsync(receiver.Key, content);
+						break;
 				    default:
 					    throw new ArgumentOutOfRangeException(nameof(communication.Type), communication.Type.ToString());
 			    }
