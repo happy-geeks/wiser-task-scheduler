@@ -23,6 +23,7 @@ using GeeksCoreLibrary.Modules.Payments.Interfaces;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Serilog;
+using SlackNet.AspNetCore;
 using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Core.Workers;
 
@@ -60,7 +61,7 @@ namespace WiserTaskScheduler
                 {
                     ConfigureSettings(hostContext.Configuration, services);
                     ConfigureHostedServices(services);
-                    ConfigureWtsServices(services);
+                    ConfigureWtsServices(services, hostContext);
                     
                     Log.Logger = new LoggerConfiguration()
                         .ReadFrom.Configuration(hostContext.Configuration)
@@ -80,11 +81,11 @@ namespace WiserTaskScheduler
             services.AddHostedService<CleanupWorker>();
         }
 
-        private static void ConfigureWtsServices(IServiceCollection services)
+        private static void ConfigureWtsServices(IServiceCollection services, HostBuilderContext hostContext)
         {
             services.AddScoped<ConfigurationsWorker>();
             services.AddScoped<IDatabaseConnection, MySqlDatabaseConnection>();
-            services.AddScoped<IHttpContextAccessor, HttpContextAccessor>();
+            services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
             services.AddScoped<IObjectsService, ObjectsService>();
             services.AddScoped<IDatabaseHelpersService, MySqlDatabaseHelpersService>();
             services.AddScoped<IStringReplacementsService, StringReplacementsService>();
@@ -92,6 +93,14 @@ namespace WiserTaskScheduler
             services.AddScoped<IAccountsService, AccountsService>();
             services.AddScoped<IBranchesService, BranchesService>();
             services.AddScoped<IRolesService, RolesService>();
+            
+#if DEBUG
+            services.AddSingleton(new SlackEndpointConfiguration());
+#else
+            services.AddSingleton(new SlackEndpointConfiguration().UseSigningSecret(signingSecret));
+#endif
+            var slackToken = hostContext.Configuration.GetSection("Wts").GetSection("SlackSettings").GetValue<string>("SlackAccessToken");
+            services.AddSlackNet(c => c.UseApiToken(slackToken));
 
             // Configure automatic scanning of classes for dependency injection.
             services.Scan(scan => scan

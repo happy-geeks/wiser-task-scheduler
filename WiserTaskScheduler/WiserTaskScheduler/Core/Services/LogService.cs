@@ -6,21 +6,27 @@ using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
+using WiserTaskScheduler.Modules.Slack.modules;
+using SlackNet;
+using SlackNet.WebApi;
 
 namespace WiserTaskScheduler.Core.Services
 {
-    public class LogService : ILogService, ISingletonService
+    public class LogService : ILogService, ISingletonService 
     {
         private readonly IServiceProvider serviceProvider;
 
         private bool updatedLogTable;
-
-        public LogService(IServiceProvider serviceProvider)
+        private readonly SlackSettings slackSettings;
+        
+        public LogService(IServiceProvider serviceProvider, IOptions<WtsSettings> wtsSettings)
         {
             this.serviceProvider = serviceProvider;
+            slackSettings = wtsSettings.Value.SlackSettings;
         }
 
         /// <inheritdoc />
@@ -70,10 +76,10 @@ namespace WiserTaskScheduler.Core.Services
                 {
                     try
                     {
+                        using var scope = serviceProvider.CreateScope();
                         // Try writing the log to the database.
                         try
                         {
-                            using var scope = serviceProvider.CreateScope();
                             using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
                             
                             // Update log table if it has not already been done since launch. The table definitions can only change when the WTS restarts with a new update.
@@ -93,7 +99,6 @@ namespace WiserTaskScheduler.Core.Services
                             databaseConnection.AddParameter("timeId", timeId);
                             databaseConnection.AddParameter("order", order);
                             databaseConnection.AddParameter("addedOn", DateTime.Now);
-                            
 #if DEBUG
                             databaseConnection.AddParameter("isTest", 1);
 #else
@@ -108,8 +113,15 @@ namespace WiserTaskScheduler.Core.Services
                             // If writing to the database fails log its error.
                             logger.Log(logLevel, $"Failed to write log to database due to exception: ${e}");
                         }
-
                         logger.Log(logLevel, message);
+
+                        // If Slack channel set use Slack .
+                        if (logLevel == logSettings.SlacklogLevel)
+                        {
+                            var slack = scope.ServiceProvider.GetRequiredService<ISlackApiClient>();
+                            var slackChannel = Environment.GetEnvironmentVariable("SlackChannel") ?? slackSettings.SlackChannel;
+                            await slack.Chat.PostMessage(new Message() { Text = $"Configuration : '{configurationName}'{Environment.NewLine}Time id : '{timeId}' {Environment.NewLine} order : {Environment.NewLine} message :{Environment.NewLine} {message} {Environment.NewLine} date : {DateTime.Now}"  , Channel = slackChannel });
+                        }
                     }
                     catch
                     {
