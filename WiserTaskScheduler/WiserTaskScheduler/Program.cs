@@ -94,14 +94,17 @@ namespace WiserTaskScheduler
             services.AddScoped<IBranchesService, BranchesService>();
             services.AddScoped<IRolesService, RolesService>();
             
+            // get SlackAccessToken & check if it is there 
+            var slackToken = hostContext.Configuration.GetSection("Wts").GetSection("SlackSettings").GetValue<string>("SlackAccessToken");
+            if (slackToken != String.Empty ){
 #if DEBUG
             services.AddSingleton(new SlackEndpointConfiguration());
 #else
             services.AddSingleton(new SlackEndpointConfiguration().UseSigningSecret(signingSecret));
 #endif
-            var slackToken = hostContext.Configuration.GetSection("Wts").GetSection("SlackSettings").GetValue<string>("SlackAccessToken");
             services.AddSlackNet(c => c.UseApiToken(slackToken));
-
+            }
+            
             // Configure automatic scanning of classes for dependency injection.
             services.Scan(scan => scan
                 // We start out with all types in the current assembly.
