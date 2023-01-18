@@ -94,9 +94,10 @@ namespace WiserTaskScheduler
             services.AddScoped<IBranchesService, BranchesService>();
             services.AddScoped<IRolesService, RolesService>();
             
-            // get SlackAccessToken & check if it is there 
+            // If there is Slacktoken setup Slack message. 
             var slackToken = hostContext.Configuration.GetSection("Wts").GetSection("SlackSettings").GetValue<string>("SlackAccessToken");
-            if (slackToken != String.Empty ){
+            if (!String.IsNullOrWhiteSpace(slackToken))
+            {
 #if DEBUG
             services.AddSingleton(new SlackEndpointConfiguration());
 #else

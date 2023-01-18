@@ -16,7 +16,7 @@ using SlackNet.WebApi;
 
 namespace WiserTaskScheduler.Core.Services
 {
-    public class LogService : ILogService, ISingletonService 
+    public class LogService : ILogService, ISingletonService
     {
         private readonly IServiceProvider serviceProvider;
 
@@ -115,12 +115,14 @@ namespace WiserTaskScheduler.Core.Services
                         }
                         logger.Log(logLevel, message);
 
-                        // If Slack channel set use Slack .
-                        if (logLevel == logSettings.SlacklogLevel)
+                        // If there is a slackChannel and SlackAccesToken Send a slack message if critical error.
+                        if (!String.IsNullOrWhiteSpace(slackSettings.SlackChannel) && !string.IsNullOrWhiteSpace(slackSettings.SlackAccessToken))
                         {
-                            var slack = scope.ServiceProvider.GetRequiredService<ISlackApiClient>();
-                            var slackChannel = Environment.GetEnvironmentVariable("SlackChannel") ?? slackSettings.SlackChannel;
-                            await slack.Chat.PostMessage(new Message() { Text = $"Configuration : '{configurationName}'{Environment.NewLine}Time id : '{timeId}' {Environment.NewLine} order : {Environment.NewLine} message :{Environment.NewLine} {message} {Environment.NewLine} date : {DateTime.Now}"  , Channel = slackChannel });
+                            if (logLevel == logSettings.SlacklogLevel)
+                            {
+                                var slack = scope.ServiceProvider.GetRequiredService<ISlackApiClient>();
+                                await slack.Chat.PostMessage(new Message() { Text = $"Configuration : '{configurationName}'{Environment.NewLine}Time id : '{timeId}'{Environment.NewLine}order :{Environment.NewLine}message :{Environment.NewLine}{message}{Environment.NewLine}date : {DateTime.Now}",Channel=slackSettings.SlackChannel});
+                            }    
                         }
                     }
                     catch
