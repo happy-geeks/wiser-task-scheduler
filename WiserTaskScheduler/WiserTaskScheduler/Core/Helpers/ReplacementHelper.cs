@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Helpers;
@@ -48,7 +49,7 @@ namespace WiserTaskScheduler.Core.Helpers
                     var lastKeyIndex = key.LastIndexOf('.');
                     var keyToArray = GetKeyToArray(remainingKey, key);
 
-                    var usingResultSetArray = ResultSetHelper.GetCorrectObject<JArray>(keyToArray.ToString(), emptyRows, usingResultSet);
+                    var usingResultSetArray = ResultSetHelper.GetCorrectObject<JArray>(keyToArray, emptyRows, usingResultSet);
                     for (var i = 0; i < usingResultSetArray.Count; i++)
                     {
                         values.Add(GetValue(key.Substring(lastKeyIndex + 1), new List<int>() {i}, (JObject) usingResultSetArray[i], htmlEncode));
@@ -109,7 +110,7 @@ namespace WiserTaskScheduler.Core.Helpers
             
             if (!String.IsNullOrWhiteSpace(remainingKey) && lastKeyIndex > 0)
             {
-                keyToArray.Append(".");
+                keyToArray.Append('.');
             }
 
             if (lastKeyIndex > 0)
@@ -131,6 +132,11 @@ namespace WiserTaskScheduler.Core.Helpers
         /// <returns></returns>
         public static string ReplaceText(string originalString, List<int> rows, List<string> parameterKeys, JObject usingResultSet, bool htmlEncode = false)
         {
+            if (String.IsNullOrWhiteSpace(originalString) || !parameterKeys.Any())
+            {
+                return originalString;
+            }
+            
             var result = originalString;
             
             foreach (var key in parameterKeys)

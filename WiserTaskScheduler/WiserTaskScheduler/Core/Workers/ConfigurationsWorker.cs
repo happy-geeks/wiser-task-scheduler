@@ -15,6 +15,7 @@ namespace WiserTaskScheduler.Core.Workers
         private readonly IConfigurationsService configurationsService;
         
         public ConfigurationModel Configuration { get; private set; }
+        public bool HasAction => configurationsService.HasAction;
 
         /// <summary>
         /// Creates a new instance of <see cref="ConfigurationsWorker"/>.

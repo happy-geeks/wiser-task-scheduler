@@ -80,6 +80,16 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                     {"Results", jArray}
                 };
             }
+            
+            if (String.IsNullOrWhiteSpace(httpApi.UseResultSet))
+            {
+                await logService.LogError(logger, LogScopes.StartAndStop, httpApi.LogSettings, $"The HTTP API in configuration '{configurationServiceName}', time ID '{httpApi.TimeId}', order '{httpApi.Order}' is set to not be a single request but no result set has been provided. If the information is not dynamic set action to single request, otherwise provide a result set to use.", configurationServiceName, httpApi.TimeId, httpApi.Order);
+                
+                return new JObject
+                {
+                    {"Results", jArray}
+                };
+            }
 
             var rows = ResultSetHelper.GetCorrectObject<JArray>(httpApi.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
 
@@ -162,6 +172,10 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                 {
                     request.Headers.Add("Authorization", token);
                 }
+                else
+                {
+                    await logService.LogWarning(logger, LogScopes.RunBody, httpApi.LogSettings, $"OAuth '{httpApi.OAuth}' not found for configuration '{configurationServiceName}' with time ID '{httpApi.TimeId}' and order '{httpApi.Order}'. Add the '{httpApi.OAuth}' to the OAuth configuration or remove usage.", configurationServiceName, httpApi.TimeId, httpApi.Order);
+                }
             }
             
             await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Headers: {request.Headers}", configurationServiceName, httpApi.TimeId, httpApi.Order);
@@ -242,7 +256,6 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
 
             // Always add the body as plain text.
             resultSet.Add("BodyPlainText", responseBody);
-            
             
             var useResultSetKeyParts = useResultSet.Split('.');
             var usedResultSet = String.IsNullOrWhiteSpace(useResultSet) ? null : ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? useResultSetKeyParts[0] : useResultSet, ReplacementHelper.EmptyRows, resultSets);

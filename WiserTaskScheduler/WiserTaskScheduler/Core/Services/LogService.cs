@@ -97,7 +97,7 @@ namespace WiserTaskScheduler.Core.Services
 #if DEBUG
                             databaseConnection.AddParameter("isTest", 1);
 #else
-                    databaseConnection.AddParameter("isTest", 0);
+                            databaseConnection.AddParameter("isTest", 0);
 #endif
                             
                             await databaseConnection.ExecuteAsync(@$"INSERT INTO {WiserTableNames.WtsLogs} (message, level, scope, source, configuration, time_id, `order`, added_on, is_test)

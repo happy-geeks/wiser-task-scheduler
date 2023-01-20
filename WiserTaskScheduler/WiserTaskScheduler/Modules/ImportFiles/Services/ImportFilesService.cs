@@ -45,10 +45,20 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
             {
                 return await ImportFile(importFile, ReplacementHelper.EmptyRows, resultSets, configurationServiceName, importFile.UseResultSet);
             }
+            
+            var jArray = new JArray();
+
+            if (String.IsNullOrWhiteSpace(importFile.UseResultSet))
+            {
+                await logService.LogError(logger, LogScopes.StartAndStop, importFile.LogSettings, $"The import in configuration '{configurationServiceName}', time ID '{importFile.TimeId}', order '{importFile.Order}' is set to not be a single file but no result set has been provided. If the information is not dynamic set action to single file, otherwise provide a result set to use.", configurationServiceName, importFile.TimeId, importFile.Order);
+                
+                return new JObject
+                {
+                    {"Results", jArray}
+                };
+            }
 
             var rows = ResultSetHelper.GetCorrectObject<JArray>(importFile.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
-
-            var jArray = new JArray();
 
             for (var i = 0; i < rows.Count; i++)
             {
