@@ -118,7 +118,7 @@ namespace WiserTaskScheduler.Core.Services
                         // If there is a slackChannel and SlackAccesToken Send a slack message if critical error.
                         if (!String.IsNullOrWhiteSpace(slackSettings.SlackChannel) && !string.IsNullOrWhiteSpace(slackSettings.SlackAccessToken))
                         {
-                            if (logLevel == logSettings.SlacklogLevel)
+                            if (logLevel == logSettings.SlackLogLevel)
                             {
                                 var slack = scope.ServiceProvider.GetRequiredService<ISlackApiClient>();
                                 await slack.Chat.PostMessage(new Message() { Text = $"Configuration : '{configurationName}'{Environment.NewLine}Time id : '{timeId}'{Environment.NewLine}order :{Environment.NewLine}message :{Environment.NewLine}{message}{Environment.NewLine}date : {DateTime.Now}",Channel=slackSettings.SlackChannel});

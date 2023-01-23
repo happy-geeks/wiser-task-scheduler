@@ -99,13 +99,13 @@ namespace WiserTaskScheduler
             if (!String.IsNullOrWhiteSpace(slackToken))
             {
 #if DEBUG
-            services.AddSingleton(new SlackEndpointConfiguration());
+                services.AddSingleton(new SlackEndpointConfiguration());
 #else
-            services.AddSingleton(new SlackEndpointConfiguration().UseSigningSecret(signingSecret));
+                services.AddSingleton(new SlackEndpointConfiguration().UseSigningSecret(signingSecret));
 #endif
-            services.AddSlackNet(c => c.UseApiToken(slackToken));
+                services.AddSlackNet(c => c.UseApiToken(slackToken));
             }
-            
+
             // Configure automatic scanning of classes for dependency injection.
             services.Scan(scan => scan
                 // We start out with all types in the current assembly.
