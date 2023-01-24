@@ -7,6 +7,8 @@ using WiserTaskScheduler.Modules.Branches.Interfaces;
 using WiserTaskScheduler.Modules.Branches.Models;
 using WiserTaskScheduler.Modules.CleanupItems.Interfaces;
 using WiserTaskScheduler.Modules.CleanupItems.Models;
+using WiserTaskScheduler.Modules.CleanupWiserHistory.Interfaces;
+using WiserTaskScheduler.Modules.CleanupWiserHistory.Models;
 using WiserTaskScheduler.Modules.Communications.Interfaces;
 using WiserTaskScheduler.Modules.Communications.Models;
 using WiserTaskScheduler.Modules.GenerateFiles.Interfaces;
@@ -59,6 +61,8 @@ namespace WiserTaskScheduler.Core.Factories
                     return serviceProvider.GetRequiredService<IWiserImportsService>() as IActionsService;
                 case CommunicationModel:
                     return serviceProvider.GetRequiredService<ICommunicationsService>() as IActionsService;
+                case CleanupWiserHistoryModel:
+                    return serviceProvider.GetRequiredService<ICleanupWiserHistoryService>() as IActionsService;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(action), action.ToString());
             }

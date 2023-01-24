@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Xml.Serialization;
 using WiserTaskScheduler.Modules.Branches.Models;
 using WiserTaskScheduler.Modules.CleanupItems.Models;
+using WiserTaskScheduler.Modules.CleanupWiserHistory.Models;
 using WiserTaskScheduler.Modules.Communications.Models;
 using WiserTaskScheduler.Modules.GenerateFiles.Models;
 using WiserTaskScheduler.Modules.HttpApis.Models;
@@ -160,6 +161,19 @@ namespace WiserTaskScheduler.Core.Models
         /// </summary>
         [XmlElement("WiserImport")]
         public WiserImportModel[] WiserImports { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the Wiser histories that need to be cleaned that have been placed in the group.
+        /// </summary>
+        [XmlArray("CleanupWiserHistories")]
+        [XmlArrayItem(typeof(CleanupWiserHistoryModel))]
+        public CleanupWiserHistoryModel[] CleanupWiserHistoryGroup { get; set; }
+
+        /// <summary>
+        /// Gets or sets the Wiser histories that need to be cleaned that have been placed outside the group.
+        /// </summary>
+        [XmlElement("CleanupWiserHistory")]
+        public CleanupWiserHistoryModel[] CleanupWiserHistories { get; set; }
 
         /// <summary>
         /// Get all run schemes that are defined in this configuration.

@@ -98,7 +98,9 @@ namespace WiserTaskScheduler.Core.Services
                 configuration.CommunicationGroup,
                 configuration.Communications,
                 configuration.WiserImportGroup,
-                configuration.WiserImports
+                configuration.WiserImports,
+                configuration.CleanupWiserHistoryGroup,
+                configuration.CleanupWiserHistories
             };
 
             var allActions = new List<ActionModel>();
