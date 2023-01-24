@@ -78,7 +78,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
         var gclCommunicationsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<GclCommunicationsService>>();
         var dataSelectorsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<DataSelectorsService>>();
 
-        var templatesService = new TemplatesService(null, gclSettings, databaseConnection, stringReplacementsService, null, null, null, null, null, null, null, null, null);
+        var templatesService = new TemplatesService(null, gclSettings, databaseConnection, stringReplacementsService, null, null, null, null, null, null, null, null, null, databaseHelpersService);
         var dataSelectorsService = new DataSelectorsService(gclSettings, databaseConnection, stringReplacementsService, templatesService, null, null, dataSelectorsServiceLogger, null);
         var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, dataSelectorsService, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
         var gclCommunicationsService = new GclCommunicationsService(gclSettings, gclCommunicationsServiceLogger, wiserItemsService, databaseConnection, databaseHelpersService);
@@ -92,7 +92,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
             case CommunicationTypes.Sms:
 	            return await ProcessSmsAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName);
             case CommunicationTypes.WhatsApp:
-	            throw new NotImplementedException();
+                return await ProcessWhatsAppAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName);
             default:
                 throw new ArgumentOutOfRangeException(nameof(communication.Type), communication.Type.ToString());
         }
@@ -110,7 +110,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
     {
 	    var communicationSettings = await gclCommunicationsService.GetSettingsAsync(communication.Type);
 
-	    foreach (var communicationSetting in communicationSettings)
+        foreach (var communicationSetting in communicationSettings)
 	    {
 		    var contentSettings = communicationSetting.Settings.Single(x => x.Type == communication.Type);
 		    var lastProcessed = communicationSetting.LastProcessed.SingleOrDefault(x => x.Type == communication.Type);
@@ -304,7 +304,8 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 					    await gclCommunicationsService.SendSmsAsync(receiver.Key, content);
 					    break;
 				    case CommunicationTypes.WhatsApp:
-					    throw new NotImplementedException();
+                        await gclCommunicationsService.SendWhatsAppAsync(receiver.Key, content);
+						break;
 				    default:
 					    throw new ArgumentOutOfRangeException(nameof(communication.Type), communication.Type.ToString());
 			    }
@@ -488,6 +489,68 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    {"Failed", failed},
 		    {"Total", processed + failed}
 	    };
+    }
+    private async Task<JObject> ProcessWhatsAppAsync(CommunicationModel communication, IDatabaseConnection databaseConnection, GclCommunicationsService gclCommunicationsService, string configurationServiceName)
+    {
+        var whatsAppList = await GetCommunicationsOfTypeAsync(communication, databaseConnection, configurationServiceName);
+
+        if (!whatsAppList.Any())
+        {
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, communication.LogSettings, "No text messages found to be send.", configurationServiceName, communication.TimeId, communication.Order);
+            return new JObject()
+            {
+                {"Type", "WhatsApp"},
+                {"Processed", 0},
+                {"Failed", 0},
+                {"Total", 0}
+            };
+        }
+
+        var processed = 0;
+        var failed = 0;
+
+        foreach (var whatsApp in whatsAppList)
+        {
+            if (ShouldDelay(whatsApp) || whatsApp.AttemptCount >= communication.MaxNumberOfCommunicationAttempts)
+            {
+                continue;
+            }
+
+            string statusCode = null;
+            string statusMessage = null;
+
+            try
+            {
+                whatsApp.AttemptCount++;
+                await gclCommunicationsService.SendWhatsAppDirectlyAsync(whatsApp, communication.SmsSettings);
+                processed++;
+                databaseConnection.ClearParameters();
+                databaseConnection.AddParameter("processed_date", DateTime.Now);
+            }
+            catch (Exception e)
+            {
+                failed++;
+                databaseConnection.ClearParameters();
+                statusCode = "General exception";
+                statusMessage = $"Attempt #{whatsApp.AttemptCount}:{Environment.NewLine}{e}";
+                await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, $"Failed to send whatsApp for communication ID {whatsApp.Id} due to general error:\n{e}", configurationServiceName, communication.TimeId, communication.Order);
+
+                whatsApp.AttemptCount = communication.MaxNumberOfCommunicationAttempts;
+            }
+
+            databaseConnection.AddParameter("attempt_count", whatsApp.AttemptCount);
+            databaseConnection.AddParameter("status_code", statusCode);
+            databaseConnection.AddParameter("status_message", statusMessage);
+            await databaseConnection.InsertOrUpdateRecordBasedOnParametersAsync(WiserTableNames.WiserCommunicationGenerated, whatsApp.Id);
+        }
+
+        return new JObject()
+        {
+            {"Type", "WhatsApp"},
+            {"Processed", processed},
+            {"Failed", failed},
+            {"Total", processed + failed}
+        };
     }
 
     /// <summary>

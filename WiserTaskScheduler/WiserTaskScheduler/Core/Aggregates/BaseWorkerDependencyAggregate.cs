@@ -24,6 +24,9 @@ namespace WiserTaskScheduler.Core.Aggregates
         /// <inheritdoc />
         public IWiserDashboardService WiserDashboardService { get; }
 
+        /// <inheritdoc />
+        public IErrorNotificationService ErrorNotificationService { get; }
+
         /// <summary>
         /// Creates a new instance of <see cref="BaseWorkerDependencyAggregate"/>.
         /// </summary>
@@ -31,12 +34,13 @@ namespace WiserTaskScheduler.Core.Aggregates
         /// <param name="logger"></param>
         /// <param name="runSchemesService"></param>
         /// <param name="wiserDashboardService"></param>
-        public BaseWorkerDependencyAggregate(ILogService logService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService, IWiserDashboardService wiserDashboardService)
+        public BaseWorkerDependencyAggregate(ILogService logService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService, IWiserDashboardService wiserDashboardService, IErrorNotificationService errorNotificationService)
         {
             LogService = logService;
             Logger = logger;
             RunSchemesService = runSchemesService;
             WiserDashboardService = wiserDashboardService;
+            ErrorNotificationService = errorNotificationService;
         }
     }
 }

@@ -30,7 +30,7 @@ namespace WiserTaskScheduler.Core.Workers
         /// <param name="baseWorkerDependencyAggregate"></param>
         public MainWorker(IOptions<WtsSettings> wtsSettings, IMainService mainService, ILogService logService, ILogger<MainWorker> logger, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
         {
-            Initialize(LogName, wtsSettings.Value.MainService.RunScheme, true);
+            Initialize(LogName, wtsSettings.Value.MainService.RunScheme, wtsSettings.Value.ServiceFailedNotificationEmails, true);
             RunScheme.LogSettings ??= new LogSettings();
 
             this.mainService = mainService;

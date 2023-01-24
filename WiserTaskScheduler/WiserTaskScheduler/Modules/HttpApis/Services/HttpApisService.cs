@@ -71,7 +71,7 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                 do
                 {
                     var result = await ExecuteRequest(httpApi, resultSets, httpApi.UseResultSet, ReplacementHelper.EmptyRows, configurationServiceName, url);
-                    url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}", ReplacementHelper.EmptyRows, result, false);
+                    url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}?", ReplacementHelper.EmptyRows, result, false);
                     jArray.Add(result);
                 } while (!String.IsNullOrWhiteSpace(url));
 
@@ -97,7 +97,7 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                     do
                     {
                         var result = await ExecuteRequest(httpApi, resultSets, $"{httpApi.UseResultSet}[{indexRows[0]}]", indexRows, configurationServiceName, url, i);
-                        url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}", ReplacementHelper.EmptyRows, result, false);
+                        url = ReplacementHelper.GetValue($"Body.{httpApi.NextUrlProperty}?", ReplacementHelper.EmptyRows, result, false);
                         jArray.Add(result);
                     } while (!String.IsNullOrWhiteSpace(url));
                 }
@@ -245,7 +245,7 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
             
             
             var useResultSetKeyParts = useResultSet.Split('.');
-            var usedResultSet = ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? useResultSetKeyParts[0] : useResultSet, ReplacementHelper.EmptyRows, resultSets);
+            var usedResultSet = String.IsNullOrWhiteSpace(useResultSet) ? null : ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? useResultSetKeyParts[0] : useResultSet, ReplacementHelper.EmptyRows, resultSets);
             resultSet.Add("UsedResultSet", usedResultSet);
 
             await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Status: {resultSet["StatusCode"]}, Result body:\n{responseBody}", configurationServiceName, httpApi.TimeId, httpApi.Order);
