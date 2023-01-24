@@ -1,4 +1,5 @@
 ﻿using System.Xml.Serialization;
+using GeeksCoreLibrary.Modules.Ftps.Enums;
 using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Modules.Body.Models;
 using WiserTaskScheduler.Modules.Ftps.Enums;

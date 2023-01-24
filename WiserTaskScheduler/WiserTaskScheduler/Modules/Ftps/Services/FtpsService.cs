@@ -12,6 +12,8 @@ using WiserTaskScheduler.Modules.Ftps.Enums;
 using WiserTaskScheduler.Modules.Ftps.Interfaces;
 using WiserTaskScheduler.Modules.Ftps.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Modules.Ftps.Interfaces;
+using GeeksCoreLibrary.Modules.Ftps.Models;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
 
@@ -43,7 +45,20 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
     {
         var ftpAction = (FtpModel) action;
         var ftpHandler = ftpHandlerFactory.GetFtpHandler(ftpAction.Type);
-        await ftpHandler.OpenConnectionAsync(ftpAction);
+
+        var ftpSettings = new FtpSettings()
+        {
+            User = ftpAction.User,
+            Password = ftpAction.Password,
+            Host = ftpAction.Host,
+            Port = ftpAction.Port,
+            EncryptionMode = ftpAction.EncryptionMode,
+            UsePassive = ftpAction.UsePassive,
+            SshPrivateKeyPassphrase = ftpAction.SshPrivateKeyPassphrase,
+            SshPrivateKeyPath = ftpAction.SshPrivateKeyPath
+        };
+        
+        await ftpHandler.OpenConnectionAsync(ftpSettings);
 
         JObject result;
 
@@ -121,7 +136,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
                     if (String.IsNullOrWhiteSpace(ftpAction.From))
                     {
                         var body = bodyService.GenerateBody(ftpAction.Body, ReplacementHelper.EmptyRows, resultSets);
-                        success = await ftpHandler.UploadAsync(ftpAction, toPath, Encoding.UTF8.GetBytes(body));
+                        success = await ftpHandler.UploadAsync(toPath, Encoding.UTF8.GetBytes(body));
                         result.Add("Success", success);
 
                         if (success)
@@ -135,7 +150,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
                     }
                     else
                     {
-                        success = await ftpHandler.UploadAsync(ftpAction, toPath, fromPath);
+                        success = await ftpHandler.UploadAsync(ftpAction.AllFilesInFolder, toPath, fromPath);
                         result.Add("Success", success);
 
                         if (success)
@@ -184,7 +199,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
             case FtpActionTypes.Download:
                 try
                 {
-                    var success = await ftpHandler.DownloadAsync(ftpAction, fromPath, toPath);
+                    var success = await ftpHandler.DownloadAsync(ftpAction.AllFilesInFolder, fromPath, toPath);
                     result.Add("Success", success);
 
                     if (success)
@@ -202,7 +217,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
                         try
                         {
                             await logService.LogInformation(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Deleting file(s) '{fromPath}' after successful download", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
-                            await ftpHandler.DeleteFileAsync(ftpAction, fromPath);
+                            await ftpHandler.DeleteFileAsync(ftpAction.AllFilesInFolder, fromPath);
                         }
                         catch (Exception e)
                         {
@@ -220,7 +235,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
             case FtpActionTypes.FilesInDirectory:
                 try
                 {
-                    var filesOnServer = await ftpHandler.GetFilesInFolderAsync(ftpAction, fromPath);
+                    var filesOnServer = await ftpHandler.GetFilesInFolderAsync(fromPath);
                     result.Add("FilesInDirectory", new JArray(filesOnServer));
                     result.Add("FilesInDirectoryCount", filesOnServer.Count);
                     result.Add("Success", true);
@@ -235,7 +250,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
             case FtpActionTypes.Delete:
                 try
                 {
-                    await ftpHandler.DeleteFileAsync(ftpAction, fromPath);
+                    await ftpHandler.DeleteFileAsync(ftpAction.AllFilesInFolder, fromPath);
                 }
                 catch (Exception e)
                 {
