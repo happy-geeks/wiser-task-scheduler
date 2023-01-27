@@ -43,6 +43,12 @@ namespace WiserTaskScheduler.Modules.Queries.Services
         public Task InitializeAsync(ConfigurationModel configuration)
         {
             connectionString = configuration.ConnectionString;
+
+            if (String.IsNullOrWhiteSpace(connectionString))
+            {
+                throw new ArgumentException($"Configuration '{configuration.ServiceName}' has no connection string defined but contains active `Query` actions. Please provide a connection string.");
+            }
+            
             return Task.CompletedTask;
         }
 

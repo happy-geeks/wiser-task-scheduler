@@ -42,6 +42,12 @@ namespace WiserTaskScheduler.Core.Services
         {
             this.configuration = configuration;
 
+            if (this.configuration.OAuths == null || !this.configuration.OAuths.Any())
+            {
+                await logService.LogWarning(logger, LogScopes.StartAndStop, this.configuration.LogSettings, "An OAuth configuration has been added but it does not contain OAuths to setup. Consider removing the OAuth configuration.", LogName);
+                return;
+            }
+
             using var scope = serviceProvider.CreateScope();
             var objectsService = scope.ServiceProvider.GetRequiredService<IObjectsService>();
 
@@ -54,7 +60,7 @@ namespace WiserTaskScheduler.Core.Services
                 var expireTime = await objectsService.GetSystemObjectValueAsync($"WTS_{oAuth.ApiName}_ExpireTime");
                 oAuth.ExpireTime = String.IsNullOrWhiteSpace(expireTime) ? DateTime.MinValue : Convert.ToDateTime(expireTime);
 
-                oAuth.LogSettings ??= configuration.LogSettings;
+                oAuth.LogSettings ??= this.configuration.LogSettings;
             }
         }
 
@@ -176,6 +182,7 @@ namespace WiserTaskScheduler.Core.Services
             return $"{oAuthApi.TokenType} {oAuthApi.AccessToken}";
         }
 
+        /// <inheritdoc />
         public async Task RequestWasUnauthorizedAsync(string apiName)
         {
             var oAuthApi = configuration.OAuths.SingleOrDefault(oAuth => oAuth.ApiName.Equals(apiName));
@@ -193,6 +200,10 @@ namespace WiserTaskScheduler.Core.Services
             await SaveToDatabaseAsync(oAuthApi);
         }
 
+        /// <summary>
+        /// Save the state/information of the OAuth to the database.
+        /// </summary>
+        /// <param name="oAuthApi">The name of the API to save the information for.</param>
         private async Task SaveToDatabaseAsync(OAuthModel oAuthApi)
         {
             using var scope = serviceProvider.CreateScope();

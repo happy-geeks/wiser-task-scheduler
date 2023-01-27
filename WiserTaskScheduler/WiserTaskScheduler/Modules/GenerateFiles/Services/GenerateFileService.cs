@@ -52,9 +52,20 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
             {
                 return await GenerateFile(generateFile, ReplacementHelper.EmptyRows, resultSets, configurationServiceName, generateFile.UseResultSet);
             }
+            
+            var jArray = new JArray();
+            
+            if (String.IsNullOrWhiteSpace(generateFile.UseResultSet))
+            {
+                await logService.LogError(logger, LogScopes.StartAndStop, generateFile.LogSettings, $"The generate file in configuration '{configurationServiceName}', time ID '{generateFile.TimeId}', order '{generateFile.Order}' is set to not be a single file but no result set has been provided. If the information is not dynamic set action to single file, otherwise provide a result set to use.", configurationServiceName, generateFile.TimeId, generateFile.Order);
+                
+                return new JObject
+                {
+                    {"Results", jArray}
+                };
+            }
 
             var rows = ResultSetHelper.GetCorrectObject<JArray>(generateFile.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
-            var jArray = new JArray();
 
             for (var i = 0; i < rows.Count; i++)
             {

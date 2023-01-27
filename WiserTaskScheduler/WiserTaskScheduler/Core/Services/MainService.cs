@@ -31,8 +31,7 @@ namespace WiserTaskScheduler.Core.Services
     {
         private const string LogName = "MainService";
 
-        private readonly string localConfiguration;
-        private readonly string localOAuthConfiguration;
+        private readonly WtsSettings wtsSettings;
         private readonly GclSettings gclSettings;
         private readonly IServiceProvider serviceProvider;
         private readonly IWiserService wiserService;
@@ -40,6 +39,7 @@ namespace WiserTaskScheduler.Core.Services
         private readonly IWiserDashboardService wiserDashboardService;
         private readonly ILogService logService;
         private readonly ILogger<MainService> logger;
+        private readonly IErrorNotificationService errorNotificationService;
 
         private readonly ConcurrentDictionary<string, ActiveConfigurationModel> activeConfigurations;
 
@@ -53,10 +53,9 @@ namespace WiserTaskScheduler.Core.Services
         /// <summary>
         /// Creates a new instance of <see cref="MainService"/>.
         /// </summary>
-        public MainService(IOptions<WtsSettings> wtsSettings, IOptions<GclSettings> gclSettings, IServiceProvider serviceProvider, IWiserService wiserService, IOAuthService oAuthService, IWiserDashboardService wiserDashboardService, ILogService logService, ILogger<MainService> logger)
+        public MainService(IOptions<WtsSettings> wtsSettings, IOptions<GclSettings> gclSettings, IServiceProvider serviceProvider, IWiserService wiserService, IOAuthService oAuthService, IWiserDashboardService wiserDashboardService, ILogService logService, ILogger<MainService> logger, IErrorNotificationService errorNotificationService)
         {
-            localConfiguration = wtsSettings.Value.MainService.LocalConfiguration;
-            localOAuthConfiguration = wtsSettings.Value.MainService.LocalOAuthConfiguration;
+            this.wtsSettings = wtsSettings.Value;
             this.gclSettings = gclSettings.Value;
             this.serviceProvider = serviceProvider;
             this.wiserService = wiserService;
@@ -64,6 +63,7 @@ namespace WiserTaskScheduler.Core.Services
             this.wiserDashboardService = wiserDashboardService;
             this.logService = logService;
             this.logger = logger;
+            this.errorNotificationService = errorNotificationService;
 
             activeConfigurations = new ConcurrentDictionary<string, ActiveConfigurationModel>();
         }
@@ -206,7 +206,7 @@ namespace WiserTaskScheduler.Core.Services
         {
             var configurations = new List<ConfigurationModel>();
             
-            if (String.IsNullOrWhiteSpace(localConfiguration))
+            if (String.IsNullOrWhiteSpace(wtsSettings.MainService.LocalConfiguration))
             {
                 var wiserConfigurations = await wiserService.RequestConfigurations();
 
@@ -227,7 +227,7 @@ namespace WiserTaskScheduler.Core.Services
 
                     if (wiserConfiguration.EditorValue.StartsWith("<OAuthConfiguration>"))
                     {
-                        if (String.IsNullOrWhiteSpace(localOAuthConfiguration))
+                        if (String.IsNullOrWhiteSpace(wtsSettings.MainService.LocalOAuthConfiguration))
                         {
                             if (wiserConfiguration.Version != oAuthConfigurationVersion)
                             {
@@ -251,22 +251,22 @@ namespace WiserTaskScheduler.Core.Services
             }
             else
             {
-                var configuration = await DeserializeConfigurationAsync(await File.ReadAllTextAsync(localConfiguration), $"Local file {localConfiguration}");
+                var configuration = await DeserializeConfigurationAsync(await File.ReadAllTextAsync(wtsSettings.MainService.LocalConfiguration), $"Local file {wtsSettings.MainService.LocalConfiguration}");
 
                 if (configuration != null)
                 {
                     configuration.TemplateId = 0;
-                    configuration.Version = File.GetLastWriteTimeUtc(localConfiguration).Ticks;
+                    configuration.Version = File.GetLastWriteTimeUtc(wtsSettings.MainService.LocalConfiguration).Ticks;
                     configurations.Add(configuration);
                 }
             }
 
-            if (!String.IsNullOrWhiteSpace(localOAuthConfiguration))
+            if (!String.IsNullOrWhiteSpace(wtsSettings.MainService.LocalOAuthConfiguration))
             {
-                var fileVersion = File.GetLastWriteTimeUtc(localOAuthConfiguration).Ticks;
+                var fileVersion = File.GetLastWriteTimeUtc(wtsSettings.MainService.LocalOAuthConfiguration).Ticks;
                 if (fileVersion != oAuthConfigurationVersion)
                 {
-                    await SetOAuthConfigurationAsync(await File.ReadAllTextAsync(localOAuthConfiguration));
+                    await SetOAuthConfigurationAsync(await File.ReadAllTextAsync(wtsSettings.MainService.LocalOAuthConfiguration));
                     oAuthConfigurationVersion = fileVersion;
                 }
             }
@@ -325,8 +325,27 @@ namespace WiserTaskScheduler.Core.Services
             using var scope = serviceProvider.CreateScope();
             var worker = scope.ServiceProvider.GetRequiredService<ConfigurationsWorker>();
 
-            await worker.InitializeAsync(configuration, $"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme, singleRun);
-            
+            try
+            {
+                await worker.InitializeAsync(configuration, $"{configuration.ServiceName} (Time id: {runScheme.TimeId})", runScheme, singleRun);
+                
+                // If there is no action to be performed the thread can be closed.
+                if (!worker.HasAction)
+                {
+                    await wiserDashboardService.UpdateServiceAsync(configuration.ServiceName, runScheme.TimeId, state: "stopped");
+                    return;
+                }
+            }
+            catch (Exception e)
+            {
+                await logService.LogCritical(logger, LogScopes.StartAndStop, configuration.LogSettings, $"{configuration.ServiceName} with time ID '{runScheme.TimeId}' could not be started due to exception {e}", configuration.ServiceName, runScheme.TimeId);
+                await wiserDashboardService.UpdateServiceAsync(configuration.ServiceName, runScheme.TimeId, state: "crashed");
+
+                await errorNotificationService.NotifyOfErrorByEmailAsync(String.IsNullOrWhiteSpace(configuration.ServiceFailedNotificationEmails) ?configuration.ServiceFailedNotificationEmails : wtsSettings.ServiceFailedNotificationEmails, $"Service '{configuration.ServiceName}' with time ID '{runScheme.TimeId}' could not be started.", $"Wiser Task Scheduler could not start service '{configuration.ServiceName}' with time ID '{runScheme.TimeId}'. Please check the logs for more details.", runScheme.LogSettings, LogScopes.StartAndStop, configuration.ServiceName);
+
+                return;
+            }
+
             if (!singleRun)
             {
                 activeConfigurations[configuration.ServiceName].WorkerPerTimeId.TryAdd(runScheme.TimeId, worker);

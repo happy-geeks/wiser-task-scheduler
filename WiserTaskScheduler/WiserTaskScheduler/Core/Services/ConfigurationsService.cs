@@ -36,6 +36,9 @@ namespace WiserTaskScheduler.Core.Services
         /// <inheritdoc />
         public string Name { get; set; }
 
+        /// <inheritdoc />
+        public bool HasAction => actions.Any();
+
         /// <summary>
         /// Creates a new instance of <see cref="ConfigurationsService"/>.
         /// </summary>
@@ -74,7 +77,13 @@ namespace WiserTaskScheduler.Core.Services
                 }
             }
 
-            await logService.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"{Name} has {actions.Count} action(s).", configurationServiceName, timeId);
+            if (!actions.Any())
+            {
+                await logService.LogWarning(logger, LogScopes.StartAndStop, LogSettings, $"{configurationServiceName} has no actions for time ID '{timeId}'. Please make sure the time ID of the run scheme and actions are filled in correctly.", configurationServiceName, timeId);
+                return;
+            }
+
+            await logService.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"{configurationServiceName} has {actions.Count} action(s) for time ID '{timeId}'.", configurationServiceName, timeId);
         }
 
         /// <summary>
@@ -100,7 +109,9 @@ namespace WiserTaskScheduler.Core.Services
                 configuration.WiserImportGroup,
                 configuration.WiserImports,
                 configuration.FtpGroup,
-                configuration.Ftps
+                configuration.Ftps,
+                configuration.CleanupWiserHistoryGroup,
+                configuration.CleanupWiserHistories
             };
 
             var allActions = new List<ActionModel>();

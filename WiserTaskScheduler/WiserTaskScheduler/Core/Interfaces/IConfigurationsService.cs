@@ -19,6 +19,11 @@ namespace WiserTaskScheduler.Core.Interfaces
         public string Name { get; set; }
 
         /// <summary>
+        /// Gets if the configuration service has any action to execute.
+        /// </summary>
+        public bool HasAction { get; }
+
+        /// <summary>
         /// Get all actions from the configuration that are associated with the time id.
         /// </summary>
         /// <param name="timeId"></param>

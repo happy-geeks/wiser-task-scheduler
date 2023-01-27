@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Models;
@@ -40,8 +41,11 @@ namespace WiserTaskScheduler.Core.Services
         /// <inheritdoc />
         public async Task CleanupAsync()
         {
+            using var scope = serviceProvider.CreateScope();
+            using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+            
             await CleanupFilesAsync();
-            await CleanupDatabaseLogsAsync();
+            await CleanupDatabaseLogsAsync(databaseConnection);
         }
 
         /// <summary>
@@ -49,7 +53,7 @@ namespace WiserTaskScheduler.Core.Services
         /// </summary>
         private async Task CleanupFilesAsync()
         {
-            if (cleanupServiceSettings.FileFolderPaths == null || cleanupServiceSettings.FileFolderPaths.Length == 0)
+            if (cleanupServiceSettings.FileFolderPaths == null || !cleanupServiceSettings.FileFolderPaths.Any())
             {
                 return;
             }
@@ -93,11 +97,8 @@ namespace WiserTaskScheduler.Core.Services
         /// <summary>
         /// Cleanup logs in the database older than the set number of days in the WTS logs.
         /// </summary>
-        private async Task CleanupDatabaseLogsAsync()
+        private async Task CleanupDatabaseLogsAsync(IDatabaseConnection databaseConnection)
         {
-            using var scope = serviceProvider.CreateScope();
-            using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
-            
             databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStore));
             var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WtsLogs} WHERE added_on < ?cleanupDate", cleanUp: true);
 
