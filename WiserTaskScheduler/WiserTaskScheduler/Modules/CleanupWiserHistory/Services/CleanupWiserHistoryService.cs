@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Models;
@@ -21,6 +22,7 @@ public class CleanupWiserHistoryService : ICleanupWiserHistoryService, IActionsS
     private readonly ILogger<CleanupWiserHistoryService> logger;
     
     private string connectionString;
+    private HashSet<string> tablesToOptimize;
 
     public CleanupWiserHistoryService(IServiceProvider serviceProvider, ILogService logService, ILogger<CleanupWiserHistoryService> logger)
     {
@@ -30,9 +32,11 @@ public class CleanupWiserHistoryService : ICleanupWiserHistoryService, IActionsS
     }
     
     /// <inheritdoc />
-    public Task InitializeAsync(ConfigurationModel configuration)
+    // ReSharper disable once ParameterHidesMember
+    public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
     {
         connectionString = configuration.ConnectionString;
+        this.tablesToOptimize = tablesToOptimize;
         
         if (String.IsNullOrWhiteSpace(connectionString))
         {
@@ -93,6 +97,11 @@ JOIN {WiserTableNames.WiserItem} AS item ON item.id = history.item_id AND item.e
 WHERE history.changed_on < ?cleanupDate");
 
         await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupWiserHistory.LogSettings, $"'{historyRowsDeleted}' {(historyRowsDeleted == 1 ? "row has" : "rows have")} been deleted from the history of items of entity '{cleanupWiserHistory.EntityName}'.", configurationServiceName, cleanupWiserHistory.TimeId, cleanupWiserHistory.Order);
+
+        if (cleanupWiserHistory.OptimizeTablesAfterCleanup && historyRowsDeleted > 0)
+        {
+            tablesToOptimize.Add(WiserTableNames.WiserHistory);
+        }
         
         return new JObject()
         {

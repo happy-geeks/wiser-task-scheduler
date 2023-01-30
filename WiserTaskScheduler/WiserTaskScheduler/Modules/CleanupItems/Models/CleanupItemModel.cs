@@ -56,5 +56,10 @@ namespace WiserTaskScheduler.Modules.CleanupItems.Models
         /// Gets or sets if the history needs to be saved.
         /// </summary>
         public bool SaveHistory { get; set; } = true;
+        
+        /// <summary>
+        /// Gets or sets if the cleaned tables need to be optimized afterwards.
+        /// </summary>
+        public bool OptimizeTablesAfterCleanup { get; set; } = true;
     }
 }
