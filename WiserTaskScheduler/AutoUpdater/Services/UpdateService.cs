@@ -65,7 +65,7 @@ public class UpdateService : IUpdateService
         logger.LogInformation("Retrieving version list from server.");
         
         using var request = new HttpRequestMessage(HttpMethod.Get, updateSettings.VersionListUrl);
-        using var client = new HttpClient();
+        using var client = new HttpClient(new HttpClientHandler() {AllowAutoRedirect = true});
         using var response = await client.SendAsync(request);
         return await response.Content.ReadFromJsonAsync<List<VersionModel>>();
     }
@@ -78,14 +78,14 @@ public class UpdateService : IUpdateService
     {
         logger.LogInformation("Download the latest update from the server.");
         
-        var filePath = Path.Combine(WtsTempPath, "update", "Update.zip");
+        var filePath = Path.Combine(WtsTempPath, "update", "update.zip");
         if (File.Exists(filePath))
         {
             File.Delete(filePath);
         }
         
         using var request = new HttpRequestMessage(HttpMethod.Get, updateSettings.VersionDownloadUrl);
-        using var client = new HttpClient();
+        using var client = new HttpClient(new HttpClientHandler() {AllowAutoRedirect = true});
         using var response = await client.SendAsync(request);
         await File.WriteAllBytesAsync(filePath, await response.Content.ReadAsByteArrayAsync());
 
@@ -184,7 +184,7 @@ public class UpdateService : IUpdateService
         try
         {
             BackupWts(wts);
-            PlaceWts(wts, Path.Combine(WtsTempPath, "update", "Update.zip"));
+            PlaceWts(wts, Path.Combine(WtsTempPath, "update", "update.zip"));
 
             // If the service was not running when the update started it does not need to restart.
             if (!serviceAlreadyStopped)
