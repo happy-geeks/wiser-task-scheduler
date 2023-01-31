@@ -21,6 +21,14 @@ namespace WiserTaskScheduler.Modules.Queries.Models
         /// </summary>
         public int Timeout { get; set; } = 30;
 
+        /// <summary>
+        /// Gets or sets the information for character encoding to use.
+        /// </summary>
         public CharacterEncodingModel CharacterEncoding { get; set; } = new CharacterEncodingModel();
+        
+        /// <summary>
+        /// Gets or sets if the queries in this action needs to be performed within a transaction.
+        /// </summary>
+        public bool UseTransaction { get; set; }
     }
 }
