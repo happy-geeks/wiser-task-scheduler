@@ -137,6 +137,7 @@ WHERE item.entity_type = ?entityName
 AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?cleanupDate) <= 0
 {wheres}";
         
+        databaseConnection.AddParameter("entityName", cleanupItem.EntityName);
         var itemsDataTable = await databaseConnection.GetAsync(query);
 
         if (itemsDataTable.Rows.Count == 0)
@@ -169,12 +170,14 @@ AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?
                 tablesToOptimize.Add($"{tablePrefix}{WiserTableNames.WiserItemDetail}");
                 tablesToOptimize.Add($"{tablePrefix}{WiserTableNames.WiserItemFile}");
                 
+                // Get all links that are connected to the selected entity and don't use parent ID (no links will be deleted when a parent ID is used so those links can be ignored).
                 var links = (await wiserItemsService.GetAllLinkTypeSettingsAsync())
                     .Where(linkSetting => !linkSetting.UseItemParentId
                                           && (linkSetting.DestinationEntityType.Equals(cleanupItem.EntityName, StringComparison.InvariantCultureIgnoreCase)
                                               || linkSetting.SourceEntityType.Equals(cleanupItem.EntityName, StringComparison.InvariantCultureIgnoreCase))
                                           );
 
+                // Add all link tables, including prefixed ones.
                 foreach (var link in links)
                 {
                     tablesToOptimize.Add($"{(link.UseDedicatedTable ? $"{link.Id}_" : "")}{WiserTableNames.WiserItemLink}");

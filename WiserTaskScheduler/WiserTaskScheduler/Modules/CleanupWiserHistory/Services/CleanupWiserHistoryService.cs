@@ -3,9 +3,13 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Core.Services;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
+using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
+using GeeksCoreLibrary.Modules.Objects.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Interfaces;
@@ -85,16 +89,34 @@ public class CleanupWiserHistoryService : ICleanupWiserHistoryService, IActionsS
         var connectionStringToUse = connectionString;
         await databaseConnection.ChangeConnectionStringsAsync(connectionStringToUse, connectionStringToUse);
         databaseConnection.ClearParameters();
+        
+        // Wiser Items Service requires dependency injection that results in the need of MVC services that are unavailable.
+        // Get all other services and create the Wiser Items Service with one of the services missing.
+        var objectService = scope.ServiceProvider.GetRequiredService<IObjectsService>();
+        var stringReplacementsService = scope.ServiceProvider.GetRequiredService<IStringReplacementsService>();
+        var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+        var gclSettings = scope.ServiceProvider.GetRequiredService<IOptions<GclSettings>>();
+        var wiserItemsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<WiserItemsService>>();
+        
+        var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, null, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
+        var tablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(cleanupWiserHistory.EntityName);
 
         var cleanupDate = DateTime.Now.Subtract(cleanupWiserHistory.TimeToStore);
         databaseConnection.AddParameter("entityName", cleanupWiserHistory.EntityName);
         databaseConnection.AddParameter("cleanupDate", cleanupDate);
+        databaseConnection.AddParameter("tableName", $"{tablePrefix}{WiserTableNames.WiserItem}");
         
         var historyRowsDeleted = await databaseConnection.ExecuteAsync($@"
 DELETE history.*
-FROM {WiserTableNames.WiserHistory} AS history
-JOIN {WiserTableNames.WiserItem} AS item ON item.id = history.item_id AND item.entity_type = ?entityName
-WHERE history.changed_on < ?cleanupDate");
+FROM {tablePrefix}{WiserTableNames.WiserItem} AS item
+JOIN {WiserTableNames.WiserHistory} AS history ON history.item_id = item.id AND history.tablename LIKE CONCAT(?tableName, '%') AND history.changed_on < ?cleanupDate
+WHERE item.entity_type = ?entityName");
+        
+        historyRowsDeleted += await databaseConnection.ExecuteAsync($@"
+DELETE history.*
+FROM {tablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} AS item
+JOIN {WiserTableNames.WiserHistory} AS history ON history.item_id = item.id AND history.tablename LIKE CONCAT(?tableName, '%') AND history.changed_on < ?cleanupDate
+WHERE item.entity_type = ?entityName");
 
         await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupWiserHistory.LogSettings, $"'{historyRowsDeleted}' {(historyRowsDeleted == 1 ? "row has" : "rows have")} been deleted from the history of items of entity '{cleanupWiserHistory.EntityName}'.", configurationServiceName, cleanupWiserHistory.TimeId, cleanupWiserHistory.Order);
 
