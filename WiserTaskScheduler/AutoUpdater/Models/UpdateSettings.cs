@@ -10,7 +10,7 @@ public class UpdateSettings
     public string VersionListUrl { get; set; }
 
     /// <summary>
-    /// The URL to the ZIP file containing the latest version of the AIS.
+    /// The URL to the ZIP file containing the latest version of the WTS.
     /// </summary>
     public string VersionDownloadUrl { get; set; }
 
@@ -20,7 +20,7 @@ public class UpdateSettings
     public SmtpSettings MailSettings { get; set; }
 
     /// <summary>
-    /// The information of the multiple AIS instances to update.
+    /// The information of the multiple WTS instances to update.
     /// </summary>
-    public List<AisModel> AisInstancesToUpdate { get; set; }
+    public List<WtsModel> WtsInstancesToUpdate { get; set; }
 }

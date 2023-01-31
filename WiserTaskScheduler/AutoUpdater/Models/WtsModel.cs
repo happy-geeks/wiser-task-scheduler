@@ -1,14 +1,14 @@
 ﻿namespace AutoUpdater.Models;
 
-public class AisModel
+public class WtsModel
 {
     /// <summary>
-    /// The name of the AIS service that needs tobe updated.
+    /// The name of the WTS service that needs tobe updated.
     /// </summary>
     public string ServiceName { get; set; }
 
     /// <summary>
-    /// The path to the folder the AIS is placed in that needs to be updated.
+    /// The path to the folder the WTS is placed in that needs to be updated.
     /// </summary>
     public string PathToFolder { get; set; }
 
@@ -18,7 +18,7 @@ public class AisModel
     public string ContactEmail { get; set; }
 
     /// <summary>
-    /// Send a email if the AIS has been updated.
+    /// Send a email if the WTS has been updated.
     /// </summary>
     public bool SendEmailOnUpdateComplete { get; set; }
 }

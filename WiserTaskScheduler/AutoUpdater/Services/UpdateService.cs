@@ -13,8 +13,8 @@ namespace AutoUpdater.Services;
 
 public class UpdateService : IUpdateService
 {
-    private const string AisTempPath = "C:/temp/ais";
-    private const string AisExeFile = "AutoImportServiceCore.exe";
+    private const string WtsTempPath = "C:/temp/wts";
+    private const string WtsExeFile = "WiserTaskScheduler.exe";
 
     private readonly UpdateSettings updateSettings;
     private readonly ILogger<UpdateService> logger;
@@ -28,14 +28,14 @@ public class UpdateService : IUpdateService
         this.logger = logger;
         this.serviceProvider = serviceProvider;
         
-        Directory.CreateDirectory(Path.Combine(AisTempPath, "update"));
-        Directory.CreateDirectory(Path.Combine(AisTempPath, "backups"));
+        Directory.CreateDirectory(Path.Combine(WtsTempPath, "update"));
+        Directory.CreateDirectory(Path.Combine(WtsTempPath, "backups"));
     }
 
     /// <inheritdoc />
     public async Task UpdateServicesAsync()
     {
-        logger.LogInformation("Starting with updating the AIS services.");
+        logger.LogInformation("Starting with updating the WTS services.");
 
         try
         {
@@ -45,21 +45,21 @@ public class UpdateService : IUpdateService
                 await DownloadUpdate(versionList[0].Version);
             }
 
-            foreach (var ais in updateSettings.AisInstancesToUpdate)
+            foreach (var wts in updateSettings.WtsInstancesToUpdate)
             {
-                new Thread(() => UpdateAis(ais, versionList)).Start();
+                new Thread(() => UpdateWts(wts, versionList)).Start();
             }
         }
         catch (Exception e)
         {
-            logger.LogError($"Failed to update the AIS services due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
+            logger.LogError($"Failed to update the WTS services due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
         }
     }
 
     /// <summary>
-    /// Get the list of all the versions of the AIS.
+    /// Get the list of all the versions of the WTS.
     /// </summary>
-    /// <returns>Returns the list of all the versions of the AIS.</returns>
+    /// <returns>Returns the list of all the versions of the WTS.</returns>
     private async Task<List<VersionModel>> GetVersionList()
     {
         logger.LogInformation("Retrieving version list from server.");
@@ -78,7 +78,7 @@ public class UpdateService : IUpdateService
     {
         logger.LogInformation("Download the latest update from the server.");
         
-        var filePath = Path.Combine(AisTempPath, "update", "Update.zip");
+        var filePath = Path.Combine(WtsTempPath, "update", "Update.zip");
         if (File.Exists(filePath))
         {
             File.Delete(filePath);
@@ -93,15 +93,15 @@ public class UpdateService : IUpdateService
     }
     
     /// <summary>
-    /// Update a single AIS, method is started on its own thread.
+    /// Update a single WTS, method is started on its own thread.
     /// </summary>
-    /// <param name="ais">The AIS information to update.</param>
-    /// <param name="versionList">All the versions of the AIS to be checked against.</param>
-    private void UpdateAis(AisModel ais, List<VersionModel> versionList)
+    /// <param name="wts">The WTS information to update.</param>
+    /// <param name="versionList">All the versions of the WTS to be checked against.</param>
+    private void UpdateWts(WtsModel wts, List<VersionModel> versionList)
     {
-        logger.LogInformation($"Updating AIS '{ais.ServiceName}'.");
+        logger.LogInformation($"Updating WTS '{wts.ServiceName}'.");
         
-        var versionInfo = FileVersionInfo.GetVersionInfo(Path.Combine(ais.PathToFolder, AisExeFile));
+        var versionInfo = FileVersionInfo.GetVersionInfo(Path.Combine(wts.PathToFolder, WtsExeFile));
         var version = new Version(versionInfo.FileVersion);
         var updateState = CheckForUpdates(version, versionList);
 
@@ -110,11 +110,11 @@ public class UpdateService : IUpdateService
             case UpdateStates.UpToDate:
                 return;
             case UpdateStates.BreakingChanges:
-                logger.LogWarning($"Could not update AIS '{ais.ServiceName}' to version {versionList[0].Version} due to breaking changes since the current version of the AIS ({version}).{Environment.NewLine}Please check the release logs and resolve the breaking changes before manually updating the AIS.");
-                EmailAdministrator(ais.ContactEmail, "AIS Auto Updater - Manual action required", $"Could not update AIS '{ais.ServiceName}' to version {versionList[0].Version} due to breaking changes since the current version of the AIS ({version}).<br/>Please check the release logs and resolve the breaking changes before manually updating the AIS.");
+                logger.LogWarning($"Could not update WTS '{wts.ServiceName}' to version {versionList[0].Version} due to breaking changes since the current version of the WTS ({version}).{Environment.NewLine}Please check the release logs and resolve the breaking changes before manually updating the WTS.");
+                EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Manual action required", $"Could not update WTS '{wts.ServiceName}' to version {versionList[0].Version} due to breaking changes since the current version of the WTS ({version}).<br/>Please check the release logs and resolve the breaking changes before manually updating the WTS.", wts.ServiceName);
                 return;
             case UpdateStates.Update:
-                PerformUpdate(ais, version, versionList[0].Version);
+                PerformUpdate(wts, version, versionList[0].Version);
                 return;
             default:
                 throw new ArgumentOutOfRangeException(nameof(updateState), updateState.ToString());
@@ -122,10 +122,10 @@ public class UpdateService : IUpdateService
     }
 
     /// <summary>
-    /// Check if the AIS can and needs to be updated.
+    /// Check if the WTS can and needs to be updated.
     /// </summary>
-    /// <param name="version">The current version of the AIS.</param>
-    /// <param name="versionList">All the versions of the AIS to be checked against.</param>
+    /// <param name="version">The current version of the WTS.</param>
+    /// <param name="versionList">All the versions of the WTS to be checked against.</param>
     /// <returns></returns>
     private UpdateStates CheckForUpdates(Version version, List<VersionModel> versionList)
     {
@@ -151,16 +151,16 @@ public class UpdateService : IUpdateService
     }
 
     /// <summary>
-    /// Update the current AIS to the newest version.
+    /// Update the current WTS to the newest version.
     /// Tries to restore to current version if the update failed.
     /// </summary>
-    /// <param name="ais">The AIS information to update.</param>
-    /// <param name="currentVersion"></param>
-    /// <param name="versionToUpdateTo"></param>
-    private void PerformUpdate(AisModel ais, Version currentVersion, Version versionToUpdateTo)
+    /// <param name="wts">The WTS information to update.</param>
+    /// <param name="currentVersion">The current version of the WTS.</param>
+    /// <param name="versionToUpdateTo">The version to update the WTS to.</param>
+    private void PerformUpdate(WtsModel wts, Version currentVersion, Version versionToUpdateTo)
     {
         var serviceController = new ServiceController();
-        serviceController.ServiceName = ais.ServiceName;
+        serviceController.ServiceName = wts.ServiceName;
         bool serviceAlreadyStopped;
 
         // Check if the service has been found. If the status throws an invalid operation exception the service does not exist.
@@ -170,8 +170,8 @@ public class UpdateService : IUpdateService
         }
         catch (InvalidOperationException)
         {
-            EmailAdministrator(ais.ContactEmail, "AIS Auto Updater - AIS not found", $"The service for AIS '{ais.ServiceName}' could not be found on the server and can therefore not be updated.");
-            logger.LogWarning($"No service found for '{ais.ServiceName}'.");
+            EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - WTS not found", $"The service for WTS '{wts.ServiceName}' could not be found on the server and can therefore not be updated.", wts.ServiceName);
+            logger.LogWarning($"No service found for '{wts.ServiceName}'.");
             return;
         }
 
@@ -183,8 +183,8 @@ public class UpdateService : IUpdateService
 
         try
         {
-            BackupAis(ais);
-            PlaceAis(ais, Path.Combine(AisTempPath, "update", "Update.zip"));
+            BackupWts(wts);
+            PlaceWts(wts, Path.Combine(WtsTempPath, "update", "Update.zip"));
 
             // If the service was not running when the update started it does not need to restart.
             if (!serviceAlreadyStopped)
@@ -196,31 +196,31 @@ public class UpdateService : IUpdateService
                 }
                 catch (InvalidOperationException updateException)
                 {
-                    RevertUpdate(ais, serviceController, currentVersion, versionToUpdateTo, updateException);
+                    RevertUpdate(wts, serviceController, currentVersion, versionToUpdateTo, updateException);
 
                     return;
                 }
             }
 
-            if (ais.SendEmailOnUpdateComplete)
+            if (wts.SendEmailOnUpdateComplete)
             {
-                logger.LogInformation($"AIS '{ais.ServiceName}' has been successfully updated to version {versionToUpdateTo}.");
-                EmailAdministrator(ais.ContactEmail, "AIS Auto Updater - Update installed", $"The AIS has been successfully updated to version {versionToUpdateTo}.");
+                logger.LogInformation($"WTS '{wts.ServiceName}' has been successfully updated to version {versionToUpdateTo}.");
+                EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Update installed", $"The service for WTS '{wts.ServiceName}' has been successfully updated to version {versionToUpdateTo}.", wts.ServiceName);
             }
         }
         catch (Exception e)
         {
-            logger.LogError($"Exception occured while updating AIS '{ais.ServiceName}'.{Environment.NewLine}{Environment.NewLine}{e}");
+            logger.LogError($"Exception occured while updating WTS '{wts.ServiceName}'.{Environment.NewLine}{Environment.NewLine}{e}");
         }
     }
 
     /// <summary>
-    /// Make a backup of the current AIS.
+    /// Make a backup of the current WTS.
     /// </summary>
-    /// <param name="ais">The AIS information to update.</param>
-    private void BackupAis(AisModel ais)
+    /// <param name="wts">The WTS information to update.</param>
+    private void BackupWts(WtsModel wts)
     {
-        var backupPath = Path.Combine(AisTempPath, "backups", ais.ServiceName);
+        var backupPath = Path.Combine(WtsTempPath, "backups", wts.ServiceName);
         Directory.CreateDirectory(backupPath);
         
         // Delete old backups.
@@ -229,17 +229,17 @@ public class UpdateService : IUpdateService
             file.Delete();
         }
         
-        ZipFile.CreateFromDirectory(ais.PathToFolder,  Path.Combine(backupPath, $"{DateTime.Now:yyyyMMdd}.zip"));
+        ZipFile.CreateFromDirectory(wts.PathToFolder,  Path.Combine(backupPath, $"{DateTime.Now:yyyyMMdd}.zip"));
     }
 
     /// <summary>
     /// Delete all files except the app settings and extract the files from the <see cref="source"/> to the folder.
     /// </summary>
-    /// <param name="ais">The AIS information to update.</param>
+    /// <param name="wts">The WTS information to update.</param>
     /// <param name="source">The source to extract the files from.</param>
-    private void PlaceAis(AisModel ais, string source)
+    private void PlaceWts(WtsModel wts, string source)
     {
-        foreach (var file in new DirectoryInfo(ais.PathToFolder).GetFiles())
+        foreach (var file in new DirectoryInfo(wts.PathToFolder).GetFiles())
         {
             if (file.Name.StartsWith("appsettings") && file.Name.EndsWith(".json"))
             {
@@ -248,43 +248,50 @@ public class UpdateService : IUpdateService
             
             file.Delete();
         }
-        ZipFile.ExtractToDirectory(source, ais.PathToFolder, true);
+        ZipFile.ExtractToDirectory(source, wts.PathToFolder, true);
     }
 
     /// <summary>
-    /// Revert the AIS back to the previous version from the backup made prior to the update.
+    /// Revert the WTS back to the previous version from the backup made prior to the update.
     /// </summary>
-    /// <param name="ais">The AIS information to update.</param>
+    /// <param name="wts">The WTS information to update.</param>
     /// <param name="serviceController"></param>
     /// <param name="currentVersion"></param>
     /// <param name="versionToUpdateTo"></param>
     /// <param name="updateException"></param>
-    private void RevertUpdate(AisModel ais, ServiceController serviceController, Version currentVersion, Version versionToUpdateTo, InvalidOperationException updateException)
+    private void RevertUpdate(WtsModel wts, ServiceController serviceController, Version currentVersion, Version versionToUpdateTo, InvalidOperationException updateException)
     {
-        PlaceAis(ais, Path.Combine(AisTempPath, "backups", ais.ServiceName, $"{DateTime.Now:yyyyMMdd}.zip"));
+        PlaceWts(wts, Path.Combine(WtsTempPath, "backups", wts.ServiceName, $"{DateTime.Now:yyyyMMdd}.zip"));
 
         try
         {
             // Try to start the previous installed version again.
             serviceController.Start();
             serviceController.WaitForStatus(ServiceControllerStatus.Running);
-            EmailAdministrator(ais.ContactEmail, "AIS Auto Updater - Updating failed!", $"Failed to update AIS '{ais.ServiceName}' to version {versionToUpdateTo}, successfully restored to version {currentVersion}.<br/><br/>Error when updating:<br/>{updateException.ToString().ReplaceLineEndings("<br/>")}");
+            EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Updating failed!", $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}, successfully restored to version {currentVersion}.<br/><br/>Error when updating:<br/>{updateException.ToString().ReplaceLineEndings("<br/>")}", wts.ServiceName);
         }
         catch (InvalidOperationException revertException)
         {
-            logger.LogError($"Failed to update AIS '{ais.ServiceName}' to version {versionToUpdateTo}, failed to restore version {currentVersion}.{Environment.NewLine}{Environment.NewLine}Error when reverting:{Environment.NewLine}{revertException}{Environment.NewLine}{Environment.NewLine}Error when updating:<br/>{updateException}");
-            EmailAdministrator(ais.ContactEmail, "AIS Auto Updater - Updating and reverting failed!", $"Failed to update AIS '{ais.ServiceName}' to version {versionToUpdateTo}, failed to restore version {currentVersion}.<br/><br/>Error when reverting:<br/>{revertException.ToString().ReplaceLineEndings("<br/>")}<br/><br/>Error when updating:<br/>{updateException.ToString().ReplaceLineEndings("<br/>")}");
+            logger.LogError($"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}, failed to restore version {currentVersion}.{Environment.NewLine}{Environment.NewLine}Error when reverting:{Environment.NewLine}{revertException}{Environment.NewLine}{Environment.NewLine}Error when updating:<br/>{updateException}");
+            EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Updating and reverting failed!", $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}, failed to restore version {currentVersion}.<br/><br/>Error when reverting:<br/>{revertException.ToString().ReplaceLineEndings("<br/>")}<br/><br/>Error when updating:<br/>{updateException.ToString().ReplaceLineEndings("<br/>")}", wts.ServiceName);
         }
     }
     
     /// <summary>
-    /// Send a email to the administrator of the AIS.
+    /// Send a email to the administrator of the WTS.
     /// </summary>
     /// <param name="receiver">The email address of the administrator.</param>
     /// <param name="subject">The subject of the email.</param>
     /// <param name="body">The body of the email.</param>
-    private void EmailAdministrator(string receiver, string subject, string body)
+    /// <param name="serviceName">The name of the WTS service for which an email is being send.</param>
+    private void EmailAdministrator(string receiver, string subject, string body, string serviceName)
     {
+        if (String.IsNullOrWhiteSpace(receiver))
+        {
+            logger.LogWarning($"No email address provided for '{serviceName}'.");
+            return;
+        }
+        
         var scope = serviceProvider.CreateScope();
         var communicationsService = GclServicesHelper.GetCommunicationsService(scope, null);
         var receivers = new List<CommunicationReceiverModel>();
