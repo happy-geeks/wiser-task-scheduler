@@ -60,33 +60,34 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
         
         await ftpHandler.OpenConnectionAsync(ftpSettings);
 
-        JObject result;
-
-        if (ftpAction.SingleAction)
+        try
         {
-            result = await ExecuteFtpAction(ftpAction, ftpHandler, resultSets, ReplacementHelper.EmptyRows, ftpAction.UseResultSet, configurationServiceName);
-        }
-        else
-        {
-            var rows = ResultSetHelper.GetCorrectObject<JArray>(ftpAction.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
-            var jArray = new JArray();
-            
-            // Execute the action for each result in the stated result set.
-            for (var i = 0; i < rows.Count; i++)
+            if (ftpAction.SingleAction)
             {
-                var indexRows = new List<int> { i };
-                jArray.Add(await ExecuteFtpAction(ftpAction, ftpHandler, resultSets, indexRows, $"{ftpAction.UseResultSet}[{i}]", configurationServiceName));
+                return await ExecuteFtpAction(ftpAction, ftpHandler, resultSets, ReplacementHelper.EmptyRows, ftpAction.UseResultSet, configurationServiceName);
             }
-            
-            result = new JObject
+            else
             {
-                {"Results", jArray}
-            };
+                var rows = ResultSetHelper.GetCorrectObject<JArray>(ftpAction.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
+                var jArray = new JArray();
+
+                // Execute the action for each result in the stated result set.
+                for (var i = 0; i < rows.Count; i++)
+                {
+                    var indexRows = new List<int> {i};
+                    jArray.Add(await ExecuteFtpAction(ftpAction, ftpHandler, resultSets, indexRows, $"{ftpAction.UseResultSet}[{i}]", configurationServiceName));
+                }
+
+                return new JObject
+                {
+                    {"Results", jArray}
+                };
+            }
         }
-
-        await ftpHandler.CloseConnectionAsync();
-
-        return result;
+        finally
+        {
+            await ftpHandler.CloseConnectionAsync();
+        }
     }
     
     /// <summary>
