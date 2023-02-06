@@ -22,7 +22,7 @@ public class GclServicesHelper
     /// <param name="scope">The scope to use.</param>
     /// <param name="databaseConnection">The database connection to use.</param>
     /// <param name="gclSettings">Optionally GCL settings, if not provided they will be injected.</param>
-    /// <returns>Returns and instance of <see cref="ICommunicationsService"/></returns>
+    /// <returns>Returns an instance of <see cref="IWiserItemsService"/></returns>
     public static IWiserItemsService GetWiserItemsService(IServiceScope scope, IDatabaseConnection? databaseConnection, IOptions<GclSettings>? gclSettings)
     {
         var objectService = scope.ServiceProvider.GetRequiredService<IObjectsService>();
