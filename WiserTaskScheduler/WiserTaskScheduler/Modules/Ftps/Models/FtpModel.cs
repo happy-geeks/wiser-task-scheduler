@@ -87,5 +87,5 @@ public class FtpModel : ActionModel
     /// <summary>
     /// Gets or sets if it is a single action that needs to be executed.
     /// </summary>
-    public bool SingleAction = true;
+    public bool SingleAction { get; set; } = true;
 }
