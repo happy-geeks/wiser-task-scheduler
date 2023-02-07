@@ -98,16 +98,16 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                 var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(useResultSet, ReplacementHelper.EmptyRows, resultSets);
                 var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
 
-                var fileLocationTuple = ReplacementHelper.PrepareText(fileLocation, usingResultSet, remainingKey);
-                var fileNameTuple = ReplacementHelper.PrepareText(fileName, usingResultSet, remainingKey);
+                var fileLocationTuple = ReplacementHelper.PrepareText(fileLocation, usingResultSet, remainingKey, generateFile.HashAlgorithm, generateFile.HashRepresentation);
+                var fileNameTuple = ReplacementHelper.PrepareText(fileName, usingResultSet, remainingKey, generateFile.HashAlgorithm, generateFile.HashRepresentation);
 
-                fileLocation = ReplacementHelper.ReplaceText(fileLocationTuple.Item1, rows, fileLocationTuple.Item2, usingResultSet);
-                fileName = ReplacementHelper.ReplaceText(fileNameTuple.Item1, rows, fileNameTuple.Item2, usingResultSet);
+                fileLocation = ReplacementHelper.ReplaceText(fileLocationTuple.Item1, rows, fileLocationTuple.Item2, usingResultSet, generateFile.HashAlgorithm, generateFile.HashRepresentation);
+                fileName = ReplacementHelper.ReplaceText(fileNameTuple.Item1, rows, fileNameTuple.Item2, usingResultSet, generateFile.HashAlgorithm, generateFile.HashRepresentation);
             }
 
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"Generating file '{fileName}' at '{fileLocation}'.", configurationServiceName, generateFile.TimeId, generateFile.Order);
 
-            var body = bodyService.GenerateBody(generateFile.Body, rows, resultSets, forcedIndex);
+            var body = bodyService.GenerateBody(generateFile.Body, rows, resultSets, generateFile.HashAlgorithm, generateFile.HashRepresentation, forcedIndex);
 
             var fileGenerated = false;
             try

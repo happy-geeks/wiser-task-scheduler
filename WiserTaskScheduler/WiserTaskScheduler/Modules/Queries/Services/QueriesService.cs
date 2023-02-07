@@ -107,7 +107,7 @@ namespace WiserTaskScheduler.Modules.Queries.Services
 
             var keyParts = query.UseResultSet.Split('.');
             var remainingKey = keyParts.Length > 1 ? query.UseResultSet.Substring(keyParts[0].Length + 1) : "";
-            var tuple = ReplacementHelper.PrepareText(query.Query, (JObject)resultSets[keyParts[0]], remainingKey, insertValues: false);
+            var tuple = ReplacementHelper.PrepareText(query.Query, (JObject)resultSets[keyParts[0]], remainingKey, query.HashAlgorithm, query.HashRepresentation, insertValues: false);
             var queryString = tuple.Item1;
             var parameterKeys = tuple.Item2;
             var insertedParameters = tuple.Item3;
@@ -131,7 +131,7 @@ namespace WiserTaskScheduler.Modules.Queries.Services
             // Perform the query for each row in the result set that is being used.
             var usingResultSet = ResultSetHelper.GetCorrectObject<JArray>(query.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
             var rows = new List<int> {0, 0};
-            var keyWithSecondLayer = parameterKeys.FirstOrDefault(key => key.Contains("[j]"));
+            var keyWithSecondLayer = parameterKeys.FirstOrDefault(parameterKey => parameterKey.Key.Contains("[j]"))?.Key;
             for (var i = 0; i < usingResultSet.Count; i++)
             {
                 rows[0] = i;
@@ -152,12 +152,12 @@ namespace WiserTaskScheduler.Modules.Queries.Services
                     {
                         rows[1] = j;
                         var lastJQuery = j == secondLayerArray.Count - 1;
-                        jArray.Add(await ExecuteQueryWithParameters(databaseConnection, queryString, rows, usingResultSet, parameterKeys, insertedParameters, lastIQuery && lastJQuery, query.UseTransaction));
+                        jArray.Add(await ExecuteQueryWithParameters(query, databaseConnection, queryString, rows, usingResultSet, parameterKeys, insertedParameters, lastIQuery && lastJQuery, query.UseTransaction));
                     }
                 }
                 else
                 {
-                    jArray.Add(await ExecuteQueryWithParameters(databaseConnection, queryString, rows, usingResultSet, parameterKeys, insertedParameters, lastIQuery, query.UseTransaction));
+                    jArray.Add(await ExecuteQueryWithParameters(query, databaseConnection, queryString, rows, usingResultSet, parameterKeys, insertedParameters, lastIQuery, query.UseTransaction));
                 }
             }
 
@@ -170,6 +170,7 @@ namespace WiserTaskScheduler.Modules.Queries.Services
         /// <summary>
         /// Execute the query with parameters.
         /// </summary>
+        /// <param name="query">The query action that is executed.</param>
         /// <param name="databaseConnection">The database connection to use.</param>
         /// <param name="queryString">The query to execute.</param>
         /// <param name="rows">The indexes for the rows to use.</param>
@@ -179,14 +180,20 @@ namespace WiserTaskScheduler.Modules.Queries.Services
         /// <param name="lastQuery">If the current query is the last one to be performed for this action.</param>
         /// <param name="usingTransaction">If the action is using a transaction.</param>
         /// <returns></returns>
-        private async Task<JObject> ExecuteQueryWithParameters(IDatabaseConnection databaseConnection, string queryString, List<int> rows, JArray usingResultSet, List<string> parameterKeys, List<KeyValuePair<string, string>> insertedParameters, bool lastQuery, bool usingTransaction)
+        private async Task<JObject> ExecuteQueryWithParameters(QueryModel query, IDatabaseConnection databaseConnection, string queryString, List<int> rows, JArray usingResultSet, List<ParameterKey> parameterKeys, List<KeyValuePair<string, string>> insertedParameters, bool lastQuery, bool usingTransaction)
         {
             var parameters = new List<KeyValuePair<string, string>>(insertedParameters);
 
-            foreach (var key in parameterKeys)
+            foreach (var parameterKey in parameterKeys)
             {
-                var parameterName = DatabaseHelpers.CreateValidParameterName(key);
-                var value = ReplacementHelper.GetValue(key, rows, (JObject)usingResultSet[rows[0]], false);
+                var parameterName = DatabaseHelpers.CreateValidParameterName(parameterKey.Key);
+                var value = ReplacementHelper.GetValue(parameterKey.Key, rows, (JObject)usingResultSet[rows[0]], false);
+
+                if (parameterKey.Hash)
+                {
+                    value = ReplacementHelper.HashValue(value, query.HashAlgorithm, query.HashRepresentation);
+                }
+                
                 parameters.Add(new KeyValuePair<string, string>(parameterName, value));
             }
 

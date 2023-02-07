@@ -138,10 +138,10 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                 var keyParts = useResultSet.Split('.');
                 var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? keyParts[0] : useResultSet, ReplacementHelper.EmptyRows, resultSets);
                 var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
-                var tuple = ReplacementHelper.PrepareText(url, usingResultSet, remainingKey, htmlEncode: true);
+                var tuple = ReplacementHelper.PrepareText(url, usingResultSet, remainingKey, httpApi.HashAlgorithm, httpApi.HashRepresentation, htmlEncode: true);
                 url = tuple.Item1;
                 var parameterKeys = tuple.Item2;
-                url = ReplacementHelper.ReplaceText(url, rows, parameterKeys, usingResultSet, htmlEncode: true);
+                url = ReplacementHelper.ReplaceText(url, rows, parameterKeys, usingResultSet, httpApi.HashAlgorithm, httpApi.HashRepresentation, htmlEncode: true);
             }
 
             await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Url: {url}, method: {httpApi.Method}", configurationServiceName, httpApi.TimeId, httpApi.Order);
@@ -159,8 +159,8 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                     var keyParts = header.UseResultSet.Split('.');
                     var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? keyParts[0] : header.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
                     var remainingKey = keyParts.Length > 1 ? header.UseResultSet.Substring(keyParts[0].Length + 1) : "";
-                    var tuple = ReplacementHelper.PrepareText(header.Value, usingResultSet, remainingKey);
-                    var headerValue = tuple.Item2.Count > 0 ? ReplacementHelper.ReplaceText(tuple.Item1, rows, tuple.Item2, usingResultSet) : tuple.Item1;
+                    var tuple = ReplacementHelper.PrepareText(header.Value, usingResultSet, remainingKey, httpApi.HashAlgorithm, httpApi.HashRepresentation);
+                    var headerValue = tuple.Item2.Count > 0 ? ReplacementHelper.ReplaceText(tuple.Item1, rows, tuple.Item2, usingResultSet, httpApi.HashAlgorithm, httpApi.HashRepresentation) : tuple.Item1;
                     request.Headers.Add(header.Name, headerValue);
                 }
             }
@@ -182,7 +182,7 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
 
             if (httpApi.Body != null)
             {
-                var body = bodyService.GenerateBody(httpApi.Body, rows, resultSets, forcedIndex);
+                var body = bodyService.GenerateBody(httpApi.Body, rows, resultSets, httpApi.HashAlgorithm, httpApi.HashRepresentation, forcedIndex);
 
                 await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Body:\n{body}", configurationServiceName, httpApi.TimeId, httpApi.Order);
                 request.Content = new StringContent(body)
