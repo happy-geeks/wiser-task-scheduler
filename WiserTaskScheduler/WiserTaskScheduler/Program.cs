@@ -40,7 +40,7 @@ namespace WiserTaskScheduler
             Host.CreateDefaultBuilder(args)
                 .UseWindowsService((options) =>
                 {
-                    options.ServiceName = "Auto import service";
+                    options.ServiceName = "Wiser Task Scheduler";
                 })
                 .ConfigureAppConfiguration((hostingContext, config) =>
                 {
