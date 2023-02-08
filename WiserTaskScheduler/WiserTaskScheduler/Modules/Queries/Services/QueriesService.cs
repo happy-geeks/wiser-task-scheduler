@@ -55,10 +55,12 @@ namespace WiserTaskScheduler.Modules.Queries.Services
         /// <inheritdoc />
         public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
         {
+            var query = (QueryModel)action;
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, query.LogSettings, $"Executing query in time id: {query.TimeId}, order: {query.Order}", configurationServiceName, query.TimeId, query.Order);
+            
             using var scope = serviceProvider.CreateScope();
             var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
-            var query = (QueryModel)action;
             await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
             databaseConnection.ClearParameters();
             await databaseConnection.EnsureOpenConnectionForWritingAsync();
@@ -70,9 +72,31 @@ namespace WiserTaskScheduler.Modules.Queries.Services
             databaseConnection.AddParameter("collation", query.CharacterEncoding.Collation);
             await databaseConnection.GetAsync("SET NAMES ?characterSet COLLATE ?collation", cleanUp: false);
             databaseConnection.ClearParameters();
+            
+            if (query.UseTransaction) await databaseConnection.BeginTransactionAsync();
 
-            await logService.LogInformation(logger, LogScopes.RunStartAndStop, query.LogSettings, $"Executing query in time id: {query.TimeId}, order: {query.Order}", configurationServiceName, query.TimeId, query.Order);
-
+            try
+            {
+                var result = await Execute(query, databaseConnection, resultSets, configurationServiceName);
+                
+                if (!query.UseTransaction) return result;
+                
+                await databaseConnection.CommitTransactionAsync();
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, query.LogSettings, $"Transaction committed in time id: {query.TimeId}, order: {query.Order}", configurationServiceName, query.TimeId, query.Order);
+                return result;
+            }
+            catch
+            {
+                if (!query.UseTransaction) throw;
+                
+                await databaseConnection.RollbackTransactionAsync();
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, query.LogSettings, $"Action failed, rolled back transaction in time id: {query.TimeId}, order: {query.Order}", configurationServiceName, query.TimeId, query.Order);
+                throw;
+            }
+        }
+        
+        private async Task<JObject> Execute(QueryModel query, IDatabaseConnection databaseConnection, JObject resultSets, string configurationServiceName)
+        {
             // If not using a result set execute the query as given.
             if (String.IsNullOrWhiteSpace(query.UseResultSet))
             {
@@ -128,12 +152,12 @@ namespace WiserTaskScheduler.Modules.Queries.Services
                     {
                         rows[1] = j;
                         var lastJQuery = j == secondLayerArray.Count - 1;
-                        jArray.Add(await ExecuteQueryWithParameters(databaseConnection, queryString, rows, usingResultSet, parameterKeys, insertedParameters, lastIQuery && lastJQuery));
+                        jArray.Add(await ExecuteQueryWithParameters(databaseConnection, queryString, rows, usingResultSet, parameterKeys, insertedParameters, lastIQuery && lastJQuery, query.UseTransaction));
                     }
                 }
                 else
                 {
-                    jArray.Add(await ExecuteQueryWithParameters(databaseConnection, queryString, rows, usingResultSet, parameterKeys, insertedParameters, lastIQuery));
+                    jArray.Add(await ExecuteQueryWithParameters(databaseConnection, queryString, rows, usingResultSet, parameterKeys, insertedParameters, lastIQuery, query.UseTransaction));
                 }
             }
 
@@ -143,7 +167,19 @@ namespace WiserTaskScheduler.Modules.Queries.Services
             };
         }
 
-        private async Task<JObject> ExecuteQueryWithParameters(IDatabaseConnection databaseConnection, string queryString, List<int> rows, JArray usingResultSet, List<string> parameterKeys, List<KeyValuePair<string, string>> insertedParameters, bool lastQuery)
+        /// <summary>
+        /// Execute the query with parameters.
+        /// </summary>
+        /// <param name="databaseConnection">The database connection to use.</param>
+        /// <param name="queryString">The query to execute.</param>
+        /// <param name="rows">The indexes for the rows to use.</param>
+        /// <param name="usingResultSet">The result set that is used.</param>
+        /// <param name="parameterKeys">The keys of the parameters to add.</param>
+        /// <param name="insertedParameters">The keys and values of parameters already inserted.</param>
+        /// <param name="lastQuery">If the current query is the last one to be performed for this action.</param>
+        /// <param name="usingTransaction">If the action is using a transaction.</param>
+        /// <returns></returns>
+        private async Task<JObject> ExecuteQueryWithParameters(IDatabaseConnection databaseConnection, string queryString, List<int> rows, JArray usingResultSet, List<string> parameterKeys, List<KeyValuePair<string, string>> insertedParameters, bool lastQuery, bool usingTransaction)
         {
             var parameters = new List<KeyValuePair<string, string>>(insertedParameters);
 
@@ -167,7 +203,7 @@ namespace WiserTaskScheduler.Modules.Queries.Services
                 }
             }
 
-            var dataTable = await databaseConnection.GetAsync(queryString, cleanUp: lastQuery);
+            var dataTable = await databaseConnection.GetAsync(queryString, cleanUp: lastQuery, useWritingConnectionIfAvailable: usingTransaction);
             return GetResultSetFromDataTable(dataTable);
         }
 
