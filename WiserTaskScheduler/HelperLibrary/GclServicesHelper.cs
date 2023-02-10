@@ -45,6 +45,7 @@ public class GclServicesHelper
     {
         var gclSettings = scope.ServiceProvider.GetRequiredService<IOptions<GclSettings>>();
         var gclCommunicationsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<CommunicationsService>>();
-        return new CommunicationsService(gclSettings, gclCommunicationsServiceLogger, GetWiserItemsService(scope, databaseConnection, gclSettings), databaseConnection);
+        var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+        return new CommunicationsService(gclSettings, gclCommunicationsServiceLogger, GetWiserItemsService(scope, databaseConnection, gclSettings), databaseConnection, databaseHelpersService);
     }
 }

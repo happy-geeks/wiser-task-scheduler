@@ -107,7 +107,7 @@ namespace WiserTaskScheduler.Modules.Queries.Services
 
             var keyParts = query.UseResultSet.Split('.');
             var remainingKey = keyParts.Length > 1 ? query.UseResultSet.Substring(keyParts[0].Length + 1) : "";
-            var tuple = ReplacementHelper.PrepareText(query.Query, (JObject)resultSets[keyParts[0]], remainingKey, query.HashAlgorithm, query.HashRepresentation, insertValues: false);
+            var tuple = ReplacementHelper.PrepareText(query.Query, (JObject)resultSets[keyParts[0]], remainingKey, query.HashSettings, insertValues: false);
             var queryString = tuple.Item1;
             var parameterKeys = tuple.Item2;
             var insertedParameters = tuple.Item3;
@@ -180,7 +180,7 @@ namespace WiserTaskScheduler.Modules.Queries.Services
         /// <param name="lastQuery">If the current query is the last one to be performed for this action.</param>
         /// <param name="usingTransaction">If the action is using a transaction.</param>
         /// <returns></returns>
-        private async Task<JObject> ExecuteQueryWithParameters(QueryModel query, IDatabaseConnection databaseConnection, string queryString, List<int> rows, JArray usingResultSet, List<ParameterKey> parameterKeys, List<KeyValuePair<string, string>> insertedParameters, bool lastQuery, bool usingTransaction)
+        private async Task<JObject> ExecuteQueryWithParameters(QueryModel query, IDatabaseConnection databaseConnection, string queryString, List<int> rows, JArray usingResultSet, List<ParameterKeyModel> parameterKeys, List<KeyValuePair<string, string>> insertedParameters, bool lastQuery, bool usingTransaction)
         {
             var parameters = new List<KeyValuePair<string, string>>(insertedParameters);
 
@@ -191,7 +191,7 @@ namespace WiserTaskScheduler.Modules.Queries.Services
 
                 if (parameterKey.Hash)
                 {
-                    value = ReplacementHelper.HashValue(value, query.HashAlgorithm, query.HashRepresentation);
+                    value = StringHelpers.HashValue(value, query.HashSettings);
                 }
                 
                 parameters.Add(new KeyValuePair<string, string>(parameterName, value));

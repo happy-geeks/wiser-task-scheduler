@@ -1,12 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Security.Cryptography;
 using System.Text;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Helpers;
+using GeeksCoreLibrary.Core.Models;
 using Newtonsoft.Json.Linq;
-using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Models;
 
 namespace WiserTaskScheduler.Core.Helpers
@@ -27,15 +26,14 @@ namespace WiserTaskScheduler.Core.Helpers
         /// <param name="originalString">The string to prepare.</param>
         /// <param name="usingResultSet">The result set that is used.</param>
         /// <param name="remainingKey">The remainder of they key (after the first .) to be used for collections.</param>
-        /// <param name="hashAlgorithm">The algorithm to use for hashing.</param>
-        /// <param name="hashRepresentation">The representation of hashed values.</param>
+        /// <param name="hashSettings">The settings to use for hashing.</param>
         /// <param name="insertValues">Insert values directly if it is a collection or a single value. Otherwise it will be replaced by a parameter '?{key}' and the value will be returned with the key in Item 3.</param>
         /// <param name="htmlEncode">If the values from the result set needs to be HTML encoded.</param>
         /// <returns></returns>
-        public static Tuple<string, List<ParameterKey>, List<KeyValuePair<string, string>>> PrepareText(string originalString, JObject usingResultSet, string remainingKey, HashAlgorithms hashAlgorithm, HashRepresentations hashRepresentation, bool insertValues = true, bool htmlEncode = false)
+        public static Tuple<string, List<ParameterKeyModel>, List<KeyValuePair<string, string>>> PrepareText(string originalString, JObject usingResultSet, string remainingKey, HashSettingsModel hashSettings, bool insertValues = true, bool htmlEncode = false)
         {
             var result = originalString;
-            var parameterKeys = new List<ParameterKey>();
+            var parameterKeys = new List<ParameterKeyModel>();
             var insertedParameters = new List<KeyValuePair<string, string>>();
 
             while (result.Contains("[{") && result.Contains("}]"))
@@ -70,7 +68,7 @@ namespace WiserTaskScheduler.Core.Helpers
                     var value = String.Join(",", values);
                     if (hashValue)
                     {
-                        value = HashValue(value, hashAlgorithm, hashRepresentation);
+                        value = StringHelpers.HashValue(value, hashSettings);
                     }
 
                     if (insertValues)
@@ -90,7 +88,7 @@ namespace WiserTaskScheduler.Core.Helpers
                     var value = GetValue(key, emptyRows, ResultSetHelper.GetCorrectObject<JObject>(remainingKey, emptyRows, usingResultSet), htmlEncode);
                     if (hashValue)
                     {
-                        value = HashValue(value, hashAlgorithm, hashRepresentation);
+                        value = StringHelpers.HashValue(value, hashSettings);
                     }
                     
                     if (insertValues)
@@ -108,7 +106,7 @@ namespace WiserTaskScheduler.Core.Helpers
                 {
                     var parameterName = DatabaseHelpers.CreateValidParameterName(key);
                     result = result.Replace($"[{{{originalKey}}}]", $"?{parameterName}");
-                    parameterKeys.Add(new ParameterKey()
+                    parameterKeys.Add(new ParameterKeyModel()
                     {
                         Key = key,
                         Hash = hashValue
@@ -116,7 +114,7 @@ namespace WiserTaskScheduler.Core.Helpers
                 }
             }
 
-            return new Tuple<string, List<ParameterKey>, List<KeyValuePair<string, string>>>(result, parameterKeys, insertedParameters);
+            return new Tuple<string, List<ParameterKeyModel>, List<KeyValuePair<string, string>>>(result, parameterKeys, insertedParameters);
         }
 
         /// <summary>
@@ -155,11 +153,10 @@ namespace WiserTaskScheduler.Core.Helpers
         /// <param name="rows">The rows to use the values from.</param>
         /// <param name="parameterKeys">The keys of the parameters to replace.</param>
         /// <param name="usingResultSet">The result set that is used.</param>
-        /// <param name="hashAlgorithm">The algorithm to use for hashing.</param>
-        /// <param name="hashRepresentation">The representation of hashed values.</param>
+        /// <param name="hashSettings">The settings to use for hashing.</param>
         /// <param name="htmlEncode">If the values from the result set needs to be HTML encoded.</param>
         /// <returns></returns>
-        public static string ReplaceText(string originalString, List<int> rows, List<ParameterKey> parameterKeys, JObject usingResultSet, HashAlgorithms hashAlgorithm, HashRepresentations hashRepresentation, bool htmlEncode = false)
+        public static string ReplaceText(string originalString, List<int> rows, List<ParameterKeyModel> parameterKeys, JObject usingResultSet, HashSettingsModel hashSettings, bool htmlEncode = false)
         {
             if (String.IsNullOrWhiteSpace(originalString) || !parameterKeys.Any())
             {
@@ -175,7 +172,7 @@ namespace WiserTaskScheduler.Core.Helpers
 
                 if (parameterKey.Hash)
                 {
-                    value = HashValue(value, hashAlgorithm, hashRepresentation);
+                    value = StringHelpers.HashValue(value, hashSettings);
                 }
                 
                 var parameterName = DatabaseHelpers.CreateValidParameterName(key);
@@ -226,51 +223,6 @@ namespace WiserTaskScheduler.Core.Helpers
             }
 
             return value;
-        }
-
-        /// <summary>
-        /// Hash a value given a specific algorithm and return it in the given representation.
-        /// </summary>
-        /// <param name="value">The value to hash.</param>
-        /// <param name="algorithm">The algorithm to use for hashing.</param>
-        /// <param name="representation">The representation of the bytes to return.</param>
-        /// <returns>Returns the value hashed with the algorithm converted to the given representation.</returns>
-        public static string HashValue(string value, HashAlgorithms algorithm, HashRepresentations representation)
-        {
-            HashAlgorithm hashAlgorithm;
-            
-            switch (algorithm)
-            {
-                case HashAlgorithms.MD5:
-                    hashAlgorithm = MD5.Create();
-                    break;
-                case HashAlgorithms.SHA256:
-                    hashAlgorithm = SHA256.Create();
-                    break;
-                case HashAlgorithms.SHA384:
-                    hashAlgorithm = SHA384.Create();
-                    break;
-                case HashAlgorithms.SHA512:
-                    hashAlgorithm = SHA512.Create();
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(algorithm), algorithm, null);
-            }
-            
-            var bytes = Encoding.ASCII.GetBytes(value);
-            var hashBytes = hashAlgorithm.ComputeHash(bytes);
-            
-            hashAlgorithm.Dispose();
-
-            switch (representation)
-            {
-                case HashRepresentations.Base64:
-                    return Convert.ToBase64String(hashBytes);
-                case HashRepresentations.Hex:
-                    return Convert.ToHexString(hashBytes);
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(representation), representation, null);
-            }
         }
     }
 }

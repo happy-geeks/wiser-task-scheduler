@@ -1,6 +1,6 @@
 ﻿namespace WiserTaskScheduler.Core.Models;
 
-public class ParameterKey
+public class ParameterKeyModel
 {
     /// <summary>
     /// Gets or sets the key for the parameter.
