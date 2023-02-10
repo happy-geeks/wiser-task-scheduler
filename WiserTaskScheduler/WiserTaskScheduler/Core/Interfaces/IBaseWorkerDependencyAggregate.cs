@@ -2,6 +2,7 @@ using WiserTaskScheduler.Core.Workers;
 using WiserTaskScheduler.Modules.RunSchemes.Interfaces;
 using WiserTaskScheduler.Modules.Wiser.Interfaces;
 using Microsoft.Extensions.Logging;
+using WiserTaskScheduler.Core.Models;
 
 namespace WiserTaskScheduler.Core.Interfaces
 {
@@ -34,5 +35,10 @@ namespace WiserTaskScheduler.Core.Interfaces
         /// Gets the <see cref="IErrorNotificationService"/>.
         /// </summary>
         IErrorNotificationService ErrorNotificationService { get; }
+
+        /// <summary>
+        /// Gets or sets the <see cref="WtsSettings"/>.
+        /// </summary>
+        WtsSettings WtsSettings { get; }
     }
 }

@@ -4,6 +4,8 @@ using WiserTaskScheduler.Modules.RunSchemes.Interfaces;
 using WiserTaskScheduler.Modules.Wiser.Interfaces;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using WiserTaskScheduler.Core.Models;
 
 namespace WiserTaskScheduler.Core.Aggregates
 {
@@ -26,6 +28,9 @@ namespace WiserTaskScheduler.Core.Aggregates
 
         /// <inheritdoc />
         public IErrorNotificationService ErrorNotificationService { get; }
+        
+        /// <inheritdoc />
+        public WtsSettings WtsSettings { get; }
 
         /// <summary>
         /// Creates a new instance of <see cref="BaseWorkerDependencyAggregate"/>.
@@ -34,13 +39,16 @@ namespace WiserTaskScheduler.Core.Aggregates
         /// <param name="logger"></param>
         /// <param name="runSchemesService"></param>
         /// <param name="wiserDashboardService"></param>
-        public BaseWorkerDependencyAggregate(ILogService logService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService, IWiserDashboardService wiserDashboardService, IErrorNotificationService errorNotificationService)
+        /// <param name="errorNotificationService"></param>
+        /// <param name="wtsSettings"></param>
+        public BaseWorkerDependencyAggregate(ILogService logService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService, IWiserDashboardService wiserDashboardService, IErrorNotificationService errorNotificationService, IOptions<WtsSettings> wtsSettings)
         {
             LogService = logService;
             Logger = logger;
             RunSchemesService = runSchemesService;
             WiserDashboardService = wiserDashboardService;
             ErrorNotificationService = errorNotificationService;
+            WtsSettings = wtsSettings.Value;
         }
     }
 }

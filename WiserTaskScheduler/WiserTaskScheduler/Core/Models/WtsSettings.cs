@@ -1,4 +1,5 @@
-﻿using WiserTaskScheduler.Core.Models.Cleanup;
+﻿using System;
+using WiserTaskScheduler.Core.Models.Cleanup;
 using WiserTaskScheduler.Modules.Slack.modules;
 using WiserTaskScheduler.Modules.Wiser.Models;
 
@@ -9,6 +10,17 @@ namespace WiserTaskScheduler.Core.Models
     /// </summary>
     public class WtsSettings
     {
+        private string name;
+
+        /// <summary>
+        /// Gets or sets the name of the WTS to use for communication.
+        /// </summary>
+        public string Name
+        {
+            get => String.IsNullOrWhiteSpace(name) ? $"Wiser Task Scheduler ({Environment.MachineName})" : name;
+            set => name = value;
+        }
+
         /// <summary>
         /// Gets or sets the settings of the <see cref="MainService"/>.
         /// </summary>

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Helpers;
@@ -24,6 +25,7 @@ namespace WiserTaskScheduler.Core.Services
         private readonly IActionsServiceFactory actionsServiceFactory;
         private readonly IErrorNotificationService errorNotificationService;
         private readonly IDatabaseHelpersService databaseHelpersService;
+        private readonly WtsSettings wtsSettings;
 
         private readonly SortedList<int, ActionModel> actions;
         private readonly Dictionary<string, IActionsService> actionsServices;
@@ -51,13 +53,14 @@ namespace WiserTaskScheduler.Core.Services
         /// <param name="actionsServiceFactory"></param>
         /// <param name="errorNotificationService"></param>
         /// <param name="databaseHelpersService"></param>
-        public ConfigurationsService(ILogService logService, ILogger<ConfigurationsService> logger, IActionsServiceFactory actionsServiceFactory, IErrorNotificationService errorNotificationService, IDatabaseHelpersService databaseHelpersService)
+        public ConfigurationsService(ILogService logService, ILogger<ConfigurationsService> logger, IActionsServiceFactory actionsServiceFactory, IErrorNotificationService errorNotificationService, IDatabaseHelpersService databaseHelpersService, IOptions<WtsSettings> wtsSettings)
         {
             this.logService = logService;
             this.logger = logger;
             this.actionsServiceFactory = actionsServiceFactory;
             this.errorNotificationService = errorNotificationService;
             this.databaseHelpersService = databaseHelpersService;
+            this.wtsSettings = wtsSettings.Value;
 
             actions = new SortedList<int, ActionModel>();
             actionsServices = new Dictionary<string, IActionsService>();
@@ -224,7 +227,7 @@ namespace WiserTaskScheduler.Core.Services
             catch (Exception e)
             {
                 await logService.LogCritical(logger, LogScopes.StartAndStop, LogSettings, $"Aborted {configurationServiceName} due to exception in time ID '{timeId}' and order '{currentOrder}', will try again next time. Exception {e}", configurationServiceName, timeId, currentOrder);
-                await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{configurationServiceName}' with time ID '{timeId}' failed.", $"Wiser Task Scheduler failed during the executing of service '{configurationServiceName}' with time ID '{timeId}' and has therefore been aborted. Please check the logs for more details. A new attempt will be made during the next run.", LogSettings, LogScopes.RunStartAndStop, configurationServiceName);
+                await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{configurationServiceName}' with time ID '{timeId}' of '{wtsSettings.Name}' failed.", $"Wiser Task Scheduler '{wtsSettings.Name}' failed during the executing of service '{configurationServiceName}' with time ID '{timeId}' and has therefore been aborted. Please check the logs for more details. A new attempt will be made during the next run.", LogSettings, LogScopes.RunStartAndStop, configurationServiceName);
             }
         }
 
