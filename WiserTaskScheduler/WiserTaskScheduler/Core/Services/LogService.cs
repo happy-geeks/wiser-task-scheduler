@@ -116,7 +116,7 @@ namespace WiserTaskScheduler.Core.Services
                         logger.Log(logLevel, message);
 
                         // If there is a slackChannel and SlackAccesToken Send a slack message if critical error.
-                        if (!String.IsNullOrWhiteSpace(slackSettings.SlackChannel) && !string.IsNullOrWhiteSpace(slackSettings.SlackAccessToken))
+                        if (slackSettings != null && !String.IsNullOrWhiteSpace(slackSettings.SlackChannel) && !string.IsNullOrWhiteSpace(slackSettings.SlackAccessToken))
                         {
                             if (logLevel == logSettings.SlackLogLevel)
                             {

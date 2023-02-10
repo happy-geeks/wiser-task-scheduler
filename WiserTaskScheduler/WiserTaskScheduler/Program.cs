@@ -40,7 +40,7 @@ namespace WiserTaskScheduler
             Host.CreateDefaultBuilder(args)
                 .UseWindowsService((options) =>
                 {
-                    options.ServiceName = "Auto import service";
+                    options.ServiceName = "Wiser Task Scheduler";
                 })
                 .ConfigureAppConfiguration((hostingContext, config) =>
                 {
@@ -101,7 +101,8 @@ namespace WiserTaskScheduler
 #if DEBUG
                 services.AddSingleton(new SlackEndpointConfiguration());
 #else
-                services.AddSingleton(new SlackEndpointConfiguration().UseSigningSecret(signingSecret));
+                var slackSigningSecret = hostContext.Configuration.GetSection("Wts").GetSection("SlackSettings").GetValue<string>("SlackSigningSecret");
+                services.AddSingleton(new SlackEndpointConfiguration().UseSigningSecret(slackSigningSecret));
 #endif
                 services.AddSlackNet(c => c.UseApiToken(slackToken));
             }

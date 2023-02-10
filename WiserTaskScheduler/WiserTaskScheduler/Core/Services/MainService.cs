@@ -341,7 +341,7 @@ namespace WiserTaskScheduler.Core.Services
                 await logService.LogCritical(logger, LogScopes.StartAndStop, configuration.LogSettings, $"{configuration.ServiceName} with time ID '{runScheme.TimeId}' could not be started due to exception {e}", configuration.ServiceName, runScheme.TimeId);
                 await wiserDashboardService.UpdateServiceAsync(configuration.ServiceName, runScheme.TimeId, state: "crashed");
 
-                await errorNotificationService.NotifyOfErrorByEmailAsync(String.IsNullOrWhiteSpace(configuration.ServiceFailedNotificationEmails) ?configuration.ServiceFailedNotificationEmails : wtsSettings.ServiceFailedNotificationEmails, $"Service '{configuration.ServiceName}' with time ID '{runScheme.TimeId}' could not be started.", $"Wiser Task Scheduler could not start service '{configuration.ServiceName}' with time ID '{runScheme.TimeId}'. Please check the logs for more details.", runScheme.LogSettings, LogScopes.StartAndStop, configuration.ServiceName);
+                await errorNotificationService.NotifyOfErrorByEmailAsync(String.IsNullOrWhiteSpace(configuration.ServiceFailedNotificationEmails) ? configuration.ServiceFailedNotificationEmails : wtsSettings.ServiceFailedNotificationEmails, $"Service '{configuration.ServiceName}' with time ID '{runScheme.TimeId}' of '{wtsSettings.Name}' could not be started.", $"Wiser Task Scheduler '{wtsSettings.Name}' could not start service '{configuration.ServiceName}' with time ID '{runScheme.TimeId}'. Please check the logs for more details.", runScheme.LogSettings, LogScopes.StartAndStop, configuration.ServiceName);
 
                 return;
             }

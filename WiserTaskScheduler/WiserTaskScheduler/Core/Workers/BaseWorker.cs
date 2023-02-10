@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Interfaces;
+using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Modules.RunSchemes.Interfaces;
 using WiserTaskScheduler.Modules.RunSchemes.Models;
 using WiserTaskScheduler.Modules.Wiser.Interfaces;
@@ -39,6 +40,7 @@ namespace WiserTaskScheduler.Core.Workers
         private readonly IRunSchemesService runSchemesService;
         private readonly IWiserDashboardService wiserDashboardService;
         private readonly IErrorNotificationService errorNotificationService;
+        private readonly WtsSettings wtsSettings;
         
         private string serviceFailedNotificationEmails;
 
@@ -53,6 +55,7 @@ namespace WiserTaskScheduler.Core.Workers
             runSchemesService = baseWorkerDependencyAggregate.RunSchemesService;
             wiserDashboardService = baseWorkerDependencyAggregate.WiserDashboardService;
             errorNotificationService = baseWorkerDependencyAggregate.ErrorNotificationService;
+            wtsSettings = baseWorkerDependencyAggregate.WtsSettings;
         }
 
         /// <summary>
@@ -185,7 +188,7 @@ namespace WiserTaskScheduler.Core.Workers
                     await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "crashed");
                 }
                 
-                await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} crashed.", $"Wiser Task Scheduler crashed while executing the service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} and is therefore shutdown. Please check the logs for more details. A restart is required to start the service again.", RunScheme.LogSettings, LogScopes.StartAndStop, ConfigurationName ?? Name);
+                await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} of '{wtsSettings.Name}' crashed.", $"Wiser Task Scheduler '{wtsSettings.Name}' crashed while executing the service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} and is therefore shutdown. Please check the logs for more details. A restart is required to start the service again.", RunScheme.LogSettings, LogScopes.StartAndStop, ConfigurationName ?? Name);
             }
         }
 
