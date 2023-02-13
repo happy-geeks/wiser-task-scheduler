@@ -48,6 +48,7 @@ public class CleanupItemsService : ICleanupItemsService, IActionsService, IScope
     public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
     {
         var cleanupItem = (CleanupItemModel) action;
+        var cleanupDate = DateTime.Now.Subtract(cleanupItem.TimeToStore);
 
         await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Starting cleanup for items of entity '{cleanupItem.EntityName}' that are older than '{cleanupItem.TimeToStore}'.", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
 
@@ -72,10 +73,24 @@ public class CleanupItemsService : ICleanupItemsService, IActionsService, IScope
         // Get the delete action of the entity to show it in the logs.
         databaseConnection.AddParameter("entityName", cleanupItem.EntityName);
         var entityDataTable = await databaseConnection.GetAsync($"SELECT delete_action FROM {WiserTableNames.WiserEntity} WHERE `name` = ?entityName LIMIT 1");
+
+        if (entityDataTable.Rows.Count == 0)
+        {
+            await logService.LogWarning(logger, LogScopes.RunBody, cleanupItem.LogSettings, $"Entity '{cleanupItem.EntityName}' not found in '{WiserTableNames.WiserEntity}'. Please ensure the entity is correct. When the entity has been removed please remove this action (configuration: {configurationServiceName}, time ID: {cleanupItem.TimeId}, order: '{cleanupItem.Order}').", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
+            
+            return new JObject()
+            {
+                {"Success", false},
+                {"EntityName", cleanupItem.EntityName},
+                {"CleanupDate", cleanupDate},
+                {"ItemsToCleanup", 0},
+                {"DeleteAction", "Not found!"}
+            };
+        }
+        
         var deleteAction = entityDataTable.Rows[0].Field<string>("delete_action");
         
         // Get all IDs from items that need to be cleaned.
-        var cleanupDate = DateTime.Now.Subtract(cleanupItem.TimeToStore);
         databaseConnection.AddParameter("cleanupDate", cleanupDate);
 
         var joins = new StringBuilder();
