@@ -20,7 +20,6 @@ namespace WiserTaskScheduler.Core.Services
     {
         private readonly IServiceProvider serviceProvider;
 
-        private bool updatedLogTable;
         private readonly SlackSettings slackSettings;
         
         public LogService(IServiceProvider serviceProvider, IOptions<WtsSettings> wtsSettings)
@@ -81,14 +80,6 @@ namespace WiserTaskScheduler.Core.Services
                         try
                         {
                             using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
-                            
-                            // Update log table if it has not already been done since launch. The table definitions can only change when the WTS restarts with a new update.
-                            if (!updatedLogTable)
-                            {
-                                var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
-                                await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WtsLogs});
-                                updatedLogTable = true;
-                            }
 
                             databaseConnection.ClearParameters();
                             databaseConnection.AddParameter("message", message);

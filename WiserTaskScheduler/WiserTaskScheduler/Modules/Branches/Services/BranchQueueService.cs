@@ -80,9 +80,6 @@ namespace WiserTaskScheduler.Modules.Branches.Services
             databaseConnection.ClearParameters();
 
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, branchQueue.LogSettings, $"Start handling branches queue in time id: {branchQueue.TimeId}, order: {branchQueue.Order}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-
-            // Make sure the wiser_branch_queue table exists, so that we don't get errors when running the WTS for new customers.
-            await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WiserBranchesQueue});
             
             // Use .NET time and not database time, because we often use DigitalOcean and they have their timezone set to UTC by default.
             databaseConnection.AddParameter("now", DateTime.Now);

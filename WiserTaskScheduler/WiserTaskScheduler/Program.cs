@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,10 +34,16 @@ namespace WiserTaskScheduler
     {
         public static async Task Main(string[] args)
         {
-            await CreateHostBuilder(args).Build().RunAsync();
+            var host = CreateHostBuilder(args).Build();
+            
+            using var scope = host.Services.CreateScope();
+            var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+            await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WtsLogs, WiserTableNames.WtsServices});
+            
+            await host.RunAsync();
         }
 
-        public static IHostBuilder CreateHostBuilder(string[] args) =>
+        private static IHostBuilder CreateHostBuilder(string[] args) =>
             Host.CreateDefaultBuilder(args)
                 .UseWindowsService((options) =>
                 {
@@ -55,14 +62,14 @@ namespace WiserTaskScheduler
                     var secretsBasePath = hostingContext.Configuration.GetSection("Wts").GetValue<string>("SecretsBaseDirectory");
 
                     config.AddJsonFile($"{secretsBasePath}wts-appsettings-secrets.json", false, false)
-                            .AddJsonFile($"appsettings.{hostingContext.HostingEnvironment.EnvironmentName}.json", true, true);
+                        .AddJsonFile($"appsettings.{hostingContext.HostingEnvironment.EnvironmentName}.json", true, true);
                 })
                 .ConfigureServices((hostContext, services) =>
                 {
                     ConfigureSettings(hostContext.Configuration, services);
                     ConfigureHostedServices(services);
                     ConfigureWtsServices(services, hostContext);
-                    
+
                     Log.Logger = new LoggerConfiguration()
                         .ReadFrom.Configuration(hostContext.Configuration)
                         .CreateLogger();
