@@ -42,7 +42,7 @@ namespace WiserTaskScheduler.Core.Services
         public async Task CleanupAsync()
         {
             using var scope = serviceProvider.CreateScope();
-            using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+            await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
             
             await CleanupFilesAsync();
             await CleanupDatabaseLogsAsync(databaseConnection);

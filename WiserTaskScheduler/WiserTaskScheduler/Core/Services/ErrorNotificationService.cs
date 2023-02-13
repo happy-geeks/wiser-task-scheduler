@@ -56,7 +56,7 @@ public class ErrorNotificationService : IErrorNotificationService, ISingletonSer
         var receivers = emails.Select(email => new CommunicationReceiverModel() {Address = email}).ToList();
 
         using var scope = serviceProvider.CreateScope();
-        using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
         
         // If there are no settings provided to send an email abort.
         var gclSettings = scope.ServiceProvider.GetRequiredService<IOptions<GclSettings>>();

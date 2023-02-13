@@ -52,7 +52,7 @@ public class CleanupItemsService : ICleanupItemsService, IActionsService, IScope
         await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Starting cleanup for items of entity '{cleanupItem.EntityName}' that are older than '{cleanupItem.TimeToStore}'.", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
 
         using var scope = serviceProvider.CreateScope();
-        using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
         var connectionStringToUse = cleanupItem.ConnectionString ?? connectionString;
         await databaseConnection.ChangeConnectionStringsAsync(connectionStringToUse, connectionStringToUse);

@@ -76,7 +76,7 @@ public class CleanupWiserHistoryService : ICleanupWiserHistoryService, IActionsS
         await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupWiserHistory.LogSettings, $"Starting cleanup for history of entity '{cleanupWiserHistory.EntityName}' that are older than '{cleanupWiserHistory.TimeToStore}'.", configurationServiceName, cleanupWiserHistory.TimeId, cleanupWiserHistory.Order);
         
         using var scope = serviceProvider.CreateScope();
-        using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
         var connectionStringToUse = connectionString;
         await databaseConnection.ChangeConnectionStringsAsync(connectionStringToUse, connectionStringToUse);

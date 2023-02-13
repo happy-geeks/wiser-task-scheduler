@@ -80,7 +80,7 @@ namespace WiserTaskScheduler.Core.Services
                         // Try writing the log to the database.
                         try
                         {
-                            using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+                            await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
                             
                             // Update log table if it has not already been done since launch. The table definitions can only change when the WTS restarts with a new update.
                             if (!updatedLogTable)

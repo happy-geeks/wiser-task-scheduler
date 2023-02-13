@@ -73,7 +73,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
         await logService.LogInformation(logger, LogScopes.RunStartAndStop, wiserImport.LogSettings, $"Starting the import for '{databaseName}'.", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
 
         using var scope = serviceProvider.CreateScope();
-        using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
         await databaseConnection.ChangeConnectionStringsAsync(connectionStringToUse, connectionStringToUse);
 
         var importDataTable = await GetImportsToProcessAsync(databaseConnection);

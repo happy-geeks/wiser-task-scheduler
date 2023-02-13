@@ -63,7 +63,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
         var communication = (CommunicationModel) action;
         
         using var scope = serviceProvider.CreateScope();
-        using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
         
         var connectionStringToUse = communication.ConnectionString ?? connectionString;
         await databaseConnection.ChangeConnectionStringsAsync(connectionStringToUse, connectionStringToUse);
