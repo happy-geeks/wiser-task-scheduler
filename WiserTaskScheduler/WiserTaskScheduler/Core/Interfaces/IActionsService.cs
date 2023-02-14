@@ -23,6 +23,7 @@ namespace WiserTaskScheduler.Core.Interfaces
         /// </summary>
         /// <param name="action">The action to execute.</param>
         /// <param name="resultSets">The result sets from previous actions in the same run.</param>
+        /// <param name="configurationServiceName">The name of the service in the configuration, used for logging.</param>
         /// <returns></returns>
         Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName);
     }
