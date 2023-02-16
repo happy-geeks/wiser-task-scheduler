@@ -151,7 +151,7 @@ FROM {WiserTableNames.WtsServices}
     private async Task<DataTable> ExecuteQueryAsync(string query, Dictionary<string, object> parameters = null)
     {
         using var scope = serviceProvider.CreateScope();
-        using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
         if (parameters != null && parameters.Any())
         {
@@ -202,7 +202,7 @@ FROM {WiserTableNames.WtsServices}
         var states = new List<string>();
         
         using var scope = serviceProvider.CreateScope();
-        using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
         databaseConnection.AddParameter("runStartTime", runStartTime);
         databaseConnection.AddParameter("configuration", configuration);
@@ -226,7 +226,7 @@ AND time_id = ?timeId");
     public async Task<bool> IsServicePaused(string configuration, int timeId)
     {
         using var scope = serviceProvider.CreateScope();
-        using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
         databaseConnection.AddParameter("configuration", configuration);
         databaseConnection.AddParameter("timeId", timeId);
@@ -249,7 +249,7 @@ AND time_id = ?timeId");
     public async Task<bool> IsServiceRunning(string configuration, int timeId)
     {
         using var scope = serviceProvider.CreateScope();
-        using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
         databaseConnection.AddParameter("configuration", configuration);
         databaseConnection.AddParameter("timeId", timeId);

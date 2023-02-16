@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,6 +14,9 @@ using GeeksCoreLibrary.Modules.Branches.Interfaces;
 using GeeksCoreLibrary.Modules.Branches.Services;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.Databases.Services;
+using GeeksCoreLibrary.Modules.Ftps.Factories;
+using GeeksCoreLibrary.Modules.Ftps.Handlers;
+using GeeksCoreLibrary.Modules.Ftps.Interfaces;
 using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
 using GeeksCoreLibrary.Modules.GclReplacements.Services;
 using GeeksCoreLibrary.Modules.Languages.Interfaces;
@@ -26,6 +30,7 @@ using Serilog;
 using SlackNet.AspNetCore;
 using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Core.Workers;
+using WiserTaskScheduler.Modules.Ftps.Services;
 
 namespace WiserTaskScheduler
 {
@@ -33,10 +38,16 @@ namespace WiserTaskScheduler
     {
         public static async Task Main(string[] args)
         {
-            await CreateHostBuilder(args).Build().RunAsync();
+            var host = CreateHostBuilder(args).Build();
+            
+            using var scope = host.Services.CreateScope();
+            var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+            await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WtsLogs, WiserTableNames.WtsServices});
+            
+            await host.RunAsync();
         }
 
-        public static IHostBuilder CreateHostBuilder(string[] args) =>
+        private static IHostBuilder CreateHostBuilder(string[] args) =>
             Host.CreateDefaultBuilder(args)
                 .UseWindowsService((options) =>
                 {
@@ -55,14 +66,14 @@ namespace WiserTaskScheduler
                     var secretsBasePath = hostingContext.Configuration.GetSection("Wts").GetValue<string>("SecretsBaseDirectory");
 
                     config.AddJsonFile($"{secretsBasePath}wts-appsettings-secrets.json", false, false)
-                            .AddJsonFile($"appsettings.{hostingContext.HostingEnvironment.EnvironmentName}.json", true, true);
+                        .AddJsonFile($"appsettings.{hostingContext.HostingEnvironment.EnvironmentName}.json", true, true);
                 })
                 .ConfigureServices((hostContext, services) =>
                 {
                     ConfigureSettings(hostContext.Configuration, services);
                     ConfigureHostedServices(services);
                     ConfigureWtsServices(services, hostContext);
-                    
+
                     Log.Logger = new LoggerConfiguration()
                         .ReadFrom.Configuration(hostContext.Configuration)
                         .CreateLogger();
@@ -84,6 +95,7 @@ namespace WiserTaskScheduler
         private static void ConfigureWtsServices(IServiceCollection services, HostBuilderContext hostContext)
         {
             services.AddScoped<ConfigurationsWorker>();
+            
             services.AddScoped<IDatabaseConnection, MySqlDatabaseConnection>();
             services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
             services.AddScoped<IObjectsService, ObjectsService>();
@@ -93,6 +105,9 @@ namespace WiserTaskScheduler
             services.AddScoped<IAccountsService, AccountsService>();
             services.AddScoped<IBranchesService, BranchesService>();
             services.AddScoped<IRolesService, RolesService>();
+            services.AddScoped<IFtpHandlerFactory, FtpHandlerFactory>();
+            services.AddScoped<FtpsHandler>();
+            services.AddScoped<SftpHandler>();
             
             // If there is Slacktoken setup Slack message. 
             var slackToken = hostContext.Configuration.GetSection("Wts").GetSection("SlackSettings").GetValue<string>("SlackAccessToken");

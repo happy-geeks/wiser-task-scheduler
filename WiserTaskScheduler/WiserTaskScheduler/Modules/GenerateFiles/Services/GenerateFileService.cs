@@ -38,7 +38,7 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
         }
 
         /// <inheritdoc />
-        public Task InitializeAsync(ConfigurationModel configuration)
+        public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
         {
             return Task.CompletedTask;
         }
@@ -98,16 +98,16 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                 var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(useResultSet, ReplacementHelper.EmptyRows, resultSets);
                 var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
 
-                var fileLocationTuple = ReplacementHelper.PrepareText(fileLocation, usingResultSet, remainingKey);
-                var fileNameTuple = ReplacementHelper.PrepareText(fileName, usingResultSet, remainingKey);
+                var fileLocationTuple = ReplacementHelper.PrepareText(fileLocation, usingResultSet, remainingKey, generateFile.HashSettings);
+                var fileNameTuple = ReplacementHelper.PrepareText(fileName, usingResultSet, remainingKey, generateFile.HashSettings);
 
-                fileLocation = ReplacementHelper.ReplaceText(fileLocationTuple.Item1, rows, fileLocationTuple.Item2, usingResultSet);
-                fileName = ReplacementHelper.ReplaceText(fileNameTuple.Item1, rows, fileNameTuple.Item2, usingResultSet);
+                fileLocation = ReplacementHelper.ReplaceText(fileLocationTuple.Item1, rows, fileLocationTuple.Item2, usingResultSet, generateFile.HashSettings);
+                fileName = ReplacementHelper.ReplaceText(fileNameTuple.Item1, rows, fileNameTuple.Item2, usingResultSet, generateFile.HashSettings);
             }
 
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"Generating file '{fileName}' at '{fileLocation}'.", configurationServiceName, generateFile.TimeId, generateFile.Order);
 
-            var body = bodyService.GenerateBody(generateFile.Body, rows, resultSets, forcedIndex);
+            var body = bodyService.GenerateBody(generateFile.Body, rows, resultSets, generateFile.HashSettings, forcedIndex);
 
             var fileGenerated = false;
             try

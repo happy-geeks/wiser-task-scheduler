@@ -26,7 +26,7 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
         }
 
         /// <inheritdoc />
-        public Task InitializeAsync(ConfigurationModel configuration)
+        public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
         {
             return Task.CompletedTask;
         }
@@ -92,9 +92,9 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
                 var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(useResultSet, ReplacementHelper.EmptyRows, resultSets);
                 var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
 
-                var tuple = ReplacementHelper.PrepareText(filePath, usingResultSet, remainingKey);
+                var tuple = ReplacementHelper.PrepareText(filePath, usingResultSet, remainingKey, importFile.HashSettings);
 
-                filePath = ReplacementHelper.ReplaceText(tuple.Item1, rows, tuple.Item2, usingResultSet);
+                filePath = ReplacementHelper.ReplaceText(tuple.Item1, rows, tuple.Item2, usingResultSet, importFile.HashSettings);
             }
 
             if (!File.Exists(filePath))

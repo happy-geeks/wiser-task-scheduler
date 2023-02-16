@@ -1,5 +1,7 @@
 ﻿using System;
 using System.ComponentModel.DataAnnotations;
+using GeeksCoreLibrary.Core.Enums;
+using GeeksCoreLibrary.Core.Models;
 
 namespace WiserTaskScheduler.Core.Models
 {
@@ -29,6 +31,15 @@ namespace WiserTaskScheduler.Core.Models
         /// Gets or sets the result set to use for replacements.
         /// </summary>
         public string UseResultSet { get; set; } = String.Empty;
+
+        /// <summary>
+        /// Gets or sets the settings to use to hash the marked values.
+        /// </summary>
+        public HashSettingsModel HashSettings { get; set; } = new()
+        {
+            Algorithm = HashAlgorithms.SHA256,
+            Representation = HashRepresentations.Base64
+        };
 
         /// <summary>
         /// Gets or sets which result set needs to be a specific value.

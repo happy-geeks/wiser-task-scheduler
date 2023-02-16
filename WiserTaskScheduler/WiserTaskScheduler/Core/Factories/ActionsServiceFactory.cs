@@ -21,6 +21,8 @@ using WiserTaskScheduler.Modules.Queries.Interfaces;
 using WiserTaskScheduler.Modules.Queries.Models;
 using WiserTaskScheduler.Modules.WiserImports.Interfaces;
 using WiserTaskScheduler.Modules.WiserImports.Models;
+using WiserTaskScheduler.Modules.Ftps.Interfaces;
+using WiserTaskScheduler.Modules.Ftps.Models;
 
 namespace WiserTaskScheduler.Core.Factories
 {
@@ -61,6 +63,8 @@ namespace WiserTaskScheduler.Core.Factories
                     return serviceProvider.GetRequiredService<IWiserImportsService>() as IActionsService;
                 case CommunicationModel:
                     return serviceProvider.GetRequiredService<ICommunicationsService>() as IActionsService;
+                case FtpModel:
+                    return serviceProvider.GetRequiredService<IFtpsService>() as IActionsService;
                 case CleanupWiserHistoryModel:
                     return serviceProvider.GetRequiredService<ICleanupWiserHistoryService>() as IActionsService;
                 default:

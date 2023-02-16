@@ -42,10 +42,11 @@ namespace WiserTaskScheduler.Core.Services
         public async Task CleanupAsync()
         {
             using var scope = serviceProvider.CreateScope();
-            using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+            await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+            var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
             
             await CleanupFilesAsync();
-            await CleanupDatabaseLogsAsync(databaseConnection);
+            await CleanupDatabaseLogsAsync(databaseConnection, databaseHelpersService);
         }
 
         /// <summary>
@@ -97,12 +98,16 @@ namespace WiserTaskScheduler.Core.Services
         /// <summary>
         /// Cleanup logs in the database older than the set number of days in the WTS logs.
         /// </summary>
-        private async Task CleanupDatabaseLogsAsync(IDatabaseConnection databaseConnection)
+        private async Task CleanupDatabaseLogsAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
         {
             databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStore));
             var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WtsLogs} WHERE added_on < ?cleanupDate", cleanUp: true);
-
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WtsLogs}'.", LogName);
+
+            if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
+            {
+                await databaseHelpersService.OptimizeTablesAsync(WiserTableNames.WtsLogs);
+            }
         }
     }
 }

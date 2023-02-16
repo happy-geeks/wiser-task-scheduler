@@ -17,6 +17,11 @@ namespace WiserTaskScheduler.Core.Models.Cleanup
         public int NumberOfDaysToStore { get; set; } = 14;
 
         /// <summary>
+        /// Gets or sets if the logs table needs to be optimized after it has been cleaned.
+        /// </summary>
+        public bool OptimizeLogsTableAfterCleanup { get; set; } = true;
+
+        /// <summary>
         /// Gets or sets the run scheme for the <see cref="CleanupWorker"/>.
         /// </summary>
         public RunSchemeModel RunScheme { get; set; } = new RunSchemeModel()
