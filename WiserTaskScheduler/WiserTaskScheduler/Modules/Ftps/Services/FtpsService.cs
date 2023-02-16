@@ -112,11 +112,11 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
             var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(useResultSet, ReplacementHelper.EmptyRows, resultSets);
             var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
 
-            var fromPathTuple = ReplacementHelper.PrepareText(fromPath, usingResultSet, remainingKey);
-            var toPathTuple = ReplacementHelper.PrepareText(toPath, usingResultSet, remainingKey);
+            var fromPathTuple = ReplacementHelper.PrepareText(fromPath, usingResultSet, remainingKey, ftpAction.HashSettings);
+            var toPathTuple = ReplacementHelper.PrepareText(toPath, usingResultSet, remainingKey, ftpAction.HashSettings);
 
-            fromPath = ReplacementHelper.ReplaceText(fromPathTuple.Item1, rows, fromPathTuple.Item2, usingResultSet);
-            toPath = ReplacementHelper.ReplaceText(toPathTuple.Item1, rows, toPathTuple.Item2, usingResultSet);
+            fromPath = ReplacementHelper.ReplaceText(fromPathTuple.Item1, rows, fromPathTuple.Item2, usingResultSet, ftpAction.HashSettings);
+            toPath = ReplacementHelper.ReplaceText(toPathTuple.Item1, rows, toPathTuple.Item2, usingResultSet, ftpAction.HashSettings);
         }
 
         var result = new JObject()
@@ -136,7 +136,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
                     // If there is no from path a file will be generated from the body and uploaded to the server.
                     if (String.IsNullOrWhiteSpace(ftpAction.From))
                     {
-                        var body = bodyService.GenerateBody(ftpAction.Body, ReplacementHelper.EmptyRows, resultSets);
+                        var body = bodyService.GenerateBody(ftpAction.Body, ReplacementHelper.EmptyRows, resultSets, ftpAction.HashSettings);
                         success = await ftpHandler.UploadAsync(toPath, Encoding.UTF8.GetBytes(body));
                         result.Add("Success", success);
 
