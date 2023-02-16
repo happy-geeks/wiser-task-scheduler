@@ -34,16 +34,21 @@ public class ErrorNotificationService : IErrorNotificationService, ISingletonSer
     }
     
     /// <inheritdoc />
+#pragma warning disable CS1998
     public async Task NotifyOfErrorByEmailAsync(string emails, string subject, string content, LogSettings logSettings, LogScopes logScope, string configurationName)
     {
+#if !DEBUG
+        // Only send mails for production Wiser Task Schedulers to prevent exceptions during developing/testing to trigger it.
         if (String.IsNullOrWhiteSpace(emails))
         {
             return;
         }
-        
+
         var emailList = emails.Split(";").ToList();
         await NotifyOfErrorByEmailAsync(emailList, subject, content, logSettings, logScope, configurationName);
+#endif
     }
+#pragma warning restore CS1998
 
     /// <inheritdoc />
     public async Task NotifyOfErrorByEmailAsync(List<string> emails, string subject, string content, LogSettings logSettings, LogScopes logScope, string configurationName)

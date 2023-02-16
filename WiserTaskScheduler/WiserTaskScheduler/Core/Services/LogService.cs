@@ -106,7 +106,10 @@ namespace WiserTaskScheduler.Core.Services
                         }
                         logger.Log(logLevel, message);
 
-                        // If there is a slackChannel and SlackAccesToken Send a slack message if critical error.
+#if !DEBUG
+                        // Only send messages to Slack for production Wiser Task Schedulers to prevent exceptions during developing/testing to trigger it.
+
+                        // If there is a slackChannel and SlackAccessToken Send a slack message if critical error.
                         if (slackSettings != null && !String.IsNullOrWhiteSpace(slackSettings.SlackChannel) && !string.IsNullOrWhiteSpace(slackSettings.SlackAccessToken))
                         {
                             if (logLevel == logSettings.SlackLogLevel)
@@ -115,6 +118,7 @@ namespace WiserTaskScheduler.Core.Services
                                 await slack.Chat.PostMessage(new Message() { Text = $"Configuration : '{configurationName}'{Environment.NewLine}Time id : '{timeId}'{Environment.NewLine}order :{Environment.NewLine}message :{Environment.NewLine}{message}{Environment.NewLine}date : {DateTime.Now}",Channel=slackSettings.SlackChannel});
                             }    
                         }
+#endif
                     }
                     catch
                     {
