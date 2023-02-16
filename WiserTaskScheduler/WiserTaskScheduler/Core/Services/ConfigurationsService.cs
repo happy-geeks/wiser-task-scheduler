@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
@@ -23,6 +24,7 @@ namespace WiserTaskScheduler.Core.Services
         private readonly ILogger<ConfigurationsService> logger;
         private readonly IActionsServiceFactory actionsServiceFactory;
         private readonly IErrorNotificationService errorNotificationService;
+        private readonly IDatabaseHelpersService databaseHelpersService;
         private readonly WtsSettings wtsSettings;
 
         private readonly SortedList<int, ActionModel> actions;
@@ -31,6 +33,8 @@ namespace WiserTaskScheduler.Core.Services
         private string configurationServiceName;
         private int timeId;
         private string serviceFailedNotificationEmails;
+
+        private HashSet<string> tablesToOptimize;
 
         /// <inheritdoc />
         public LogSettings LogSettings { get; set; }
@@ -48,17 +52,20 @@ namespace WiserTaskScheduler.Core.Services
         /// <param name="logger"></param>
         /// <param name="actionsServiceFactory"></param>
         /// <param name="errorNotificationService"></param>
-        /// <param name="wtsSettings"></param>
-        public ConfigurationsService(ILogService logService, ILogger<ConfigurationsService> logger, IActionsServiceFactory actionsServiceFactory, IErrorNotificationService errorNotificationService, IOptions<WtsSettings> wtsSettings)
+        /// <param name="databaseHelpersService"></param>
+        public ConfigurationsService(ILogService logService, ILogger<ConfigurationsService> logger, IActionsServiceFactory actionsServiceFactory, IErrorNotificationService errorNotificationService, IDatabaseHelpersService databaseHelpersService, IOptions<WtsSettings> wtsSettings)
         {
             this.logService = logService;
             this.logger = logger;
             this.actionsServiceFactory = actionsServiceFactory;
             this.errorNotificationService = errorNotificationService;
+            this.databaseHelpersService = databaseHelpersService;
             this.wtsSettings = wtsSettings.Value;
 
             actions = new SortedList<int, ActionModel>();
             actionsServices = new Dictionary<string, IActionsService>();
+
+            tablesToOptimize = new HashSet<string>();
         }
 
         /// <inheritdoc />
@@ -77,7 +84,7 @@ namespace WiserTaskScheduler.Core.Services
                 if (!actionsServices.ContainsKey(action.GetType().ToString()))
                 {
                     var actionsService = actionsServiceFactory.GetActionsServiceForAction(action);
-                    await actionsService.InitializeAsync(configuration);
+                    await actionsService.InitializeAsync(configuration, tablesToOptimize);
                     actionsServices.Add(action.GetType().ToString(), actionsService);
                 }
             }
@@ -113,6 +120,8 @@ namespace WiserTaskScheduler.Core.Services
                 configuration.Communications,
                 configuration.WiserImportGroup,
                 configuration.WiserImports,
+                configuration.FtpGroup,
+                configuration.Ftps,
                 configuration.CleanupWiserHistoryGroup,
                 configuration.CleanupWiserHistories
             };
@@ -184,6 +193,7 @@ namespace WiserTaskScheduler.Core.Services
             var resultSets = new JObject();
             var currentOrder = 0;
             var stopwatch = new Stopwatch();
+            tablesToOptimize.Clear();
 
             try
             {
@@ -208,6 +218,12 @@ namespace WiserTaskScheduler.Core.Services
                     
                     stopwatch.Stop();
                     await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Action finished in {stopwatch.Elapsed}", configurationServiceName, timeId, action.Value.Order);
+                }
+
+                if (tablesToOptimize.Any())
+                {
+                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Optimizing tables: {String.Join(',', tablesToOptimize)}", configurationServiceName, timeId);
+                    await databaseHelpersService.OptimizeTablesAsync(tablesToOptimize.ToArray());
                 }
             }
             catch (Exception e)

@@ -38,7 +38,7 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
         }
 
         /// <inheritdoc />
-        public Task InitializeAsync(ConfigurationModel configuration)
+        public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
         {
             return Task.CompletedTask;
         }

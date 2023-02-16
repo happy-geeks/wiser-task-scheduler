@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Enums;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Core.Services;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
@@ -29,6 +30,7 @@ public class CleanupItemsService : ICleanupItemsService, IActionsService, IScope
     private readonly ILogger<CleanupItemsService> logger;
 
     private string connectionString;
+    private HashSet<string> tablesToOptimize;
 
     public CleanupItemsService(IServiceProvider serviceProvider, ILogService logService, ILogger<CleanupItemsService> logger)
     {
@@ -38,9 +40,11 @@ public class CleanupItemsService : ICleanupItemsService, IActionsService, IScope
     }
 
     /// <inheritdoc />
-    public Task InitializeAsync(ConfigurationModel configuration)
+    // ReSharper disable once ParameterHidesMember
+    public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
     {
         connectionString = configuration.ConnectionString;
+        this.tablesToOptimize = tablesToOptimize;
         return Task.CompletedTask;
     }
 
@@ -70,9 +74,7 @@ public class CleanupItemsService : ICleanupItemsService, IActionsService, IScope
         var tablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(cleanupItem.EntityName);
         
         // Get the delete action of the entity to show it in the logs.
-        databaseConnection.AddParameter("entityName", cleanupItem.EntityName);
-        var entityDataTable = await databaseConnection.GetAsync($"SELECT delete_action FROM {WiserTableNames.WiserEntity} WHERE `name` = ?entityName LIMIT 1");
-        var deleteAction = entityDataTable.Rows[0].Field<string>("delete_action");
+        var deleteAction = (await wiserItemsService.GetEntityTypeSettingsAsync(cleanupItem.EntityName)).DeleteAction;
         
         // Get all IDs from items that need to be cleaned.
         var cleanupDate = DateTime.Now.Subtract(cleanupItem.TimeToStore);
@@ -135,6 +137,7 @@ WHERE item.entity_type = ?entityName
 AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?cleanupDate) <= 0
 {wheres}";
         
+        databaseConnection.AddParameter("entityName", cleanupItem.EntityName);
         var itemsDataTable = await databaseConnection.GetAsync(query);
 
         if (itemsDataTable.Rows.Count == 0)
@@ -147,7 +150,7 @@ AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?
                 {"EntityName", cleanupItem.EntityName},
                 {"CleanupDate", cleanupDate},
                 {"ItemsToCleanup", 0},
-                {"DeleteAction", deleteAction}
+                {"DeleteAction", deleteAction.ToString()}
             };
         }
 
@@ -158,8 +161,29 @@ AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?
         
         try
         {
-            await wiserItemsService.DeleteAsync(ids, username: "WTS Cleanup", saveHistory: cleanupItem.SaveHistory, skipPermissionsCheck: true, entityType: cleanupItem.EntityName);
+            var affectedRows = await wiserItemsService.DeleteAsync(ids, username: "WTS Cleanup", saveHistory: cleanupItem.SaveHistory, skipPermissionsCheck: true, entityType: cleanupItem.EntityName);
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Finished cleanup for items of entity '{cleanupItem.EntityName}', delete action: '{deleteAction}'.", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
+
+            if (cleanupItem.OptimizeTablesAfterCleanup && affectedRows > 0 && (deleteAction == EntityDeletionTypes.Archive || deleteAction == EntityDeletionTypes.Permanent))
+            {
+                tablesToOptimize.Add($"{tablePrefix}{WiserTableNames.WiserItem}");
+                tablesToOptimize.Add($"{tablePrefix}{WiserTableNames.WiserItemDetail}");
+                tablesToOptimize.Add($"{tablePrefix}{WiserTableNames.WiserItemFile}");
+                
+                // Get all links that are connected to the selected entity and don't use parent ID (no links will be deleted when a parent ID is used so those links can be ignored).
+                var links = (await wiserItemsService.GetAllLinkTypeSettingsAsync())
+                    .Where(linkSetting => !linkSetting.UseItemParentId
+                                          && (linkSetting.DestinationEntityType.Equals(cleanupItem.EntityName, StringComparison.InvariantCultureIgnoreCase)
+                                              || linkSetting.SourceEntityType.Equals(cleanupItem.EntityName, StringComparison.InvariantCultureIgnoreCase))
+                                          );
+
+                // Add all link tables, including prefixed ones.
+                foreach (var link in links)
+                {
+                    tablesToOptimize.Add($"{(link.UseDedicatedTable ? $"{link.Id}_" : "")}{WiserTableNames.WiserItemLink}");
+                    tablesToOptimize.Add($"{(link.UseDedicatedTable ? $"{link.Id}_" : "")}{WiserTableNames.WiserItemLinkDetail}");
+                }
+            }
         }
         catch (Exception e)
         {
@@ -173,7 +197,7 @@ AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?
             {"EntityName", cleanupItem.EntityName},
             {"CleanupDate", cleanupDate},
             {"ItemsToCleanup", itemsDataTable.Rows.Count},
-            {"DeleteAction", deleteAction}
+            {"DeleteAction", deleteAction.ToString()}
         };
     }
 
@@ -191,7 +215,7 @@ AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?
         var query = $@"SELECT link.type
 FROM {WiserTableNames.WiserLink} AS link
 WHERE link.use_dedicated_table = true
-AND link.{(destinationInsteadOfConnectedItem ? "destination_entity_type" : "connected_entity_type")} = 'testmark6'";
+AND link.{(destinationInsteadOfConnectedItem ? "destination_entity_type" : "connected_entity_type")} = ?entityName";
 
         var dataTable = await databaseConnection.GetAsync(query);
 

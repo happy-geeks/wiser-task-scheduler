@@ -51,7 +51,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
     }
 
     /// <inheritdoc />
-    public Task InitializeAsync(ConfigurationModel configuration)
+    public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
     {
 	    connectionString = configuration.ConnectionString;
 	    return Task.CompletedTask;

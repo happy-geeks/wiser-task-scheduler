@@ -31,4 +31,9 @@ public class CleanupWiserHistoryModel : ActionModel
         get => XmlConvert.ToString(TimeToStore);
         set => TimeToStore = String.IsNullOrWhiteSpace(value) ? TimeSpan.Zero : value.StartsWith("P") ? XmlConvert.ToTimeSpan(value) : TimeSpan.Parse(value);
     }
+    
+    /// <summary>
+    /// Gets or sets if the cleaned tables need to be optimized afterwards.
+    /// </summary>
+    public bool OptimizeTablesAfterCleanup { get; set; } = true;
 }

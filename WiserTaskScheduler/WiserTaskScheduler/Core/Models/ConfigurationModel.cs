@@ -11,6 +11,7 @@ using WiserTaskScheduler.Modules.ImportFiles.Models;
 using WiserTaskScheduler.Modules.Queries.Models;
 using WiserTaskScheduler.Modules.RunSchemes.Models;
 using WiserTaskScheduler.Modules.WiserImports.Models;
+using WiserTaskScheduler.Modules.Ftps.Models;
 
 namespace WiserTaskScheduler.Core.Models
 {
@@ -161,6 +162,19 @@ namespace WiserTaskScheduler.Core.Models
         /// </summary>
         [XmlElement("WiserImport")]
         public WiserImportModel[] WiserImports { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the FTPs that have been placed in the group.
+        /// </summary>
+        [XmlArray("Ftps")]
+        [XmlArrayItem(typeof(FtpModel))]
+        public FtpModel[] FtpGroup { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the FTPs that have been placed outside the group.
+        /// </summary>
+        [XmlElement("Ftp")]
+        public FtpModel[] Ftps { get; set; }
         
         /// <summary>
         /// Gets or sets the Wiser histories that need to be cleaned that have been placed in the group.
