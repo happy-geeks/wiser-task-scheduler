@@ -110,7 +110,7 @@ namespace WiserTaskScheduler.Core.Services
                         // Only send messages to Slack for production Wiser Task Schedulers to prevent exceptions during developing/testing to trigger it.
 
                         // Send messages to the specified Slack channel if one is set and the log level is high enough. If the token has not been set the service was not added at startup.
-                        if (slackSettings != null && !string.IsNullOrWhiteSpace(slackSettings.BotToken) && !String.IsNullOrWhiteSpace(slackSettings.Channel) && logLevel >= logSettings.SlackLogLevel)
+                        if (slackSettings != null && !String.IsNullOrWhiteSpace(slackSettings.BotToken) && !String.IsNullOrWhiteSpace(slackSettings.Channel) && logLevel >= logSettings.SlackLogLevel)
                         {
                             var slack = scope.ServiceProvider.GetRequiredService<ISlackApiClient>();
                             await slack.Chat.PostMessage(new Message() { Text = $@"Log level: {logLevel}
@@ -120,7 +120,7 @@ Order: '{order}'
 
 Message:
 {message}",
-                                Channel=slackSettings.Channel
+                                Channel = slackSettings.Channel
                             });
                         }
 #endif
