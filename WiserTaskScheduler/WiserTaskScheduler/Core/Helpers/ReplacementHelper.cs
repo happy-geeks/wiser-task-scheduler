@@ -77,7 +77,7 @@ namespace WiserTaskScheduler.Core.Helpers
                     }
                     else
                     {
-                        var parameterName = DatabaseHelpers.CreateValidParameterName(key);
+                        var parameterName = DatabaseHelpers.CreateValidParameterName($"{key}wts{Guid.NewGuid()}");
                         result = result.Replace($"[{{{originalKey}}}]", $"?{parameterName}");
                         insertedParameters.Add(new KeyValuePair<string, string>(parameterName, value));
                     }
@@ -97,18 +97,19 @@ namespace WiserTaskScheduler.Core.Helpers
                     }
                     else
                     {
-                        var parameterName = DatabaseHelpers.CreateValidParameterName(key);
+                        var parameterName = DatabaseHelpers.CreateValidParameterName($"{key}wts{Guid.NewGuid()}");
                         result = result.Replace($"[{{{originalKey}}}]", $"?{parameterName}");
                         insertedParameters.Add(new KeyValuePair<string, string>(parameterName, value));
                     }
                 }
                 else
                 {
-                    var parameterName = DatabaseHelpers.CreateValidParameterName(key);
+                    var parameterName = DatabaseHelpers.CreateValidParameterName($"{key}wts{Guid.NewGuid()}");
                     result = result.Replace($"[{{{originalKey}}}]", $"?{parameterName}");
                     parameterKeys.Add(new ParameterKeyModel()
                     {
                         Key = key,
+                        ReplacementKey = parameterName,
                         Hash = hashValue
                     });
                 }
@@ -175,8 +176,7 @@ namespace WiserTaskScheduler.Core.Helpers
                     value = StringHelpers.HashValue(value, hashSettings);
                 }
                 
-                var parameterName = DatabaseHelpers.CreateValidParameterName(key);
-                result = result.Replace($"?{parameterName}", value);
+                result = result.Replace($"?{parameterKey.ReplacementKey}", value);
             }
 
             return result;
