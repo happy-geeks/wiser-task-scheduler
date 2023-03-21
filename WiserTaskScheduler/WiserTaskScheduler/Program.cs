@@ -85,17 +85,12 @@ namespace WiserTaskScheduler
             services.AddScoped<FtpsHandler>();
             services.AddScoped<SftpHandler>();
             
-            // If there is Slacktoken setup Slack message. 
-            var slackToken = hostContext.Configuration.GetSection("Wts").GetSection("SlackSettings").GetValue<string>("SlackAccessToken");
-            if (!String.IsNullOrWhiteSpace(slackToken))
+            // If there is a bot token provided for Slack add the service. 
+            var slackBotToken = hostContext.Configuration.GetSection("Wts").GetSection("SlackSettings").GetValue<string>("BotToken");
+            if (!String.IsNullOrWhiteSpace(slackBotToken))
             {
-#if DEBUG
                 services.AddSingleton(new SlackEndpointConfiguration());
-#else
-                var slackSigningSecret = hostContext.Configuration.GetSection("Wts").GetSection("SlackSettings").GetValue<string>("SlackSigningSecret");
-                services.AddSingleton(new SlackEndpointConfiguration().UseSigningSecret(slackSigningSecret));
-#endif
-                services.AddSlackNet(c => c.UseApiToken(slackToken));
+                services.AddSlackNet(c => c.UseApiToken(slackBotToken));
             }
 
             // Configure automatic scanning of classes for dependency injection.

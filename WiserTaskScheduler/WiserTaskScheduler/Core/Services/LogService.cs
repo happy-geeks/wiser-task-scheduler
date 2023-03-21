@@ -109,14 +109,19 @@ namespace WiserTaskScheduler.Core.Services
 #if !DEBUG
                         // Only send messages to Slack for production Wiser Task Schedulers to prevent exceptions during developing/testing to trigger it.
 
-                        // If there is a slackChannel and SlackAccessToken Send a slack message if critical error.
-                        if (slackSettings != null && !String.IsNullOrWhiteSpace(slackSettings.SlackChannel) && !string.IsNullOrWhiteSpace(slackSettings.SlackAccessToken))
+                        // Send messages to the specified Slack channel if one is set and the log level is high enough. If the token has not been set the service was not added at startup.
+                        if (slackSettings != null && !String.IsNullOrWhiteSpace(slackSettings.BotToken) && !String.IsNullOrWhiteSpace(slackSettings.Channel) && logLevel >= logSettings.SlackLogLevel)
                         {
-                            if (logLevel == logSettings.SlackLogLevel)
-                            {
-                                var slack = scope.ServiceProvider.GetRequiredService<ISlackApiClient>();
-                                await slack.Chat.PostMessage(new Message() { Text = $"Configuration : '{configurationName}'{Environment.NewLine}Time id : '{timeId}'{Environment.NewLine}order :{Environment.NewLine}message :{Environment.NewLine}{message}{Environment.NewLine}date : {DateTime.Now}",Channel=slackSettings.SlackChannel});
-                            }    
+                            var slack = scope.ServiceProvider.GetRequiredService<ISlackApiClient>();
+                            await slack.Chat.PostMessage(new Message() { Text = $@"Log level: {logLevel}
+Configuration : '{configurationName}'
+Time ID: '{timeId}'
+Order: '{order}'
+
+Message:
+{message}",
+                                Channel = slackSettings.Channel
+                            });
                         }
 #endif
                     }
