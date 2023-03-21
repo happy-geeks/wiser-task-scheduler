@@ -1,14 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-    <ItemGroup>
-      <ProjectReference Include="..\..\..\GeeksCoreLibrary\GeeksCoreLibrary\GeeksCoreLibrary.csproj" />
-    </ItemGroup>
-
     <PropertyGroup>
         <TargetFramework>net7.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <LangVersion>default</LangVersion>
     </PropertyGroup>
+
+    <ItemGroup>
+      <PackageReference Include="GeeksCoreLibrary" Version="3.0.0" />
+    </ItemGroup>
 
 </Project>

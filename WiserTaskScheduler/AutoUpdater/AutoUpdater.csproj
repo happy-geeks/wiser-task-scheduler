@@ -12,6 +12,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference Include="GeeksCoreLibrary" Version="3.0.0" />
         <PackageReference Include="Microsoft.Extensions.Hosting" Version="7.0.1" />
         <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="7.0.0" />
         <PackageReference Include="Serilog.AspNetCore" Version="6.1.0" />
@@ -19,6 +20,5 @@
 
     <ItemGroup>
       <ProjectReference Include="..\HelperLibrary\HelperLibrary.csproj" />
-      <ProjectReference Include="..\..\..\GeeksCoreLibrary\GeeksCoreLibrary\GeeksCoreLibrary.csproj" />
     </ItemGroup>
 </Project>

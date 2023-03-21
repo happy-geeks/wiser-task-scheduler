@@ -11,15 +11,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="GeeksCoreLibrary" Version="3.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="7.0.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="7.0.0" />
     <PackageReference Include="Serilog.AspNetCore" Version="6.1.0" />
     <PackageReference Include="Serilog.Sinks.MySQL" Version="4.6.0" />
     <PackageReference Include="SlackNet.AspNetCore" Version="0.10.22" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\..\..\GeeksCoreLibrary\GeeksCoreLibrary\GeeksCoreLibrary.csproj" />
   </ItemGroup>
 </Project>
