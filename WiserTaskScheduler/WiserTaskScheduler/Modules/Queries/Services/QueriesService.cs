@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
-using System.Diagnostics;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Helpers;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
@@ -16,7 +15,6 @@ using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Modules.Queries.Interfaces;
 using WiserTaskScheduler.Modules.Queries.Models;
-
 
 namespace WiserTaskScheduler.Modules.Queries.Services
 {

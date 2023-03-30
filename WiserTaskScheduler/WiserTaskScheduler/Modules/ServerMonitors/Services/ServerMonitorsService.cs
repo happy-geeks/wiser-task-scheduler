@@ -137,17 +137,14 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         /// <returns></returns>
         private async Task GetAllHardDrivesSpaceAsync(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, CommunicationsService gclCommunicationsService)
         {
-            //Checks for each drive if it alreadt exists in the dictonary.
             foreach (var drive in allDrives)
             {
+                //Checks for each drive if it already exists in the dictonary.
                 if (!emailDrivesSent.ContainsKey(drive.Name))
                 {
                     emailDrivesSent[drive.Name] = false;
                 }
-            }
 
-            foreach (var drive in allDrives)
-            {
                 //Calculate the percentage of free space availible and see if it matches with the given threshold.
                 decimal freeSpace = drive.TotalFreeSpace;
                 decimal fullSpace = drive.TotalSize;
@@ -164,13 +161,13 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                 if (percentage > threshold)
                 {
                     emailDrivesSent[drive.Name] = false;
-                    return;
+                    continue;
                 }
                 
                 //Check if an email already has been sent
                 if (emailDrivesSent[drive.Name])
                 {
-                    return;
+                    continue;
                 }
 
                 emailDrivesSent[drive.Name] = true;
@@ -399,15 +396,15 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             const int numberOfIterations = 10;
 
             //get the correct types of the performancecounter class
-            PerformanceCounter bandwidthCounter = new PerformanceCounter("Network Interface", "Current Bandwidth", networkInterfaceName);
+            var bandwidthCounter = new PerformanceCounter("Network Interface", "Current Bandwidth", networkInterfaceName);
             var bandwidth = bandwidthCounter.NextValue();
-            PerformanceCounter dataSentCounter = new PerformanceCounter("Network Interface", "Bytes Sent/sec", networkInterfaceName);
-            PerformanceCounter dataReceivedCounter = new PerformanceCounter("Network Interface", "Bytes Received/sec", networkInterfaceName);
+            var dataSentCounter = new PerformanceCounter("Network Interface", "Bytes Sent/sec", networkInterfaceName);
+            var dataReceivedCounter = new PerformanceCounter("Network Interface", "Bytes Received/sec", networkInterfaceName);
 
-            float sendSum = 0;
-            float receiveSum = 0;
+            var sendSum = 0f;
+            var receiveSum = 0f;
 
-            for (int index = 0; index < numberOfIterations; index++)
+            for (var index = 0; index < numberOfIterations; index++)
             {
                 sendSum += dataSentCounter.NextValue();
                 receiveSum += dataReceivedCounter.NextValue();
