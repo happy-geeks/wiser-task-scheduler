@@ -8,21 +8,17 @@ using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
-using GeeksCoreLibrary.Core.Services;
 using GeeksCoreLibrary.Modules.Communication.Enums;
+using GeeksCoreLibrary.Modules.Communication.Extensions;
 using GeeksCoreLibrary.Modules.Communication.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
+using GeeksCoreLibrary.Modules.DataSelector.Interfaces;
 using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
-using GeeksCoreLibrary.Modules.Objects.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
-using GclCommunicationsService = GeeksCoreLibrary.Modules.Communication.Services.CommunicationsService;
-using GeeksCoreLibrary.Modules.Communication.Extensions;
+using IGclCommunicationsService = GeeksCoreLibrary.Modules.Communication.Interfaces.ICommunicationsService;
 using GeeksCoreLibrary.Modules.DataSelector.Models;
-using GeeksCoreLibrary.Modules.DataSelector.Services;
-using GeeksCoreLibrary.Modules.Templates.Services;
 using Newtonsoft.Json;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Interfaces;
@@ -60,42 +56,31 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
     /// <inheritdoc />
     public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
     {
-        var communication = (CommunicationModel) action;
-        
-        using var scope = serviceProvider.CreateScope();
-        await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
-        
-        var connectionStringToUse = communication.ConnectionString ?? connectionString;
-        await databaseConnection.ChangeConnectionStringsAsync(connectionStringToUse, connectionStringToUse);
-        
-        // Wiser Items Service requires dependency injection that results in the need of MVC services that are unavailable.
-        // Get all other services and create the Wiser Items Service with one of the services missing.
-        var objectService = scope.ServiceProvider.GetRequiredService<IObjectsService>();
-        var stringReplacementsService = scope.ServiceProvider.GetRequiredService<IStringReplacementsService>();
-        var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
-        var gclSettings = scope.ServiceProvider.GetRequiredService<IOptions<GclSettings>>();
-        var wiserItemsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<WiserItemsService>>();
-        var gclCommunicationsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<GclCommunicationsService>>();
-        var dataSelectorsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<DataSelectorsService>>();
-
-        var templatesService = new TemplatesService(null, gclSettings, databaseConnection, stringReplacementsService, null, null, null, null, null, null, null, null, null, databaseHelpersService);
-        var dataSelectorsService = new DataSelectorsService(gclSettings, databaseConnection, stringReplacementsService, templatesService, null, null, dataSelectorsServiceLogger, null);
-        var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, dataSelectorsService, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
-        var gclCommunicationsService = new GclCommunicationsService(gclSettings, gclCommunicationsServiceLogger, wiserItemsService, databaseConnection, databaseHelpersService);
-
-        await GenerateCommunicationsAsync(communication, databaseConnection, gclCommunicationsService, dataSelectorsService, stringReplacementsService, configurationServiceName);
-        
-        switch (communication.Type)
-        {
-            case CommunicationTypes.Email:
-                return await ProcessMailsAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName);
-            case CommunicationTypes.Sms:
-	            return await ProcessSmsAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName);
-            case CommunicationTypes.WhatsApp:
-                return await ProcessWhatsAppAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName);
-            default:
-                throw new ArgumentOutOfRangeException(nameof(communication.Type), communication.Type.ToString());
-        }
+	    var communication = (CommunicationModel) action;
+	    
+	    using var scope = serviceProvider.CreateScope();
+	    await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+	    
+	    var connectionStringToUse = communication.ConnectionString ?? connectionString;
+	    await databaseConnection.ChangeConnectionStringsAsync(connectionStringToUse, connectionStringToUse);
+	    
+	    var gclCommunicationsService = scope.ServiceProvider.GetRequiredService<IGclCommunicationsService>();
+	    var dataSelectorsService = scope.ServiceProvider.GetRequiredService<IDataSelectorsService>();
+	    var stringReplacementsService = scope.ServiceProvider.GetRequiredService<IStringReplacementsService>();
+	    
+	    await GenerateCommunicationsAsync(communication, databaseConnection, gclCommunicationsService, dataSelectorsService, stringReplacementsService, configurationServiceName);
+	    
+	    switch (communication.Type)
+	    {
+	        case CommunicationTypes.Email:
+	            return await ProcessMailsAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName);
+	        case CommunicationTypes.Sms:
+		        return await ProcessSmsAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName);
+	        case CommunicationTypes.WhatsApp:
+	            return await ProcessWhatsAppAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName);
+	        default:
+	            throw new ArgumentOutOfRangeException(nameof(communication.Type), communication.Type.ToString());
+	    }
     }
 
     /// <summary>
@@ -105,8 +90,9 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
     /// <param name="databaseConnection">The database connection to use.</param>
     /// <param name="gclCommunicationsService">The communications service from the GCL to store the generated communications.</param>
     /// <param name="dataSelectorsService">The data selectors service to use.</param>
+    /// <param name="stringReplacementsService">The string replacements service from the GCL to use.</param>
     /// <param name="configurationServiceName">The name of the configuration that is being executed.</param>
-    private async Task GenerateCommunicationsAsync(CommunicationModel communication, IDatabaseConnection databaseConnection, GclCommunicationsService gclCommunicationsService, DataSelectorsService dataSelectorsService, IStringReplacementsService stringReplacementsService, string configurationServiceName)
+    private async Task GenerateCommunicationsAsync(CommunicationModel communication, IDatabaseConnection databaseConnection, IGclCommunicationsService gclCommunicationsService, IDataSelectorsService dataSelectorsService, IStringReplacementsService stringReplacementsService, string configurationServiceName)
     {
 	    var communicationSettings = await gclCommunicationsService.GetSettingsAsync(communication.Type);
 
@@ -326,7 +312,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
     /// <param name="gclCommunicationsService">The communications service from the GCL to actually send out the emails.</param>
     /// <param name="configurationServiceName">The name of the configuration that is being executed.</param>
     /// <returns></returns>
-    private async Task<JObject> ProcessMailsAsync(CommunicationModel communication, IDatabaseConnection databaseConnection, GclCommunicationsService gclCommunicationsService, string configurationServiceName)
+    private async Task<JObject> ProcessMailsAsync(CommunicationModel communication, IDatabaseConnection databaseConnection, IGclCommunicationsService gclCommunicationsService, string configurationServiceName)
     {
 	    var emails = await GetCommunicationsOfTypeAsync(communication, databaseConnection, configurationServiceName);
 
@@ -428,7 +414,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 	    };
     }
 
-    private async Task<JObject> ProcessSmsAsync(CommunicationModel communication, IDatabaseConnection databaseConnection, GclCommunicationsService gclCommunicationsService, string configurationServiceName)
+    private async Task<JObject> ProcessSmsAsync(CommunicationModel communication, IDatabaseConnection databaseConnection, IGclCommunicationsService gclCommunicationsService, string configurationServiceName)
     {
 	    var smsList = await GetCommunicationsOfTypeAsync(communication, databaseConnection, configurationServiceName);
 
@@ -490,7 +476,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    {"Total", processed + failed}
 	    };
     }
-    private async Task<JObject> ProcessWhatsAppAsync(CommunicationModel communication, IDatabaseConnection databaseConnection, GclCommunicationsService gclCommunicationsService, string configurationServiceName)
+    private async Task<JObject> ProcessWhatsAppAsync(CommunicationModel communication, IDatabaseConnection databaseConnection, IGclCommunicationsService gclCommunicationsService, string configurationServiceName)
     {
         var whatsAppList = await GetCommunicationsOfTypeAsync(communication, databaseConnection, configurationServiceName);
 

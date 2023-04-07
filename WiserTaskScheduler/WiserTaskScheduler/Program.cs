@@ -4,33 +4,17 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using GeeksCoreLibrary.Components.Account.Interfaces;
-using GeeksCoreLibrary.Components.Account.Services;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
-using GeeksCoreLibrary.Core.Interfaces;
+using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
-using GeeksCoreLibrary.Core.Services;
-using GeeksCoreLibrary.Modules.Branches.Interfaces;
-using GeeksCoreLibrary.Modules.Branches.Services;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
-using GeeksCoreLibrary.Modules.Databases.Services;
-using GeeksCoreLibrary.Modules.Ftps.Factories;
 using GeeksCoreLibrary.Modules.Ftps.Handlers;
-using GeeksCoreLibrary.Modules.Ftps.Interfaces;
-using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
-using GeeksCoreLibrary.Modules.GclReplacements.Services;
-using GeeksCoreLibrary.Modules.Languages.Interfaces;
-using GeeksCoreLibrary.Modules.Languages.Services;
-using GeeksCoreLibrary.Modules.Objects.Interfaces;
-using GeeksCoreLibrary.Modules.Objects.Services;
 using GeeksCoreLibrary.Modules.Payments.Interfaces;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Serilog;
 using SlackNet.AspNetCore;
 using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Core.Workers;
-using WiserTaskScheduler.Modules.Ftps.Services;
 
 namespace WiserTaskScheduler
 {
@@ -95,17 +79,9 @@ namespace WiserTaskScheduler
         private static void ConfigureWtsServices(IServiceCollection services, HostBuilderContext hostContext)
         {
             services.AddScoped<ConfigurationsWorker>();
+
+            services.AddGclServices(hostContext.Configuration, false, false, false);
             
-            services.AddScoped<IDatabaseConnection, MySqlDatabaseConnection>();
-            services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
-            services.AddScoped<IObjectsService, ObjectsService>();
-            services.AddScoped<IDatabaseHelpersService, MySqlDatabaseHelpersService>();
-            services.AddScoped<IStringReplacementsService, StringReplacementsService>();
-            services.AddScoped<ILanguagesService, LanguagesService>();
-            services.AddScoped<IAccountsService, AccountsService>();
-            services.AddScoped<IBranchesService, BranchesService>();
-            services.AddScoped<IRolesService, RolesService>();
-            services.AddScoped<IFtpHandlerFactory, FtpHandlerFactory>();
             services.AddScoped<FtpsHandler>();
             services.AddScoped<SftpHandler>();
             

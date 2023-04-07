@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Enums;
+using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Core.Services;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
@@ -63,15 +64,7 @@ public class CleanupItemsService : ICleanupItemsService, IActionsService, IScope
         await databaseConnection.ChangeConnectionStringsAsync(connectionStringToUse, connectionStringToUse);
         databaseConnection.ClearParameters();
         
-        // Wiser Items Service requires dependency injection that results in the need of MVC services that are unavailable.
-        // Get all other services and create the Wiser Items Service with one of the services missing.
-        var objectService = scope.ServiceProvider.GetRequiredService<IObjectsService>();
-        var stringReplacementsService = scope.ServiceProvider.GetRequiredService<IStringReplacementsService>();
-        var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
-        var gclSettings = scope.ServiceProvider.GetRequiredService<IOptions<GclSettings>>();
-        var wiserItemsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<WiserItemsService>>();
-        
-        var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, null, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
+        var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
         var tablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(cleanupItem.EntityName);
         
         // Get the delete action of the entity to show it in the logs.
