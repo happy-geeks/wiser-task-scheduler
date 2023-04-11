@@ -4,6 +4,8 @@ using System.Linq;
 using System.Text;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Helpers;
 using WiserTaskScheduler.Core.Models;
@@ -17,10 +19,21 @@ namespace WiserTaskScheduler.Modules.Body.Services
     /// </summary>
     public class BodyService : IBodyService, IScopedService
     {
+        private readonly IServiceProvider serviceProvider;
+
+        public BodyService(IServiceProvider serviceProvider)
+        {
+            this.serviceProvider = serviceProvider;
+        }
+
         /// <inheritdoc />
         public string GenerateBody(BodyModel bodyModel, List<int> rows, JObject resultSets, HashSettingsModel hashSettings, int forcedIndex = -1)
         {
             var finalBody = new StringBuilder();
+
+            // Create a scope to get the string replacements service. It's needed to evaluate logic snippets.
+            using var scope = serviceProvider.CreateScope();
+            var stringReplacementsService = scope.ServiceProvider.GetRequiredService<IStringReplacementsService>();
 
             foreach (var bodyPart in bodyModel.BodyParts)
             {
@@ -48,6 +61,12 @@ namespace WiserTaskScheduler.Modules.Body.Services
                             body = GenerateBodyCollection(body, bodyModel.ContentType, parameterKeys, ResultSetHelper.GetCorrectObject<JArray>(bodyPart.UseResultSet, rows, resultSets), hashSettings, bodyPart.ForceIndex ? forcedIndex : -1);
                         }
                     }
+                }
+
+                if (bodyPart.EvaluateLogicSnippets)
+                {
+                    // Evaluate [if]...[endif] snippets in the body.
+                    body = stringReplacementsService.EvaluateTemplate(body);
                 }
 
                 finalBody.Append(body);

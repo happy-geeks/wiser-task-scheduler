@@ -29,5 +29,10 @@ namespace WiserTaskScheduler.Modules.Body.Models
         /// Gets or sets if the body part needs to use the forced index.
         /// </summary>
         public bool ForceIndex { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether the logic snippets (<c>[if]...[else]...[endif]</c>) should be evaluated. 
+        /// </summary>
+        public bool EvaluateLogicSnippets { get; set; }
     }
 }
