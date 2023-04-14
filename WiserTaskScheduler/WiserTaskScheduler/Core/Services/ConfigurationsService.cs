@@ -249,7 +249,15 @@ namespace WiserTaskScheduler.Core.Services
 
                 try
                 {
-                    var statusCode = (string) ResultSetHelper.GetCorrectObject<JObject>($"{parts[0]}", ReplacementHelper.EmptyRows, resultSets)["StatusCode"];
+                    var defaultValue = String.Empty;
+                    var defaultValueIndex = parts[0].IndexOf('?');
+                    if (defaultValueIndex >= 0)
+                    {
+                        defaultValue = parts[0][defaultValueIndex..];
+                        parts[0] = parts[0][..defaultValueIndex];
+                    }
+
+                    var statusCode = ReplacementHelper.GetValue($"{parts[0]}.StatusCode{defaultValue}", ReplacementHelper.EmptyRows, resultSets, false);
                     
                     if (statusCode != parts[1])
                     {
@@ -270,7 +278,15 @@ namespace WiserTaskScheduler.Core.Services
 
                 try
                 {
-                    var state = (string) ResultSetHelper.GetCorrectObject<JObject>($"{parts[0]}", ReplacementHelper.EmptyRows, resultSets)["Success"];
+                    var defaultValue = String.Empty;
+                    var defaultValueIndex = parts[0].IndexOf('?');
+                    if (defaultValueIndex >= 0)
+                    {
+                        defaultValue = parts[0][defaultValueIndex..];
+                        parts[0] = parts[0][..defaultValueIndex];
+                    }
+
+                    var state = ReplacementHelper.GetValue($"{parts[0]}.Success{defaultValue}", ReplacementHelper.EmptyRows, resultSets, false);
                     
                     if (state != parts[1])
                     {
