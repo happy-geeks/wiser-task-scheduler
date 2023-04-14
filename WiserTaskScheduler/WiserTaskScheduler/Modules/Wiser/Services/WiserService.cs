@@ -147,31 +147,40 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
                 var environment = Environments.Live;
 #endif
                 
-                var request = new HttpRequestMessage(HttpMethod.Get, $"{wiserSettings.WiserApiUrl}api/v3/templates/entire-tree-view?startFrom=SERVICES{(String.IsNullOrWhiteSpace(wiserSettings.ConfigurationPath) ? "" : $",{wiserSettings.ConfigurationPath}")}&environment={environment}");
-                request.Headers.Add("Authorization", $"Bearer {AccessToken}");
-
+                var configurationPaths = String.IsNullOrWhiteSpace(wiserSettings.ConfigurationPath) ? new[] { "" } : wiserSettings.ConfigurationPath.Split(";");
                 using var client = new HttpClient();
-                try
+                
+                var configurations = new List<TemplateSettingsModel>();
+                
+                foreach (var configurationPath in configurationPaths)
                 {
-                    var response = client.Send(request);
-
-                    if (response.StatusCode != HttpStatusCode.OK)
+                    try
                     {
-                        logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configurations from the Wiser API.", "WiserService");
+                        var request = new HttpRequestMessage(HttpMethod.Get, $"{wiserSettings.WiserApiUrl}api/v3/templates/entire-tree-view?startFrom=SERVICES{(String.IsNullOrWhiteSpace(configurationPath) ? "" : $",{configurationPath}")}&environment={environment}");
+                        request.Headers.Add("Authorization", $"Bearer {AccessToken}");
+
+                        var response = client.Send(request);
+
+                        if (response.StatusCode != HttpStatusCode.OK)
+                        {
+                            logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configurations from the Wiser API.", "WiserService");
+                            return null;
+                        }
+
+                        using var reader = new StreamReader(response.Content.ReadAsStream());
+                        var body = reader.ReadToEnd();
+                        var templateTrees = JsonConvert.DeserializeObject<List<TemplateTreeViewModel>>(body);
+
+                        configurations.AddRange(FlattenTree(templateTrees));
+                    }
+                    catch (Exception e)
+                    {
+                        logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.\n{e.Message}\n{e.StackTrace}", "WiserService");
                         return null;
                     }
-
-                    using var reader = new StreamReader(response.Content.ReadAsStream());
-                    var body = reader.ReadToEnd();
-                    var templateTrees = JsonConvert.DeserializeObject<List<TemplateTreeViewModel>>(body);
-
-                    return FlattenTree(templateTrees);
                 }
-                catch (Exception e)
-                {
-                    logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.\n{e.Message}\n{e.StackTrace}", "WiserService");
-                    return null;
-                }
+
+                return configurations;
             });
         }
 
