@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using WiserTaskScheduler.Core.Models.Cleanup;
 using WiserTaskScheduler.Modules.Slack.modules;
 using WiserTaskScheduler.Modules.Wiser.Models;
@@ -44,5 +45,10 @@ namespace WiserTaskScheduler.Core.Models
         /// Get or sets the settings for slack
         /// </summary>
         public SlackSettings SlackSettings { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the credentials from the secrets app settings.
+        /// </summary>
+        public IReadOnlyDictionary<string, string> Credentials { get; set; }
     }
 }
