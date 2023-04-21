@@ -12,6 +12,7 @@ using WiserTaskScheduler.Modules.Queries.Models;
 using WiserTaskScheduler.Modules.RunSchemes.Models;
 using WiserTaskScheduler.Modules.WiserImports.Models;
 using WiserTaskScheduler.Modules.Ftps.Models;
+using WiserTaskScheduler.Modules.GenerateCommunications.Models;
 
 namespace WiserTaskScheduler.Core.Models
 {
@@ -188,6 +189,19 @@ namespace WiserTaskScheduler.Core.Models
         /// </summary>
         [XmlElement("CleanupWiserHistory")]
         public CleanupWiserHistoryModel[] CleanupWiserHistories { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the generate communications that have been placed in the group.
+        /// </summary>
+        [XmlArray("GenerateCommunications")]
+        [XmlArrayItem(typeof(GenerateCommunicationModel))]
+        public GenerateCommunicationModel[] GenerateCommunicationGroup { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the generate communications that have been placed outside the group.
+        /// </summary>
+        [XmlElement("GenerateCommunication")]
+        public GenerateCommunicationModel[] GenerateCommunications { get; set; }
 
         /// <summary>
         /// Get all run schemes that are defined in this configuration.

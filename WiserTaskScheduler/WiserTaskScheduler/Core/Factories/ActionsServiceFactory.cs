@@ -23,6 +23,8 @@ using WiserTaskScheduler.Modules.WiserImports.Interfaces;
 using WiserTaskScheduler.Modules.WiserImports.Models;
 using WiserTaskScheduler.Modules.Ftps.Interfaces;
 using WiserTaskScheduler.Modules.Ftps.Models;
+using WiserTaskScheduler.Modules.GenerateCommunications.Interfaces;
+using WiserTaskScheduler.Modules.GenerateCommunications.Models;
 
 namespace WiserTaskScheduler.Core.Factories
 {
@@ -67,6 +69,8 @@ namespace WiserTaskScheduler.Core.Factories
                     return serviceProvider.GetRequiredService<IFtpsService>() as IActionsService;
                 case CleanupWiserHistoryModel:
                     return serviceProvider.GetRequiredService<ICleanupWiserHistoryService>() as IActionsService;
+                case GenerateCommunicationModel:
+                    return serviceProvider.GetRequiredService<IGenerateCommunicationsService>() as IActionsService;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(action), action.ToString());
             }
