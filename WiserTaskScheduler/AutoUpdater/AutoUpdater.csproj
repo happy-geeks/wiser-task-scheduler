@@ -17,8 +17,4 @@
         <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="7.0.0" />
         <PackageReference Include="Serilog.AspNetCore" Version="6.1.0" />
     </ItemGroup>
-
-    <ItemGroup>
-      <ProjectReference Include="..\HelperLibrary\HelperLibrary.csproj" />
-    </ItemGroup>
 </Project>

@@ -2,14 +2,11 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
-using GeeksCoreLibrary.Core.Services;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
-using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
-using GeeksCoreLibrary.Modules.Objects.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Interfaces;
@@ -90,15 +87,7 @@ public class CleanupWiserHistoryService : ICleanupWiserHistoryService, IActionsS
         await databaseConnection.ChangeConnectionStringsAsync(connectionStringToUse, connectionStringToUse);
         databaseConnection.ClearParameters();
         
-        // Wiser Items Service requires dependency injection that results in the need of MVC services that are unavailable.
-        // Get all other services and create the Wiser Items Service with one of the services missing.
-        var objectService = scope.ServiceProvider.GetRequiredService<IObjectsService>();
-        var stringReplacementsService = scope.ServiceProvider.GetRequiredService<IStringReplacementsService>();
-        var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
-        var gclSettings = scope.ServiceProvider.GetRequiredService<IOptions<GclSettings>>();
-        var wiserItemsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<WiserItemsService>>();
-        
-        var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, null, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
+        var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
         var tablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(cleanupWiserHistory.EntityName);
 
         var cleanupDate = DateTime.Now.Subtract(cleanupWiserHistory.TimeToStore);

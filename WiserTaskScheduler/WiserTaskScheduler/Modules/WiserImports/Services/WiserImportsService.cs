@@ -11,11 +11,10 @@ using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Enums;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
-using GeeksCoreLibrary.Core.Services;
+using GeeksCoreLibrary.Modules.Communication.Interfaces;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
 using GeeksCoreLibrary.Modules.Imports.Models;
-using GeeksCoreLibrary.Modules.Objects.Interfaces;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -28,7 +27,6 @@ using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Modules.Wiser.Interfaces;
 using WiserTaskScheduler.Modules.WiserImports.Interfaces;
 using WiserTaskScheduler.Modules.WiserImports.Models;
-using GclCommunicationsService = GeeksCoreLibrary.Modules.Communication.Services.CommunicationsService;
 
 namespace WiserTaskScheduler.Modules.WiserImports.Services;
 
@@ -91,18 +89,10 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
         }
 
         var stopwatch = new Stopwatch();
-
-        // Wiser Items Service requires dependency injection that results in the need of MVC services that are unavailable.
-        // Get all other services and create the Wiser Items Service with one of the services missing.
-        var objectService = scope.ServiceProvider.GetRequiredService<IObjectsService>();
+        
         var stringReplacementsService = scope.ServiceProvider.GetRequiredService<IStringReplacementsService>();
-        var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
-        var gclSettings = scope.ServiceProvider.GetRequiredService<IOptions<GclSettings>>();
-        var wiserItemsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<WiserItemsService>>();
-        var gclCommunicationsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<GclCommunicationsService>>();
-
-        var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, null, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
-        var gclCommunicationsService = new GclCommunicationsService(gclSettings, gclCommunicationsServiceLogger, wiserItemsService, databaseConnection, databaseHelpersService);
+        var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
+        var gclCommunicationsService = scope.ServiceProvider.GetRequiredService<ICommunicationsService>();
 
         var successfulImports = 0;
         var importsWithWarnings = 0;
@@ -561,7 +551,7 @@ ORDER BY added_on ASC");
     /// <param name="template">An email template to use, if null the default will be used.</param>
     /// <param name="replaceData">The data to be used for replacements.</param>
     /// <param name="stringReplacementsService">The string replacements service to handle the replacements.</param>
-    private async Task NotifyUserByEmailAsync(WiserImportModel wiserImport, ImportRowModel importRow, IDatabaseConnection databaseConnection, GclCommunicationsService gclCommunicationsService, string configurationServiceName, string subject, WiserItemModel template, Dictionary<string, object> replaceData, IStringReplacementsService stringReplacementsService)
+    private async Task NotifyUserByEmailAsync(WiserImportModel wiserImport, ImportRowModel importRow, IDatabaseConnection databaseConnection, ICommunicationsService gclCommunicationsService, string configurationServiceName, string subject, WiserItemModel template, Dictionary<string, object> replaceData, IStringReplacementsService stringReplacementsService)
     {
         databaseConnection.AddParameter("userId", importRow.UserId);
         var userDataTable = await databaseConnection.GetAsync($"SELECT `value` AS receiver FROM {WiserTableNames.WiserItemDetail} WHERE item_id = ?userId AND `key` = 'email_address'");
