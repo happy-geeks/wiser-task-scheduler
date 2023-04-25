@@ -78,20 +78,8 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 
             await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
 
-            // Wiser Items Service requires dependency injection that results in the need of MVC services that are unavailable.
-            // Get all other services and create the Wiser Items Service with one of the services missing.
-            var objectService = scope.ServiceProvider.GetRequiredService<IObjectsService>();
-            var stringReplacementsService = scope.ServiceProvider.GetRequiredService<IStringReplacementsService>();
-            var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
-            var gclSettings = scope.ServiceProvider.GetRequiredService<IOptions<GclSettings>>();
-            var wiserItemsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<WiserItemsService>>();
-            var gclCommunicationsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<CommunicationsService>>();
-            var dataSelectorsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<DataSelectorsService>>();
 
-            var templatesService = new TemplatesService(null, gclSettings, databaseConnection, stringReplacementsService, null, null, null, null, databaseHelpersService, null, null, null, null, null);
-            var dataSelectorsService = new DataSelectorsService(gclSettings, databaseConnection, stringReplacementsService, templatesService, null, null, dataSelectorsServiceLogger, null);
-            var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, dataSelectorsService, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
-            var gclCommunicationsService = new CommunicationsService(gclSettings, gclCommunicationsServiceLogger, wiserItemsService, databaseConnection, databaseHelpersService);
+            var gclCommunicationsService = scope.ServiceProvider.GetRequiredService<ICommunicationsService>();
 
             var threshold = monitorItem.Threshold;
 
@@ -127,10 +115,9 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         /// <param name="gclCommunicationsService">The name of the service in the configuration, used for logging.</param>
         /// <param name="configurationServiceName">The communications service from the GCL to actually send out the email.</param>
         /// <returns></returns>
-        private async Task<JObject> GetAllHardDrivesSpaceAsync(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, CommunicationsService gclCommunicationsService)
+        private async Task<JObject> GetAllHardDrivesSpaceAsync(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, ICommunicationsService gclCommunicationsService)
         {
             var jArray = new JArray();
-
 
             foreach (var drive in allDrives)
             {
@@ -143,9 +130,9 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                 }
 
                 //Calculate the percentage of free space availible and see if it matches with the given threshold.
-                decimal freeSpace = drive.TotalFreeSpace;
-                decimal fullSpace = drive.TotalSize;
-                var percentage = freeSpace / fullSpace * 100;
+                var freeSpace = drive.TotalFreeSpace;
+                var fullSpace = drive.TotalSize;
+                var percentage = Decimal.Round(freeSpace) / Decimal.Round(fullSpace) * 100;
 
                 //Set the email settings correctly
                 receiver = monitorItem.EmailAddressForWarning;
@@ -208,7 +195,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         /// <param name="configurationServiceName">The communications service from the GCL to actually send out the email.</param>
         /// <param name="driveName">The name of the drive that is used by the monitor.</param>
         /// <returns></returns>
-        private async Task<JObject> GetHardDriveSpaceAsync(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, CommunicationsService gclCommunicationsService, string driveName)
+        private async Task<JObject> GetHardDriveSpaceAsync(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, ICommunicationsService gclCommunicationsService, string driveName)
         {
             var drive = new DriveInfo(driveName);
 
@@ -219,8 +206,8 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             }
 
             //Calculate the percentage of free space availible and see if it matches with the given threshold.
-            decimal freeSpace = drive.TotalFreeSpace;
-            decimal fullSpace = drive.TotalSize;
+            var freeSpace = drive.TotalFreeSpace;
+            var fullSpace = drive.TotalSize;
             var percentage = Decimal.Round(freeSpace) / Decimal.Round(fullSpace) * 100;
 
             //Set the email settings correctly.
@@ -278,7 +265,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         /// <param name="gclCommunicationsService">The name of the service in the configuration, used for logging.</param>
         /// <param name="configurationServiceName">The communications service from the GCL to actually send out the email.</param>
         /// <returns></returns>
-        private async Task<JObject> GetRamSpaceAsync(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, CommunicationsService gclCommunicationsService)
+        private async Task<JObject> GetRamSpaceAsync(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, ICommunicationsService gclCommunicationsService)
         {
             var ramValue = ramCounter.NextValue();
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"RAM is: {ramValue}MB available", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
@@ -333,7 +320,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         /// <param name="gclCommunicationsService">The name of the service in the configuration, used for logging.</param>
         /// <param name="configurationServiceName">The communications service from the GCL to actually send out the email.</param>
         /// <returns></returns>
-        private async Task<JObject> GetCpuUsageAsync(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, CommunicationsService gclCommunicationsService)
+        private async Task<JObject> GetCpuUsageAsync(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, ICommunicationsService gclCommunicationsService)
         {
             //gets the detection type of cpu usage to use.
             switch(monitorItem.CpuUsageDetectionType)
@@ -355,7 +342,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         /// <param name="gclCommunicationsService">The name of the service in the configuration, used for logging.</param>
         /// <param name="configurationServiceName">The communications service from the GCL to actually send out the email.</param>
         /// <returns></returns>
-        private async Task<JObject> GetCpuUsageArrayCountAsync(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, CommunicationsService gclCommunicationsService)
+        private async Task<JObject> GetCpuUsageArrayCountAsync(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, ICommunicationsService gclCommunicationsService)
         {
             if(cpuValues == null)
             {
@@ -396,7 +383,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                     {"DetectionType", "ArrayCount"},
                     {"Threshold", threshold},
                     {"EmailSend", emailCpuSent},
-                    {"arrayCount", count}
+                    {"ArrayCount", count}
                 };
             }
 
@@ -409,7 +396,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                     {"DetectionType", "ArrayCount"},
                     {"Threshold", threshold},
                     {"EmailSend", emailCpuSent},
-                    {"arrayCount", count}
+                    {"ArrayCount", count}
                 };
             }
 
@@ -422,19 +409,19 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                 {"DetectionType", "ArrayCount"},
                 {"Threshold", threshold},
                 {"EmailSend", emailCpuSent},
-                {"arrayCount", count}
+                {"ArrayCount", count}
             };
         }
 
         /// <summary>
-        /// Gets the CPU usage with the use of a counter which checks if for a certain amount of times the value above the threshold is.
+        /// Gets the CPU usage with the use of a counter which checks if for a certain amount of times the value is above the threshold.
         /// </summary>
         /// <param name="monitorItem">The information for the monitor action.</param>
         /// <param name="threshold">The threshold to check if an email needs to be send.</param>
         /// <param name="gclCommunicationsService">The name of the service in the configuration, used for logging.</param>
         /// <param name="configurationServiceName">The communications service from the GCL to actually send out the email.</param>
         /// <returns></returns>
-        private async Task<JObject> GetCpuUsageCounterAsync(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, CommunicationsService gclCommunicationsService)
+        private async Task<JObject> GetCpuUsageCounterAsync(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, ICommunicationsService gclCommunicationsService)
         {
             //the first value of performance counter will always be 0.
             if (!firstValueUsed)
@@ -462,7 +449,8 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                     {"DetectionType", "Counter"},
                     {"Threshold", threshold},
                     {"EmailSend", emailCpuSent},
-                    {"Timer", aboveThresholdTimer}
+                    {"CountSize", monitorItem.CpuCounterSize},
+                    {"Count", aboveThresholdTimer}
                 };
             }
 
@@ -475,12 +463,13 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                     {"DetectionType", "Counter"},
                     {"Threshold", threshold},
                     {"EmailSend", emailCpuSent},
-                    {"Timer", aboveThresholdTimer}
+                    {"CountSize", monitorItem.CpuCounterSize},
+                    {"Count", aboveThresholdTimer}
                 };
             }
 
             aboveThresholdTimer++;
-            if (aboveThresholdTimer >= 6)
+            if (aboveThresholdTimer >= monitorItem.CpuCounterSize)
             {
                 emailCpuSent = true;
                 await gclCommunicationsService.SendEmailAsync(receiver, subject, body);
@@ -493,7 +482,8 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                 {"DetectionType", "Counter"},
                 {"Threshold", threshold},
                 {"EmailSend", emailCpuSent},
-                {"Timer", aboveThresholdTimer}
+                {"CountSize", monitorItem.CpuCounterSize},
+                {"Count", aboveThresholdTimer}
             };
         }
 
@@ -505,11 +495,11 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         /// <param name="gclCommunicationsService">The name of the service in the configuration, used for logging.</param>
         /// <param name="configurationServiceName">The communications service from the GCL to actually send out the email.</param>
         /// <returns></returns>
-        private async Task<JObject> GetNetworkUtilization(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, CommunicationsService gclCommunicationsService)
+        private async Task<JObject> GetNetworkUtilization(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, ICommunicationsService gclCommunicationsService)
         {
             var networkInterfaceName = monitorItem.NetworkInterfaceName;
 
-            const int numberOfIterations = 10;
+            var numberOfIterations = 10;
 
             //get the correct types of the performancecounter class
             var bandwidthCounter = new PerformanceCounter("Network Interface", "Current Bandwidth", networkInterfaceName);

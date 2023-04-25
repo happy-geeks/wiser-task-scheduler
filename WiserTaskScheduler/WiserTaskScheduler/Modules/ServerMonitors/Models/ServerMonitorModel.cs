@@ -44,5 +44,10 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Models
         /// Gets or sets the size of the array for the Array Count option
         /// </summary>
         public int CpuArrayCountSize { get; set; }
+
+        /// <summary>
+        /// Gets or sets the size of the count for the CPU counter option.
+        /// </summary>
+        public int CpuCounterSize { get; set; }
     }
 }
