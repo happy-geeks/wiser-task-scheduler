@@ -78,7 +78,6 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 
             await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
 
-
             var gclCommunicationsService = scope.ServiceProvider.GetRequiredService<ICommunicationsService>();
 
             var threshold = monitorItem.Threshold;
