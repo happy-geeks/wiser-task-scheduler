@@ -131,7 +131,7 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
             }
             catch (Exception e)
             {
-                logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to login to the Wiser API.\n{e.Message}\n{e.StackTrace}", "WiserService");
+                logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to login to the Wiser API.\n{e}", "WiserService");
             }
         }
 
@@ -175,7 +175,7 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
                     }
                     catch (Exception e)
                     {
-                        logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.\n{e.Message}\n{e.StackTrace}", "WiserService");
+                        logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.\n{e}", "WiserService");
                         return null;
                     }
                 }
