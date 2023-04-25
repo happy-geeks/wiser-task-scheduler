@@ -4,13 +4,10 @@ using System.Linq;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Models;
-using GeeksCoreLibrary.Core.Services;
 using GeeksCoreLibrary.Modules.Communication.Enums;
+using GeeksCoreLibrary.Modules.Communication.Interfaces;
 using GeeksCoreLibrary.Modules.Communication.Models;
-using GeeksCoreLibrary.Modules.Communication.Services;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
-using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
-using GeeksCoreLibrary.Modules.Objects.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -71,16 +68,7 @@ public class ErrorNotificationService : IErrorNotificationService, ISingletonSer
             return;
         }
         
-        // Wiser Items Service requires dependency injection that results in the need of MVC services that are unavailable.
-        // Get all other services and create the Wiser Items Service with one of the services missing.
-        var objectService = scope.ServiceProvider.GetRequiredService<IObjectsService>();
-        var stringReplacementsService = scope.ServiceProvider.GetRequiredService<IStringReplacementsService>();
-        var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
-        var wiserItemsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<WiserItemsService>>();
-        var gclCommunicationsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<CommunicationsService>>();
-
-        var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, null, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
-        var communicationsService = new CommunicationsService(gclSettings, gclCommunicationsServiceLogger, wiserItemsService, databaseConnection, databaseHelpersService);
+        var communicationsService = scope.ServiceProvider.GetRequiredService<ICommunicationsService>();
 
         try
         {
