@@ -122,7 +122,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             {
                 var row = new JObject();
 
-                //Checks for each drive if it already exists in the dictonary.
+                //Checks for each drive if it already exists in the dictionary.
                 if (!emailDrivesSent.ContainsKey(drive.Name))
                 {
                     emailDrivesSent[drive.Name] = false;
@@ -198,7 +198,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         {
             var drive = new DriveInfo(driveName);
 
-            //Check to see if the drive is already within the dictonary.
+            //Check to see if the drive is already within the dictionary.
             if (!emailDrivesSent.ContainsKey(drive.Name))
             {
                 emailDrivesSent[drive.Name] = false;
@@ -351,7 +351,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             if (!firstValueUsed)
             {
                 firstValueUsed = true;
-                var firstValue = cpuCounter.NextValue();
+                cpuCounter.NextValue();
             }
             var count = 0;
             var realvalue = cpuCounter.NextValue();
@@ -426,7 +426,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             if (!firstValueUsed)
             {
                 firstValueUsed = true;
-                var firstValue = cpuCounter.NextValue();
+                cpuCounter.NextValue();
             }
             var realvalue = cpuCounter.NextValue();
 
