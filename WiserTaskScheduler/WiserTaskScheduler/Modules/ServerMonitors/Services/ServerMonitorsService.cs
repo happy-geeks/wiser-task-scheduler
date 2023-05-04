@@ -15,16 +15,7 @@ using Microsoft.Extensions.Logging;
 using System.IO;
 using Microsoft.Extensions.DependencyInjection;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
-using GeeksCoreLibrary.Modules.Objects.Interfaces;
-using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
-using Microsoft.Extensions.Options;
-using GeeksCoreLibrary.Core.Models;
-using GeeksCoreLibrary.Core.Services;
-using GeeksCoreLibrary.Modules.Communication.Services;
-using GeeksCoreLibrary.Modules.DataSelector.Services;
-using GeeksCoreLibrary.Modules.Templates.Services;
 using GeeksCoreLibrary.Modules.Communication.Interfaces;
-using ImageMagick;
 
 namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 {
@@ -36,19 +27,19 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 
         private string connectionString;
 
-        private Dictionary<string, bool> emailDrivesSent = new Dictionary<string, bool>();
+        private readonly Dictionary<string, bool> emailDrivesSent = new();
         private bool emailRamSent;
         private bool emailCpuSent;
         private bool emailNetworkSent;
-        
+
         private string receiver;
         private string subject;
         private string body;
 
         //create the right performanceCounter variable types.
-        private PerformanceCounter cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
-        private PerformanceCounter ramCounter = new PerformanceCounter("Memory", "Available MBytes");
-        private DriveInfo[] allDrives = DriveInfo.GetDrives();
+        private readonly PerformanceCounter cpuCounter = new("Processor", "% Processor Time", "_Total");
+        private readonly PerformanceCounter ramCounter = new("Memory", "Available MBytes");
+        private readonly DriveInfo[] allDrives = DriveInfo.GetDrives();
 
         private bool firstValueUsed;
         private int cpuIndex;
@@ -87,7 +78,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             switch (monitorItem.ServerMonitorType)
             {
                 case ServerMonitorTypes.Drive:
-                    if (monitorItem.DriveName == "All") 
+                    if (monitorItem.DriveName == "All")
                     {
                        return await GetAllHardDrivesSpaceAsync(monitorItem, threshold, configurationServiceName, gclCommunicationsService);
                     }
@@ -107,7 +98,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         }
 
         /// <summary>
-        /// Gets all the available hard drives and checks the free space available for all of them 
+        /// Gets all the available hard drives and checks the free space available for all of them
         /// </summary>
         /// <param name="monitorItem">The information for the monitor action. </param>
         /// <param name="threshold">The threshold to check if an email needs to be send.</param>
@@ -123,10 +114,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                 var row = new JObject();
 
                 //Checks for each drive if it already exists in the dictionary.
-                if (!emailDrivesSent.ContainsKey(drive.Name))
-                {
-                    emailDrivesSent[drive.Name] = false;
-                }
+                emailDrivesSent.TryAdd(drive.Name, false);
 
                 //Calculate the percentage of free space availible and see if it matches with the given threshold.
                 var freeSpace = drive.TotalFreeSpace;
@@ -154,7 +142,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
 
                     continue;
                 }
-                
+
                 //Check if an email already has been sent
                 if (emailDrivesSent[drive.Name])
                 {
@@ -199,10 +187,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             var drive = new DriveInfo(driveName);
 
             //Check to see if the drive is already within the dictionary.
-            if (!emailDrivesSent.ContainsKey(drive.Name))
-            {
-                emailDrivesSent[drive.Name] = false;
-            }
+            emailDrivesSent.TryAdd(drive.Name, false);
 
             //Calculate the percentage of free space availible and see if it matches with the given threshold.
             var freeSpace = drive.TotalFreeSpace;
@@ -223,7 +208,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
                 return new JObject
                 {
                     {"HardwareType", "HardDrive"},
-                    {"HardDriveName", drive.Name},                
+                    {"HardDriveName", drive.Name},
                     {"Threshold", threshold},
                     {"EmailSend", emailDrivesSent[drive.Name]},
                     {"SpacePercentage", percentage}
@@ -343,11 +328,9 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         /// <returns></returns>
         private async Task<JObject> GetCpuUsageArrayCountAsync(ServerMonitorModel monitorItem, int threshold, string configurationServiceName, ICommunicationsService gclCommunicationsService)
         {
-            if(cpuValues == null)
-            {
-                cpuValues = new float[monitorItem.CpuArrayCountSize];
-            }
-            //the first value of performance counter will always be 0.
+            cpuValues ??= new float[monitorItem.CpuArrayCountSize];
+
+            // The first value of performance counter will always be 0.
             if (!firstValueUsed)
             {
                 firstValueUsed = true;
@@ -355,6 +338,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
             }
             var count = 0;
             var realvalue = cpuCounter.NextValue();
+
             //gets 60 percent of the size of the array.
             var arrayCountThreshold = (int)(monitorItem.CpuArrayCountSize * 0.6);
             //Puts the value into the array.
