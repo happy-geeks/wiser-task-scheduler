@@ -38,13 +38,14 @@ namespace WiserTaskScheduler.Core.Models
         public WiserSettings Wiser { get; set; }
         
         /// <summary>
+        /// Gets or sets the <see cref="SlackSettings"/> used by the <see cref="SlackChatService"/>.
+        /// </summary>
+        public SlackSettings SlackSettings { get; set; }
+        
+        /// <summary>
         /// A semicolon (;) seperated list of email addresses to notify when a core service failed during execution.
         /// </summary>
         public string ServiceFailedNotificationEmails { get; set; }
-        /// <summary>
-        /// Get or sets the settings for slack
-        /// </summary>
-        public SlackSettings SlackSettings { get; set; }
         
         /// <summary>
         /// Gets or sets the credentials from the secrets app settings.
