@@ -465,10 +465,7 @@ AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
             catch (Exception exception)
             {
                 // Rollback transaction if started
-                if (databaseConnection.HasActiveTransaction())
-                {
-                    await databaseConnection.RollbackTransactionAsync();    
-                }
+                await databaseConnection.RollbackTransactionAsync(false);    
                 
                 // Save the error in the queue and set the finished on datetime to now.
                 databaseConnection.AddParameter("now", DateTime.Now);
