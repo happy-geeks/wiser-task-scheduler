@@ -169,6 +169,15 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
 
                         using var reader = new StreamReader(response.Content.ReadAsStream());
                         var body = reader.ReadToEnd();
+                        
+                        // The call to wiser configuration responds with an html document when Wiser is updating
+                        // We check for both html tag and doctype so this document is more free to change
+                        if (body.StartsWith("<html", StringComparison.InvariantCultureIgnoreCase) || body.StartsWith("<!DOCTYPE html", StringComparison.InvariantCultureIgnoreCase))
+                        {
+                            logService.LogInformation(logger, LogScopes.RunStartAndStop, logSettings, "Unable to get configuration due to Wiser update.", "WiserService");
+                            return null;
+                        }
+                        
                         var templateTrees = JsonConvert.DeserializeObject<List<TemplateTreeViewModel>>(body);
 
                         configurations.AddRange(FlattenTree(templateTrees));
