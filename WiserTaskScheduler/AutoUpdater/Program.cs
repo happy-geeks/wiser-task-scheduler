@@ -2,18 +2,8 @@ using AutoUpdater.Interfaces;
 using AutoUpdater.Models;
 using AutoUpdater.Services;
 using AutoUpdater.Workers;
-using GeeksCoreLibrary.Components.Account.Interfaces;
-using GeeksCoreLibrary.Components.Account.Services;
-using GeeksCoreLibrary.Modules.Branches.Interfaces;
-using GeeksCoreLibrary.Modules.Branches.Services;
-using GeeksCoreLibrary.Modules.Databases.Interfaces;
-using GeeksCoreLibrary.Modules.Databases.Services;
-using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
-using GeeksCoreLibrary.Modules.GclReplacements.Services;
-using GeeksCoreLibrary.Modules.Languages.Interfaces;
-using GeeksCoreLibrary.Modules.Languages.Services;
-using GeeksCoreLibrary.Modules.Objects.Interfaces;
-using GeeksCoreLibrary.Modules.Objects.Services;
+using GeeksCoreLibrary.Core.Extensions;
+using GeeksCoreLibrary.Core.Models;
 using Microsoft.AspNetCore.Http;
 using Serilog;
 
@@ -44,18 +34,13 @@ IHost host = Host.CreateDefaultBuilder(args)
             .CreateLogger();
         services.AddLogging(builder => { builder.AddSerilog(); });
 
+        services.Configure<GclSettings>(hostContext.Configuration.GetSection("Gcl"));
         services.Configure<UpdateSettings>(hostContext.Configuration.GetSection("Updater"));
         services.AddHostedService<UpdateWorker>();
 
         services.AddSingleton<IUpdateService, UpdateService>();
-        services.AddScoped<IDatabaseConnection, MySqlDatabaseConnection>();
         services.AddScoped<IHttpContextAccessor, HttpContextAccessor>();
-        services.AddScoped<IObjectsService, ObjectsService>();
-        services.AddScoped<IDatabaseHelpersService, MySqlDatabaseHelpersService>();
-        services.AddScoped<IStringReplacementsService, StringReplacementsService>();
-        services.AddScoped<ILanguagesService, LanguagesService>();
-        services.AddScoped<IAccountsService, AccountsService>();
-        services.AddScoped<IBranchesService, BranchesService>();
+        services.AddGclServices(hostContext.Configuration, false, false, false);
     })
     .Build();
 

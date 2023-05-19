@@ -225,6 +225,8 @@ namespace WiserTaskScheduler.Core.Services
 
                     if (String.IsNullOrWhiteSpace(wiserConfiguration.EditorValue)) continue;
 
+                    wiserConfiguration.EditorValue = ReplaceCredentials(wiserConfiguration.EditorValue);
+
                     if (wiserConfiguration.EditorValue.StartsWith("<OAuthConfiguration>"))
                     {
                         if (String.IsNullOrWhiteSpace(wtsSettings.MainService.LocalOAuthConfiguration))
@@ -251,7 +253,9 @@ namespace WiserTaskScheduler.Core.Services
             }
             else
             {
-                var configuration = await DeserializeConfigurationAsync(await File.ReadAllTextAsync(wtsSettings.MainService.LocalConfiguration), $"Local file {wtsSettings.MainService.LocalConfiguration}");
+                var fileContent = await File.ReadAllTextAsync(wtsSettings.MainService.LocalConfiguration);
+                fileContent = ReplaceCredentials(fileContent);
+                var configuration = await DeserializeConfigurationAsync(fileContent, $"Local file {wtsSettings.MainService.LocalConfiguration}");
 
                 if (configuration != null)
                 {
@@ -272,6 +276,25 @@ namespace WiserTaskScheduler.Core.Services
             }
 
             return configurations;
+        }
+
+        /// <summary>
+        /// Replaces credentials in a configuration if they are present.
+        /// </summary>
+        /// <param name="configuration">The configuration to perform the replacements on.</param>
+        /// <returns>The configuration with the credentials replaced or the original if no credentials were present.</returns>
+        private string ReplaceCredentials(string configuration)
+        {
+            // Replace credentials in configuration.
+            if (wtsSettings.Credentials != null && configuration.Contains("[{Credential:"))
+            {
+                foreach (var credential in wtsSettings.Credentials)
+                {
+                    configuration = configuration.Replace($"[{{Credential:{credential.Key}}}]", credential.Value);
+                }
+            }
+            
+            return configuration;
         }
 
         /// <summary>

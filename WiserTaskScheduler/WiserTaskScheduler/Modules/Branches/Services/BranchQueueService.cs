@@ -65,15 +65,7 @@ namespace WiserTaskScheduler.Modules.Branches.Services
             using var scope = serviceProvider.CreateScope();
             var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
             var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
-            
-            // Wiser Items Service requires dependency injection that results in the need of MVC services that are unavailable.
-            // Get all other services and create the Wiser Items Service with one of the services missing.
-            var objectService = scope.ServiceProvider.GetRequiredService<IObjectsService>();
-            var stringReplacementsService = scope.ServiceProvider.GetRequiredService<IStringReplacementsService>();
-            var gclSettings = scope.ServiceProvider.GetRequiredService<IOptions<GclSettings>>();
-            var wiserItemsServiceLogger = scope.ServiceProvider.GetRequiredService<ILogger<WiserItemsService>>();
-        
-            var wiserItemsService = new WiserItemsService(databaseConnection, objectService, stringReplacementsService, null, databaseHelpersService, gclSettings, wiserItemsServiceLogger);
+            var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
             
             var branchQueue = (BranchQueueModel) action;
             
@@ -126,7 +118,7 @@ ORDER BY start_on ASC, id ASC");
         /// <param name="scope">The <see cref="IServiceScope"/> for dependency injection.</param>
         /// <returns>An <see cref="JObject"/> with properties "Success" and "ErrorMessage".</returns>
         /// <exception cref="ArgumentOutOfRangeException">Then we get unknown options in enums.</exception>
-        private async Task<JObject> HandleCreateBranchActionAsync(DataRow dataRowWithSettings, BranchQueueModel branchQueue, string configurationServiceName, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, WiserItemsService wiserItemsService, IServiceScope scope)
+        private async Task<JObject> HandleCreateBranchActionAsync(DataRow dataRowWithSettings, BranchQueueModel branchQueue, string configurationServiceName, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService, IServiceScope scope)
         {
             var error = "";
             var result = new JObject();
@@ -499,7 +491,8 @@ AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
             }
             catch (Exception exception)
             {
-                await databaseConnection.RollbackTransactionAsync();
+                // Rollback transaction if started
+                await databaseConnection.RollbackTransactionAsync(false);    
                 
                 // Save the error in the queue and set the finished on datetime to now.
                 databaseConnection.AddParameter("now", DateTime.Now);
