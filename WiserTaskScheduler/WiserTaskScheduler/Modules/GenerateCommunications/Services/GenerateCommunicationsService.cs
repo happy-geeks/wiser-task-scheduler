@@ -1,8 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Modules.Communication.Enums;
 using GeeksCoreLibrary.Modules.Communication.Interfaces;
+using GeeksCoreLibrary.Modules.Communication.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -59,32 +63,206 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         databaseConnection.ClearParameters();
         await databaseConnection.EnsureOpenConnectionForWritingAsync();
         await databaseConnection.EnsureOpenConnectionForReadingAsync();
-        
-        if (generateCommunication != null)
+
+        if (generateCommunication.SingleCommunication)
         {
-            var body = bodyService.GenerateBody(generateCommunication.Body, )
+            return await GenerateCommunicationAsync(generateCommunication, generateCommunication.UseResultSet, resultSets, databaseConnection, communicationsService, ReplacementHelper.EmptyRows, configurationServiceName);
         }
         
-        throw new System.NotImplementedException();
+        var jArray = new JArray();
+        
+        var rows = ResultSetHelper.GetCorrectObject<JArray>(generateCommunication.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var indexRows = new List<int> {i};
+            jArray.Add(await GenerateCommunicationAsync(generateCommunication, $"{generateCommunication.UseResultSet}[{i}]", resultSets, databaseConnection, communicationsService, indexRows, configurationServiceName, forcedIndex: i));
+        }
+        
+        return new JObject
+        {
+            {"Results", jArray}
+        };
     }
 
-    private async Task<JObject> GenerateCommunicationAsync(GenerateCommunicationModel generateCommunication, JObject resultSets, IDatabaseConnection databaseConnection, ICommunicationsService communicationsService, List<int> rows, string configurationServiceName)
+    private async Task<JObject> GenerateCommunicationAsync(GenerateCommunicationModel generateCommunication, string useResultSet, JObject resultSets, IDatabaseConnection databaseConnection, ICommunicationsService communicationsService, List<int> rows, string configurationServiceName, int forcedIndex = -1)
     {
+        var identifier = generateCommunication.Identifier;
         var receivers = generateCommunication.Receiver;
         var receiverNames = generateCommunication.ReceiverName;
         var sender = generateCommunication.Sender;
         var senderName = generateCommunication.SenderName;
-        var replyToEmail = generateCommunication.ReplyToEmail;
+        var replyTo = generateCommunication.ReplyTo;
         var subject = generateCommunication.Subject;
+        var body = String.Empty;
 
-        if (!String.IsNullOrWhiteSpace(generateCommunication.UseResultSet))
+        if (!String.IsNullOrWhiteSpace(useResultSet))
         {
-            var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(generateCommunication.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
+            var keyParts = useResultSet.Split('.');
+            var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(useResultSet, rows, resultSets);
+            var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
+            
+            if (!String.IsNullOrWhiteSpace(identifier))
+            {
+                identifier = HandleReplacements(identifier, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
+            }
             
             if (!String.IsNullOrWhiteSpace(receivers))
             {
-                
+                receivers = HandleReplacements(receivers, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
+            }
+            
+            if (!String.IsNullOrWhiteSpace(receiverNames))
+            {
+                receiverNames = HandleReplacements(receiverNames, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
+            }
+            
+            if (!String.IsNullOrWhiteSpace(sender))
+            {
+                sender = HandleReplacements(sender, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
+            }
+            
+            if (!String.IsNullOrWhiteSpace(senderName))
+            {
+                senderName = HandleReplacements(senderName, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
+            }
+            
+            if (!String.IsNullOrWhiteSpace(replyTo))
+            {
+                replyTo = HandleReplacements(replyTo, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
+            }
+            
+            if (!String.IsNullOrWhiteSpace(subject))
+            {
+                subject = HandleReplacements(subject, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
             }
         }
+
+        // TODO Support email templates from Wiser to use for the body.
+        if (generateCommunication.Body != null)
+        {
+            body = bodyService.GenerateBody(generateCommunication.Body, rows, resultSets, generateCommunication.HashSettings, forcedIndex);
+        }
+
+        // Create the communication object to place in queue or send directly.
+        var singleCommunication = new SingleCommunicationModel()
+        {
+            Type = generateCommunication.CommunicationType
+        };
+        
+        // Add receivers if they are provided.
+        if (!String.IsNullOrWhiteSpace(receivers))
+        {
+            var receiverList = new List<CommunicationReceiverModel>();
+            var receiverNamesParts = String.IsNullOrWhiteSpace(receiverNames) ? null : receiverNames.Split(';');
+            var receiverParts = receivers.Split(';');
+            var includeNames = receiverNamesParts != null && receiverNamesParts.Length == receiverParts.Length;
+            
+            for (var i = 0; i < receiverParts.Length; i++)
+            {
+                receiverList.Add(new CommunicationReceiverModel
+                {
+                    Address = receiverParts[i]
+                });
+                
+                if (includeNames)
+                {
+                    receiverList.Last().DisplayName = receiverNamesParts[i];
+                }
+            }
+
+            if (receiverList.Any())
+            {
+                singleCommunication.Receivers = receiverList;
+            }
+        }
+
+        if (!String.IsNullOrWhiteSpace(sender))
+        {
+            singleCommunication.Sender = sender;
+        }
+        
+        if (!String.IsNullOrWhiteSpace(senderName))
+        {
+            singleCommunication.SenderName = senderName;
+        }
+        
+        if (!String.IsNullOrWhiteSpace(replyTo))
+        {
+            singleCommunication.ReplyTo = replyTo;
+        }
+        
+        if (!String.IsNullOrWhiteSpace(subject))
+        {
+            singleCommunication.Subject = subject;
+        }
+
+        if (!String.IsNullOrWhiteSpace(body))
+        {
+            singleCommunication.Content = body;
+        }
+        
+        var communicationId = 0;
+        
+        if (generateCommunication.SkipQueue)
+        {
+            communicationId = -1;
+
+            try
+            {
+                switch (generateCommunication.CommunicationType)
+                {
+                    case CommunicationTypes.Email:
+                        await communicationsService.SendEmailDirectlyAsync(singleCommunication, generateCommunication.SmtpSettings);
+                        break;
+                    case CommunicationTypes.Sms:
+                        await communicationsService.SendSmsDirectlyAsync(singleCommunication, generateCommunication.SmsSettings);
+                        break;
+                    case CommunicationTypes.WhatsApp:
+                        await communicationsService.SendWhatsAppDirectlyAsync(singleCommunication, generateCommunication.SmsSettings);
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(generateCommunication.CommunicationType), generateCommunication.CommunicationType.ToString());
+                }
+            }
+            catch (Exception e)
+            {
+                await logService.LogError(logger, LogScopes.RunBody, generateCommunication.LogSettings, $"Failed to directly send communication '{generateCommunication.Identifier}' using '{generateCommunication.CommunicationType}' due to exception:{Environment.NewLine}{e}", configurationServiceName, generateCommunication.TimeId, generateCommunication.Order);
+            }
+        }
+        else
+        {
+            switch (generateCommunication.CommunicationType)
+            {
+                case CommunicationTypes.Email:
+                    communicationId = await communicationsService.SendEmailAsync(singleCommunication);
+                    break;
+                case CommunicationTypes.Sms:
+                    communicationId = await communicationsService.SendSmsAsync(singleCommunication);
+                    break;
+                case CommunicationTypes.WhatsApp:
+                    communicationId = await communicationsService.SendWhatsAppAsync(singleCommunication);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(generateCommunication.CommunicationType), generateCommunication.CommunicationType.ToString());
+            }
+        }
+
+        return new JObject()
+        {
+            {"Identifier", identifier},
+            {"CommunicationId", communicationId},
+            {"CommunicationType", generateCommunication.CommunicationType.ToString()},
+            {"SkipQueue", generateCommunication.SkipQueue}
+        };
+    }
+
+    private string HandleReplacements(string originalString, JObject usingResultSet, string remainingKey, List<int> rows, HashSettingsModel hashSettings)
+    {
+        var tuple = ReplacementHelper.PrepareText(originalString, usingResultSet, remainingKey, hashSettings);
+        var result = tuple.Item1;
+        var parameterKeys = tuple.Item2;
+        result = ReplacementHelper.ReplaceText(result, rows, parameterKeys, usingResultSet, hashSettings);
+
+        return result;
     }
 }
