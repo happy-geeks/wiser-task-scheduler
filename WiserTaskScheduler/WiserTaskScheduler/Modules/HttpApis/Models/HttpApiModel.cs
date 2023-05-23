@@ -34,6 +34,11 @@ namespace WiserTaskScheduler.Modules.HttpApis.Models
         /// If false the using result set needs to be set to an array.
         /// </summary>
         public bool SingleRequest { get; set; } = true;
+        
+        /// <summary>
+        /// If True the connection will 'ignore' ssl validation errors
+        /// </summary>
+        public bool IgnoreSSLValidationErrors { get; set; } = false;
 
         /// <summary>
         /// Gets or sets the property of a response from which the next URL is taken.
