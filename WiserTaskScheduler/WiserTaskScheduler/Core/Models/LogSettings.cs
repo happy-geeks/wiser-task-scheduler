@@ -13,11 +13,6 @@ namespace WiserTaskScheduler.Core.Models
         public LogLevel LogMinimumLevel { get; set; } = LogLevel.Information;
 
         /// <summary>
-        /// Gets or sets if only Critical Errors sent to slack.
-        /// </summary>
-        public LogLevel SlackLogLevel { get; set; } = LogLevel.Critical;
-
-        /// <summary>
         /// Gets or sets if the start and stop needs to be logged.
         /// </summary>
         public bool LogStartAndStop { get; set; } = true;
@@ -31,5 +26,10 @@ namespace WiserTaskScheduler.Core.Models
         /// Gets or sets if the body of the run needs to be logged.
         /// </summary>
         public bool LogRunBody { get; set; } = true;
+        
+        /// <summary>
+        /// Gets or sets what level of Errors get sent to slack.
+        /// </summary>
+        public LogLevel SlackLogLevel { get; set; } = LogLevel.Critical;
     }
 }

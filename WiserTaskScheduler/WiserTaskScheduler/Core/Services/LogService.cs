@@ -13,19 +13,19 @@ using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Modules.Slack.modules;
 using SlackNet;
 using SlackNet.WebApi;
+using WiserTaskScheduler.Modules.Wiser.Models;
 
 namespace WiserTaskScheduler.Core.Services
 {
     public class LogService : ILogService, ISingletonService
     {
         private readonly IServiceProvider serviceProvider;
-
-        private readonly SlackSettings slackSettings;
+        private readonly ISlackChatService slackChatService;
         
-        public LogService(IServiceProvider serviceProvider, IOptions<WtsSettings> wtsSettings)
+        public LogService(IServiceProvider serviceProvider, ISlackChatService slackChatService, IOptions<WtsSettings> settings)
         {
             this.serviceProvider = serviceProvider;
-            slackSettings = wtsSettings.Value.SlackSettings;
+            this.slackChatService = slackChatService;
         }
 
         /// <inheritdoc />
@@ -104,26 +104,22 @@ namespace WiserTaskScheduler.Core.Services
                             // If writing to the database fails log its error.
                             logger.Log(logLevel, $"Failed to write log to database due to exception: ${e}");
                         }
+                        
                         logger.Log(logLevel, message);
-
-#if !DEBUG
-                        // Only send messages to Slack for production Wiser Task Schedulers to prevent exceptions during developing/testing to trigger it.
-
-                        // Send messages to the specified Slack channel if one is set and the log level is high enough. If the token has not been set the service was not added at startup.
-                        if (slackSettings != null && !String.IsNullOrWhiteSpace(slackSettings.BotToken) && !String.IsNullOrWhiteSpace(slackSettings.Channel) && logLevel >= logSettings.SlackLogLevel)
+                        
+                        // log to slack chat service in case configured 
+                        if (logLevel >= logSettings.SlackLogLevel)
                         {
-                            var slack = scope.ServiceProvider.GetRequiredService<ISlackApiClient>();
-                            await slack.Chat.PostMessage(new Message() { Text = $@"Log level: {logLevel}
+                            var title = message.Substring(0, message.IndexOf(Environment.NewLine));
+                            string slackMessage = $@"Log level: {logLevel}
 Configuration : '{configurationName}'
 Time ID: '{timeId}'
 Order: '{order}'
-
 Message:
-{message}",
-                                Channel = slackSettings.Channel
-                            });
+{title}";
+
+                            await slackChatService.SendChannelMessageAsync(slackMessage,new[] { message });
                         }
-#endif
                     }
                     catch
                     {
