@@ -107,9 +107,9 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
                 Content = new FormUrlEncodedContent(formData)
             };
             request.Headers.Add("Accept", "application/json");
-            
+
             logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"URL: {request.RequestUri}\nHeaders: {request.Headers}\nBody: {String.Join(' ', formData)}", "WiserService");
-            
+
             using var client = new HttpClient();
             try
             {
@@ -138,59 +138,55 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
         /// <inheritdoc />
         public async Task<List<TemplateSettingsModel>> RequestConfigurations()
         {
-            // Lock cannot be used inside an async function. This way we can wait till the request has completed.
-            return await Task.Run(() =>
-            {  
 #if DEBUG
-                var environment = Environments.Development;
+            var environment = Environments.Development;
 #else
-                var environment = Environments.Live;
+            var environment = Environments.Live;
 #endif
-                
-                var configurationPaths = String.IsNullOrWhiteSpace(wiserSettings.ConfigurationPath) ? new[] { "" } : wiserSettings.ConfigurationPath.Split(";");
-                using var client = new HttpClient();
-                
-                var configurations = new List<TemplateSettingsModel>();
-                
-                foreach (var configurationPath in configurationPaths)
+
+            var configurationPaths = String.IsNullOrWhiteSpace(wiserSettings.ConfigurationPath) ? new[] { "" } : wiserSettings.ConfigurationPath.Split(";");
+            using var client = new HttpClient();
+
+            var configurations = new List<TemplateSettingsModel>();
+
+            foreach (var configurationPath in configurationPaths)
+            {
+                try
                 {
-                    try
+                    var request = new HttpRequestMessage(HttpMethod.Get, $"{wiserSettings.WiserApiUrl}api/v3/templates/entire-tree-view?startFrom=SERVICES{(String.IsNullOrWhiteSpace(configurationPath) ? "" : $",{configurationPath}")}&environment={environment}");
+                    request.Headers.Add("Authorization", $"Bearer {AccessToken}");
+
+                    var response = await client.SendAsync(request);
+
+                    if (response.StatusCode != HttpStatusCode.OK)
                     {
-                        var request = new HttpRequestMessage(HttpMethod.Get, $"{wiserSettings.WiserApiUrl}api/v3/templates/entire-tree-view?startFrom=SERVICES{(String.IsNullOrWhiteSpace(configurationPath) ? "" : $",{configurationPath}")}&environment={environment}");
-                        request.Headers.Add("Authorization", $"Bearer {AccessToken}");
-
-                        var response = client.Send(request);
-
-                        if (response.StatusCode != HttpStatusCode.OK)
-                        {
-                            logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configurations from the Wiser API.", "WiserService");
-                            return null;
-                        }
-
-                        using var reader = new StreamReader(response.Content.ReadAsStream());
-                        var body = reader.ReadToEnd();
-                        
-                        // The call to wiser configuration responds with an html document when Wiser is updating
-                        // We check for both html tag and doctype so this document is more free to change
-                        if (body.StartsWith("<html", StringComparison.InvariantCultureIgnoreCase) || body.StartsWith("<!DOCTYPE html", StringComparison.InvariantCultureIgnoreCase))
-                        {
-                            logService.LogInformation(logger, LogScopes.RunStartAndStop, logSettings, "Unable to get configuration due to Wiser update.", "WiserService");
-                            return null;
-                        }
-                        
-                        var templateTrees = JsonConvert.DeserializeObject<List<TemplateTreeViewModel>>(body);
-
-                        configurations.AddRange(FlattenTree(templateTrees));
-                    }
-                    catch (Exception e)
-                    {
-                        logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.\n{e}", "WiserService");
+                        await logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configurations from the Wiser API.", "WiserService");
                         return null;
                     }
-                }
 
-                return configurations;
-            });
+                    using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+                    var body = await reader.ReadToEndAsync();
+
+                    // The call to wiser configuration responds with an html document when Wiser is updating
+                    // We check for both html tag and doctype so this document is more free to change
+                    if (body.StartsWith("<html", StringComparison.InvariantCultureIgnoreCase) || body.StartsWith("<!DOCTYPE html", StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        await logService.LogInformation(logger, LogScopes.RunStartAndStop, logSettings, "Unable to get configuration due to Wiser update.", "WiserService");
+                        return null;
+                    }
+
+                    var templateTrees = JsonConvert.DeserializeObject<List<TemplateTreeViewModel>>(body);
+
+                    configurations.AddRange(FlattenTree(templateTrees));
+                }
+                catch (Exception e)
+                {
+                    await logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.\n{e}", "WiserService");
+                    return null;
+                }
+            }
+
+            return configurations;
         }
 
         private List<TemplateSettingsModel> FlattenTree(List<TemplateTreeViewModel> templateTrees)
