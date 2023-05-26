@@ -53,7 +53,7 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
     public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
     {
         var generateCommunication = (GenerateCommunicationModel)action;
-        await logService.LogInformation(logger, LogScopes.RunStartAndStop, generateCommunication.LogSettings, $"", configurationServiceName, generateCommunication.TimeId, generateCommunication.Order);
+        await logService.LogInformation(logger, LogScopes.RunStartAndStop, generateCommunication.LogSettings, $"Generating communications of type '{generateCommunication.CommunicationType}' in time id: {generateCommunication.TimeId}, order: {generateCommunication.Order}", configurationServiceName, generateCommunication.TimeId, generateCommunication.Order);
 
         using var scope = serviceProvider.CreateScope();
         var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
@@ -78,6 +78,8 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
             jArray.Add(await GenerateCommunicationAsync(generateCommunication, $"{generateCommunication.UseResultSet}[{i}]", resultSets, databaseConnection, communicationsService, indexRows, configurationServiceName, forcedIndex: i));
         }
         
+        await logService.LogInformation(logger, LogScopes.RunStartAndStop, generateCommunication.LogSettings, $"Generated {rows.Count} communications of type '{generateCommunication.CommunicationType}' in time id: {generateCommunication.TimeId}, order: {generateCommunication.Order}", configurationServiceName, generateCommunication.TimeId, generateCommunication.Order);
+        
         return new JObject
         {
             {"Results", jArray}
@@ -89,12 +91,14 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         var identifier = generateCommunication.Identifier;
         var receivers = generateCommunication.Receiver;
         var receiverNames = generateCommunication.ReceiverName;
+        var additionalReceivers = generateCommunication.AdditionalReceiver;
         var sender = generateCommunication.Sender;
         var senderName = generateCommunication.SenderName;
         var replyTo = generateCommunication.ReplyTo;
         var subject = generateCommunication.Subject;
         var body = String.Empty;
 
+        // If a result set is used on the main level apply replacements to all properties that have been set.
         if (!String.IsNullOrWhiteSpace(useResultSet))
         {
             var keyParts = useResultSet.Split('.');
@@ -114,6 +118,11 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
             if (!String.IsNullOrWhiteSpace(receiverNames))
             {
                 receiverNames = HandleReplacements(receiverNames, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
+            }
+            
+            if (!String.IsNullOrWhiteSpace(additionalReceivers))
+            {
+                additionalReceivers = HandleReplacements(additionalReceivers, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
             }
             
             if (!String.IsNullOrWhiteSpace(sender))
@@ -137,7 +146,6 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
             }
         }
 
-        // TODO Support email templates from Wiser to use for the body.
         if (generateCommunication.Body != null)
         {
             body = bodyService.GenerateBody(generateCommunication.Body, rows, resultSets, generateCommunication.HashSettings, forcedIndex);
@@ -185,6 +193,11 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         {
             singleCommunication.SenderName = senderName;
         }
+
+        if (!String.IsNullOrWhiteSpace(additionalReceivers))
+        {
+            singleCommunication.Bcc = additionalReceivers.Split(';').ToList();
+        }
         
         if (!String.IsNullOrWhiteSpace(replyTo))
         {
@@ -209,6 +222,7 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
 
             try
             {
+                // TODO try catch to prevent the entire run from failing.
                 switch (generateCommunication.CommunicationType)
                 {
                     case CommunicationTypes.Email:
@@ -231,6 +245,7 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         }
         else
         {
+            //TODO try catch to prevent the entire run from failing.
             switch (generateCommunication.CommunicationType)
             {
                 case CommunicationTypes.Email:

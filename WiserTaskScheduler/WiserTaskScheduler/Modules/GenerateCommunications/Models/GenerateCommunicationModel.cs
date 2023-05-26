@@ -13,7 +13,7 @@ public class GenerateCommunicationModel : ActionModel
     /// <summary>
     /// Gets or sets the type of communication to generate.
     /// </summary>
-    public CommunicationTypes CommunicationType { get; set; }
+    public CommunicationTypes CommunicationType { get; set; } = CommunicationTypes.Email;
 
     /// <summary>
     /// Gets or sets a value to be used to identify the communication in the created result set.
@@ -29,7 +29,13 @@ public class GenerateCommunicationModel : ActionModel
     /// Gets or sets the receiver. Semi-colon separated list when multiple receivers.
     /// </summary>
     public string Receiver { get; set; }
-    
+
+    /// <summary>
+    /// Gets or sets an additional receiver. Semi-colon separated list when multiple receivers.
+    /// Added for email in the BCC field.
+    /// </summary>
+    public string AdditionalReceiver { get; set; }
+
     /// <summary>
     /// Gets or sets the name of the sender.
     /// </summary>
