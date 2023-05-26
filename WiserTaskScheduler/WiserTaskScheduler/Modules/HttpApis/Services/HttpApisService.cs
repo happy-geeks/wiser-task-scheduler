@@ -191,7 +191,17 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                 };
             }
 
-            using var client = new HttpClient();
+            
+            var httpHandler = new HttpClientHandler();
+
+            if (httpApi.IgnoreSSLValidationErrors)
+            {
+                httpHandler.ClientCertificateOptions = ClientCertificateOption.Manual;
+                httpHandler.ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true;
+            }
+
+            using var client = new HttpClient(httpHandler);
+
             using var response = await client.SendAsync(request);
 
             // If the request was unauthorized retry the request if it has an OAuth API name set and it hasn't retried before.
