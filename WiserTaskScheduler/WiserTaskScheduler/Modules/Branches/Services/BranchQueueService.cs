@@ -317,7 +317,6 @@ ORDER BY TABLE_NAME ASC";
                                 case CreateBranchEntityModes.DataSelector:
                                     if (entity.DataSelector <= 0)
                                     {
-                                        // TODO
                                         await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                                         continue;
                                     }
