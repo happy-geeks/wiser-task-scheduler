@@ -21,6 +21,9 @@ using WiserTaskScheduler.Modules.GenerateCommunications.Models;
 
 namespace WiserTaskScheduler.Modules.GenerateCommunications.Services;
 
+/// <summary>
+/// A service to generate communications.
+/// </summary>
 public class GenerateCommunicationsService : IGenerateCommunicationsService, IActionsService, IScopedService
 {
     private readonly IServiceProvider serviceProvider;
@@ -30,6 +33,13 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
 
     private string connectionString;
     
+    /// <summary>
+    /// Creates a new instance of <see cref="GenerateCommunicationsService"/>.
+    /// </summary>
+    /// <param name="serviceProvider"></param>
+    /// <param name="bodyService"></param>
+    /// <param name="logger"></param>
+    /// <param name="logService"></param>
     public GenerateCommunicationsService(IServiceProvider serviceProvider, IBodyService bodyService, ILogger<GenerateCommunicationsService> logger, ILogService logService)
     {
         this.serviceProvider = serviceProvider;
@@ -38,6 +48,7 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         this.logService = logService;
     }
     
+    /// <inheritdoc />
     public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
     {
         connectionString = configuration.ConnectionString;
@@ -50,6 +61,7 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         return Task.CompletedTask;
     }
 
+    /// <inheritdoc />
     public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
     {
         var generateCommunication = (GenerateCommunicationModel)action;
@@ -107,6 +119,18 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         };
     }
 
+    /// <summary>
+    /// Generate a single communication.
+    /// </summary>
+    /// <param name="generateCommunication">The information for the communication to be generated.</param>
+    /// <param name="useResultSet">The result set to use for this execution.</param>
+    /// <param name="resultSets">The result sets from previous actions in the same run.</param>
+    /// <param name="databaseConnection">The database connection to use for placing the communications in the queue.</param>
+    /// <param name="communicationsService">The <see cref="ICommunicationsService"/> to use for handling the queueing and sending of communications.</param>
+    /// <param name="rows">The indexes/rows of the array, passed to be used if '[i]' is used in the key.</param>
+    /// <param name="configurationServiceName">The name of the service in the configuration, used for logging.</param>
+    /// <param name="forcedIndex">The index to use if the index is forced.</param>
+    /// <returns></returns>
     private async Task<JObject> GenerateCommunicationAsync(GenerateCommunicationModel generateCommunication, string useResultSet, JObject resultSets, IDatabaseConnection databaseConnection, ICommunicationsService communicationsService, List<int> rows, string configurationServiceName, int forcedIndex = -1)
     {
         var identifier = generateCommunication.Identifier;
@@ -237,6 +261,7 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         
         var communicationId = 0;
         
+        // If the queue is skipped send it directly, otherwise add it to the queue.
         if (generateCommunication.SkipQueue)
         {
             communicationId = -1;
@@ -297,6 +322,15 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         };
     }
 
+    /// <summary>
+    /// Handle replacements of the given string.
+    /// </summary>
+    /// <param name="originalString">The provided string to perform the replacements on.</param>
+    /// <param name="usingResultSet">The result set that is being used.</param>
+    /// <param name="remainingKey">The remaining key to use to determine the replacement value.</param>
+    /// <param name="rows">The indexes/rows of the array, passed to be used if '[i]' is used in the key.</param>
+    /// <param name="hashSettings">The <see cref="HashSettingsModel"/> to use when a replacement value needs to be hashed.</param>
+    /// <returns>Returns the replaced text.</returns>
     private string HandleReplacements(string originalString, JObject usingResultSet, string remainingKey, List<int> rows, HashSettingsModel hashSettings)
     {
         var tuple = ReplacementHelper.PrepareText(originalString, usingResultSet, remainingKey, hashSettings);
