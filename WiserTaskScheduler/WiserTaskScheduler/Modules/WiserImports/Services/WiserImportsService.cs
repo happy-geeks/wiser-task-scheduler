@@ -180,9 +180,6 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
             var subject = await stringReplacementsService.DoAllReplacementsAsync(stringReplacementsService.DoReplacements(String.IsNullOrWhiteSpace(template?.GetDetailValue("subject")) ? DefaultSubject : template.GetDetailValue("subject"), replaceData));
             await NotifyUserByEmailAsync(wiserImport, importRow, databaseConnection, gclCommunicationsService, configurationServiceName, subject, template, replaceData, stringReplacementsService);
             await NotifyUserByTaskAlertAsync(wiserImport, importRow, wiserItemsService, configurationServiceName, usernameForLogs, subject);
-            
-            // TODO: Get all imports where "rollback_on" is not null and rollback those imports. We want to use wiser_history for rolling back.
-            // TODO: Get all item IDs that have been used in the import and get the start date and end date, then get all changes from wiser_history for these items between these two dates and use that data for rolling back.
         }
 
         return new JObject()

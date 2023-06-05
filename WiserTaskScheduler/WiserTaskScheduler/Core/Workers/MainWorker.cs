@@ -41,13 +41,13 @@ namespace WiserTaskScheduler.Core.Workers
             this.slackChatService = slackChatService;
 
             this.mainService.LogSettings = RunScheme.LogSettings;
+
+            slackChatService.SendChannelMessageAsync("*Wiser Task Scheduler has started*");
         }
-        
 
         /// <inheritdoc />
         protected override async Task ExecuteActionAsync()
         {
-            slackChatService.SendChannelMessageAsync("*Wiser Task Scheduler has started*");
             await mainService.ManageConfigurations();
         }
 
