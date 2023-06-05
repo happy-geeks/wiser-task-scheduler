@@ -66,7 +66,21 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
 
         if (generateCommunication.SingleCommunication)
         {
-            return await GenerateCommunicationAsync(generateCommunication, generateCommunication.UseResultSet, resultSets, databaseConnection, communicationsService, ReplacementHelper.EmptyRows, configurationServiceName);
+            try
+            {
+                return await GenerateCommunicationAsync(generateCommunication, generateCommunication.UseResultSet, resultSets, databaseConnection, communicationsService, ReplacementHelper.EmptyRows, configurationServiceName);
+            }
+            catch (Exception e)
+            {
+                await logService.LogError(logger, LogScopes.RunStartAndStop, generateCommunication.LogSettings, $"Failed to generate single communication due to exception:{Environment.NewLine}{e}", configurationServiceName, generateCommunication.TimeId, generateCommunication.Order);
+                return new JObject()
+                {
+                    {"Identifier", ""},
+                    {"CommunicationId", -1},
+                    {"CommunicationType", generateCommunication.CommunicationType.ToString()},
+                    {"SkipQueue", generateCommunication.SkipQueue}
+                };
+            }
         }
         
         var jArray = new JArray();
@@ -75,7 +89,14 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         for (var i = 0; i < rows.Count; i++)
         {
             var indexRows = new List<int> {i};
-            jArray.Add(await GenerateCommunicationAsync(generateCommunication, $"{generateCommunication.UseResultSet}[{i}]", resultSets, databaseConnection, communicationsService, indexRows, configurationServiceName, forcedIndex: i));
+            try
+            {
+                jArray.Add(await GenerateCommunicationAsync(generateCommunication, $"{generateCommunication.UseResultSet}[{i}]", resultSets, databaseConnection, communicationsService, indexRows, configurationServiceName, forcedIndex: i));
+            }
+            catch (Exception e)
+            {
+                await logService.LogError(logger, LogScopes.RunBody, generateCommunication.LogSettings, $"Failed to generate communication in loop due to exception:{Environment.NewLine}{e}", configurationServiceName, generateCommunication.TimeId, generateCommunication.Order);
+            }
         }
         
         await logService.LogInformation(logger, LogScopes.RunStartAndStop, generateCommunication.LogSettings, $"Generated {rows.Count} communications of type '{generateCommunication.CommunicationType}' in time id: {generateCommunication.TimeId}, order: {generateCommunication.Order}", configurationServiceName, generateCommunication.TimeId, generateCommunication.Order);
@@ -222,7 +243,6 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
 
             try
             {
-                // TODO try catch to prevent the entire run from failing.
                 switch (generateCommunication.CommunicationType)
                 {
                     case CommunicationTypes.Email:
@@ -245,20 +265,26 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         }
         else
         {
-            //TODO try catch to prevent the entire run from failing.
-            switch (generateCommunication.CommunicationType)
+            try
             {
-                case CommunicationTypes.Email:
-                    communicationId = await communicationsService.SendEmailAsync(singleCommunication);
-                    break;
-                case CommunicationTypes.Sms:
-                    communicationId = await communicationsService.SendSmsAsync(singleCommunication);
-                    break;
-                case CommunicationTypes.WhatsApp:
-                    communicationId = await communicationsService.SendWhatsAppAsync(singleCommunication);
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(generateCommunication.CommunicationType), generateCommunication.CommunicationType.ToString());
+                switch (generateCommunication.CommunicationType)
+                {
+                    case CommunicationTypes.Email:
+                        communicationId = await communicationsService.SendEmailAsync(singleCommunication);
+                        break;
+                    case CommunicationTypes.Sms:
+                        communicationId = await communicationsService.SendSmsAsync(singleCommunication);
+                        break;
+                    case CommunicationTypes.WhatsApp:
+                        communicationId = await communicationsService.SendWhatsAppAsync(singleCommunication);
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(generateCommunication.CommunicationType), generateCommunication.CommunicationType.ToString());
+                }
+            }
+            catch (Exception e)
+            {
+                await logService.LogError(logger, LogScopes.RunBody, generateCommunication.LogSettings, $"Failed to place communication '{generateCommunication.Identifier}' in the queue using '{generateCommunication.CommunicationType}' due to exception:{Environment.NewLine}{e}", configurationServiceName, generateCommunication.TimeId, generateCommunication.Order);
             }
         }
 
