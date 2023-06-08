@@ -34,7 +34,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
 {
     private const string DefaultSubject = "Import[if({name}!)] with the name '{name}'[endif] from {date:DateTime(dddd\\, dd MMMM yyyy,en-US)} did [if({errorCount}=0)]finish successfully[else](partially) go wrong[endif]";
     private const string DefaultContent = "<p>The import started on {startDate:DateTime(HH\\:mm\\:ss)} and finished on {endDate:DateTime(HH\\:mm\\:ss)}. The import took a total of {hours} hour(s), {minutes} minute(s) and {seconds} second(s).</p>[if({errorCount}!0)] <br /><br />The following errors occurred during the import: {errors}[endif]";
-    
+
     private readonly IServiceProvider serviceProvider;
     private readonly WtsSettings wtsSettings;
     private readonly IWiserService wiserService;
@@ -89,7 +89,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
         }
 
         var stopwatch = new Stopwatch();
-        
+
         var stringReplacementsService = scope.ServiceProvider.GetRequiredService<IStringReplacementsService>();
         var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
         var gclCommunicationsService = scope.ServiceProvider.GetRequiredService<ICommunicationsService>();
@@ -176,11 +176,11 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
             {
                 template = await wiserItemsService.GetItemDetailsAsync(wiserImport.TemplateId, userId: importRow.UserId);
             }
-            
+
             var subject = await stringReplacementsService.DoAllReplacementsAsync(stringReplacementsService.DoReplacements(String.IsNullOrWhiteSpace(template?.GetDetailValue("subject")) ? DefaultSubject : template.GetDetailValue("subject"), replaceData));
             await NotifyUserByEmailAsync(wiserImport, importRow, databaseConnection, gclCommunicationsService, configurationServiceName, subject, template, replaceData, stringReplacementsService);
             await NotifyUserByTaskAlertAsync(wiserImport, importRow, wiserItemsService, configurationServiceName, usernameForLogs, subject);
-            
+
             // TODO: Get all imports where "rollback_on" is not null and rollback those imports. We want to use wiser_history for rolling back.
             // TODO: Get all item IDs that have been used in the import and get the start date and end date, then get all changes from wiser_history for these items between these two dates and use that data for rolling back.
         }
@@ -600,7 +600,7 @@ ORDER BY added_on ASC");
         await wiserItemsService.SaveAsync(taskAlert, username: usernameForLogs, userId: importRow.UserId);
 
         // Push the task alert to the user to give a signal within Wiser if it is open.
-        var accessToken = await Task.Run(() => wiserService.AccessToken);
+        var accessToken = await wiserService.GetAccessTokenAsync();
 
         try
         {

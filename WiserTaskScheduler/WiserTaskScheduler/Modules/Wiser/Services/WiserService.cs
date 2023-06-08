@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Enums;
@@ -32,7 +33,8 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
         private DateTime accessTokenExpireTime;
         private string refreshToken;
 
-        public string AccessToken => GetAccessToken();
+        // Semaphore is a locking system that can be used with async code.
+        private static readonly SemaphoreSlim AccessTokenLock = new(1, 1);
 
         public WiserService(IOptions<WtsSettings> wtsSettings, ILogService logService, ILogger<WiserService> logger)
         {
@@ -46,41 +48,45 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
             refreshToken = "";
         }
 
-        /// <summary>
-        /// Get the access token and gets a new token if none is available or if it has expired.
-        /// </summary>
-        /// <returns></returns>
-        private string GetAccessToken()
+        /// <inheritdoc />
+        public async Task<string> GetAccessTokenAsync()
         {
             // Lock to prevent multiple requests at once.
-            lock (accessToken)
+            await AccessTokenLock.WaitAsync();
+
+            try
             {
                 if (String.IsNullOrWhiteSpace(accessToken))
                 {
-                    Login();
+                    await LoginAsync();
                 }
                 else if (accessTokenExpireTime <= DateTime.Now)
                 {
                     if (String.IsNullOrWhiteSpace(refreshToken))
                     {
-                        Login();
+                        await LoginAsync();
                     }
                     else
                     {
-                        Login(true);
+                        await LoginAsync(true);
                     }
                 }
 
                 return accessToken;
+            }
+            finally
+            {
+                // Release the lock. This is in a finally to be 100% sure that it will always be released. Otherwise the application might freeze.
+                AccessTokenLock.Release();
             }
         }
 
         /// <summary>
         /// DO NOT CALL THIS BY YOURSELF!
         /// Login to the Wiser API.
-        /// This method is called when using <see cref="AccessToken"/> or <see cref="GetAccessToken"/> with a lock.
+        /// This method is called when using <see cref="AccessToken"/> or <see cref="GetAccessTokenAsync"/> with a lock.
         /// </summary>
-        private void Login(bool useRefreshToken = false)
+        private async Task LoginAsync(bool useRefreshToken = false)
         {
             var formData = new List<KeyValuePair<string, string>>()
             {
@@ -108,21 +114,21 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
             };
             request.Headers.Add("Accept", "application/json");
 
-            logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"URL: {request.RequestUri}\nHeaders: {request.Headers}\nBody: {String.Join(' ', formData)}", "WiserService");
+            await logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"URL: {request.RequestUri}\nHeaders: {request.Headers}\nBody: {String.Join(' ', formData)}", "WiserService");
 
             using var client = new HttpClient();
             try
             {
-                var response = client.Send(request);
+                var response = await client.SendAsync(request);
                 if (response.StatusCode != HttpStatusCode.OK)
                 {
-                    logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to login to the Wiser API.", "WiserService");
+                    await logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to login to the Wiser API.", "WiserService");
                     return;
                 }
 
-                using var reader = new StreamReader(response.Content.ReadAsStream());
-                var body = reader.ReadToEnd();
-                logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"Response body: {body}", "WiserService");
+                using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+                var body = await reader.ReadToEndAsync();
+                await logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"Response body: {body}", "WiserService");
                 var wiserLoginResponse = JsonConvert.DeserializeObject<WiserLoginResponseModel>(body);
 
                 accessToken = wiserLoginResponse.AccessToken;
@@ -131,7 +137,7 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
             }
             catch (Exception e)
             {
-                logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to login to the Wiser API.\n{e}", "WiserService");
+                await logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to login to the Wiser API.\n{e}", "WiserService");
             }
         }
 
@@ -154,7 +160,7 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
                 try
                 {
                     var request = new HttpRequestMessage(HttpMethod.Get, $"{wiserSettings.WiserApiUrl}api/v3/templates/entire-tree-view?startFrom=SERVICES{(String.IsNullOrWhiteSpace(configurationPath) ? "" : $",{configurationPath}")}&environment={environment}");
-                    request.Headers.Add("Authorization", $"Bearer {AccessToken}");
+                    request.Headers.Add("Authorization", $"Bearer {await GetAccessTokenAsync()}");
 
                     var response = await client.SendAsync(request);
 
