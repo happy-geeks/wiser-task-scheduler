@@ -1,6 +1,13 @@
 [
   {
     "Major": 1,
+    "Minor": 2,
+    "Build": 0,
+    "Revision": 0,
+    "ContainsBreakingChanges": false
+  },
+  {
+    "Major": 1,
     "Minor": 1,
     "Build": 0,
     "Revision": 0,

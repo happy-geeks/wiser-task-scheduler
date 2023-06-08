@@ -14,6 +14,8 @@ using GeeksCoreLibrary.Modules.Branches.Helpers;
 using GeeksCoreLibrary.Modules.Branches.Models;
 using GeeksCoreLibrary.Modules.Databases.Helpers;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
+using GeeksCoreLibrary.Modules.DataSelector.Interfaces;
+using GeeksCoreLibrary.Modules.DataSelector.Models;
 using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
 using GeeksCoreLibrary.Modules.Objects.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
@@ -88,7 +90,7 @@ ORDER BY start_on ASC, id ASC");
                 switch (branchAction)
                 {
                     case "create":
-                        results.Add(await HandleCreateBranchActionAsync(dataRow, branchQueue, configurationServiceName, databaseConnection, databaseHelpersService, wiserItemsService));
+                        results.Add(await HandleCreateBranchActionAsync(dataRow, branchQueue, configurationServiceName, databaseConnection, databaseHelpersService, wiserItemsService, scope));
                         break;
                     case "merge":
                         results.Add(await HandleMergeBranchActionAsync(dataRow, branchQueue, configurationServiceName, databaseConnection, databaseHelpersService, wiserItemsService));
@@ -113,9 +115,10 @@ ORDER BY start_on ASC, id ASC");
         /// <param name="databaseConnection">The <see cref="IDatabaseConnection"/> with the connection to the database.</param>
         /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> for checking if a table exists, creating new tables etc.</param>
         /// <param name="wiserItemsService">The <see cref="IWiserItemsService"/> for getting settings of entity types and for (un)deleting items.</param>
+        /// <param name="scope">The <see cref="IServiceScope"/> for dependency injection.</param>
         /// <returns>An <see cref="JObject"/> with properties "Success" and "ErrorMessage".</returns>
         /// <exception cref="ArgumentOutOfRangeException">Then we get unknown options in enums.</exception>
-        private async Task<JObject> HandleCreateBranchActionAsync(DataRow dataRowWithSettings, BranchQueueModel branchQueue, string configurationServiceName, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService)
+        private async Task<JObject> HandleCreateBranchActionAsync(DataRow dataRowWithSettings, BranchQueueModel branchQueue, string configurationServiceName, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService, IServiceScope scope)
         {
             var error = "";
             var result = new JObject();
@@ -311,6 +314,29 @@ ORDER BY TABLE_NAME ASC";
                                     
                                     whereClauseBuilder.AppendLine($"AND added_on BETWEEN ?{startDateParameter} AND ?{endDateParameter}");
                                     break;
+                                case CreateBranchEntityModes.DataSelector:
+                                    if (entity.DataSelector <= 0)
+                                    {
+                                        await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                        continue;
+                                    }
+
+                                    var dataSelectorsService = scope.ServiceProvider.GetRequiredService<IDataSelectorsService>();
+                                    var dataSelectorSettings = new DataSelectorRequestModel
+                                    {
+                                        DataSelectorId = entity.DataSelector
+                                    };
+
+                                    var (dataSelectorResult, _, _) = await dataSelectorsService.GetJsonResponseAsync(dataSelectorSettings, true);
+
+                                    if (!dataSelectorResult.Any())
+                                    {
+                                        continue;
+                                    }
+                                    
+                                    var dataSelectorIds = dataSelectorResult.Select(i => i["id"]).ToList();
+                                    whereClauseBuilder.AppendLine($"AND item.id IN ({String.Join(", ", dataSelectorIds)})");
+                                    break;
                                 default:
                                     throw new ArgumentOutOfRangeException(nameof(entity.Mode), entity.Mode.ToString());
                             }
@@ -484,6 +510,7 @@ AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
             }
 
             // Set the finish time to the current datetime, so that we can see how long it took.
+            databaseConnection.AddParameter("queueId", queueId); // Set the queue ID again because if a data selector is used the parameters are cleared.
             databaseConnection.AddParameter("now", DateTime.Now);
             databaseConnection.AddParameter("error", error);
             databaseConnection.AddParameter("success", String.IsNullOrWhiteSpace(error));
