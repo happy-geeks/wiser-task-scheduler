@@ -23,7 +23,6 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
     private readonly IServiceProvider serviceProvider;
     private readonly ILogService logService;
     private readonly ILogger<CleanupItemsService> logger;
-    private const string WiserUsername = "WTS (Document Store Read)";
 
     public DocumentStoreReadService(IServiceProvider serviceProvider, ILogService logService, ILogger<CleanupItemsService> logger)
     {
@@ -104,7 +103,7 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
                 {
                     continue;
                 }
-                await wiserItemsService.SaveAsync(item.model, username: documentStoreReadItem.UsernameForLogging ?? WiserUsername, storeTypeOverride: StoreType.Table, userId: documentStoreReadItem.UserId);
+                await wiserItemsService.SaveAsync(item.model, username: documentStoreReadItem.UsernameForLogging, storeTypeOverride: StoreType.Table, userId: documentStoreReadItem.UserId);
                 await documentStorageService.DeleteItem(item.documentId, entitySettings);
             }
         }

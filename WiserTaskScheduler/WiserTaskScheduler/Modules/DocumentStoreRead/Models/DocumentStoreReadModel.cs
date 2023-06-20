@@ -19,9 +19,9 @@ public class DocumentStoreReadModel : ActionModel
     /// </summary>
     [Required]
     public ulong UserId { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the user name
     /// </summary>
-    public string UsernameForLogging { get; set; }
+    public string UsernameForLogging { get; set; } = "WTS (Document Store Read)";
 }
