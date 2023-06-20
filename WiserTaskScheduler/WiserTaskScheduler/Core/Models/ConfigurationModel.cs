@@ -5,6 +5,7 @@ using WiserTaskScheduler.Modules.Branches.Models;
 using WiserTaskScheduler.Modules.CleanupItems.Models;
 using WiserTaskScheduler.Modules.CleanupWiserHistory.Models;
 using WiserTaskScheduler.Modules.Communications.Models;
+using WiserTaskScheduler.Modules.DocumentStoreRead.Models;
 using WiserTaskScheduler.Modules.GenerateFiles.Models;
 using WiserTaskScheduler.Modules.HttpApis.Models;
 using WiserTaskScheduler.Modules.ImportFiles.Models;
@@ -216,6 +217,19 @@ namespace WiserTaskScheduler.Core.Models
         /// </summary>
         [XmlElement("ServerMonitor")]
         public ServerMonitorModel[] ServerMonitor { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the Document store readers that have been placed inside the group
+        /// </summary>
+        [XmlArray("DocumentStoreReads")]
+        [XmlArrayItem(typeof(DocumentStoreReadModel))]
+        public DocumentStoreReadModel[] DocumentStoreReadersGroup { get; set; }
+
+        /// <summary>
+        /// Gets or sets the Server Monitors that have been placed outside the group
+        /// </summary>
+        [XmlElement("DocumentStoreRead")]
+        public DocumentStoreReadModel[] DocumentStoreReader { get; set; }
 
         /// <summary>
         /// Get all run schemes that are defined in this configuration.
