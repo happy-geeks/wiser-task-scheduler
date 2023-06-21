@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,25 +20,39 @@ namespace WiserTaskScheduler.Core.Services
         private readonly IServiceProvider serviceProvider;
         private readonly SlackSettings slackSettings;
 
+        private ConcurrentDictionary<string, DateTime> sendMessages;
+
         public SlackChatService(IServiceProvider serviceProvider, IOptions<WtsSettings> logSettings)
         {
             this.serviceProvider = serviceProvider;
-            this.slackSettings = logSettings.Value.SlackSettings;
+            slackSettings = logSettings.Value.SlackSettings;
+            sendMessages = new ConcurrentDictionary<string, DateTime>();
         }
 
 #if DEBUG
         /// <inheritdoc />
-        public async Task SendChannelMessageAsync(string message, string[] replies = null, string recipient = null)
+        public async Task SendChannelMessageAsync(string message, string[] replies = null, string recipient = null, string messageHash = null)
         {
             return;
             // Only send messages to Slack for production Wiser Task Schedulers to prevent exceptions during developing/testing to trigger it.
         }
 #else
         /// <inheritdoc />
-        public async Task SendChannelMessageAsync(string message, string[] replies = null, string recipient = null)
+        public async Task SendChannelMessageAsync(string message, string[] replies = null, string recipient = null, string messageHash = null)
         {
             if (slackSettings != null && !String.IsNullOrWhiteSpace(slackSettings.BotToken))
             {
+                // If a hash is provided and the message has been sent within the last hour, don't send it again.
+                if (!String.IsNullOrWhiteSpace(messageHash))
+                {
+                    if (sendMessages.TryGetValue(messageHash, out var lastSendDate) && lastSendDate > DateTime.Now.AddMinutes(-60))
+                    {
+                        return;
+                    }
+
+                    sendMessages.AddOrUpdate(messageHash, DateTime.Now, (key, oldValue) => DateTime.Now);
+                }
+                
                 Message slackMessage = new Message
                 {
                     Text = message,

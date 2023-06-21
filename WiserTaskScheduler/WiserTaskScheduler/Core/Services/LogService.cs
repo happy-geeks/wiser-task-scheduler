@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Models;
@@ -118,7 +119,12 @@ Order: '{order}'
 Message:
 {title}";
 
-                            await slackChatService.SendChannelMessageAsync(slackMessage,new[] { message });
+                            // Generate SHA 256 based on configuration name, time id, order id and message
+                            var sha256 = System.Security.Cryptography.SHA256.Create();
+                            var hash = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes($"{configurationName}{timeId}{order}{message}"));
+                            var messageHash = string.Join("", hash.Select(b => b.ToString("x2")));
+                            
+                            await slackChatService.SendChannelMessageAsync(slackMessage,new[] { message },  messageHash: messageHash);
                         }
                     }
                     catch
