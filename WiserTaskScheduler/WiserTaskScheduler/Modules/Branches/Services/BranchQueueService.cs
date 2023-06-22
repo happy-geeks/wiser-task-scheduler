@@ -66,15 +66,15 @@ namespace WiserTaskScheduler.Modules.Branches.Services
             var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
             var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
             var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
-            
+
             var branchQueue = (BranchQueueModel) action;
-            
+
             // Make sure we connect to the correct database.
             await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
             databaseConnection.ClearParameters();
 
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, branchQueue.LogSettings, $"Start handling branches queue in time id: {branchQueue.TimeId}, order: {branchQueue.Order}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-            
+
             // Use .NET time and not database time, because we often use DigitalOcean and they have their timezone set to UTC by default.
             databaseConnection.AddParameter("now", DateTime.Now);
             var dataTable = await databaseConnection.GetAsync($@"SELECT * 
@@ -122,13 +122,13 @@ ORDER BY start_on ASC, id ASC");
         {
             var error = "";
             var result = new JObject();
-            
+
             // Set the start date to the current datetime.
             var queueId = dataRowWithSettings.Field<int>("id");
             databaseConnection.AddParameter("queueId", queueId);
             databaseConnection.AddParameter("now", DateTime.Now);
             await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET started_on = ?now WHERE id = ?queueId");
-            
+
             // Get and validate the settings.
             var settings = JsonConvert.DeserializeObject<CreateBranchSettingsModel>(dataRowWithSettings.Field<string>("data") ?? "{}");
             if (String.IsNullOrWhiteSpace(settings?.DatabaseName))
@@ -143,13 +143,13 @@ ORDER BY start_on ASC, id ASC");
                 await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET finished_on = ?now, success = 0, errors = ?error WHERE id = ?queueId");
                 return result;
             }
-            
+
             // Make sure that the database doesn't exist yet.
             var branchDatabase = settings.DatabaseName;
             if (await databaseHelpersService.DatabaseExistsAsync(branchDatabase))
             {
                 await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to create a branch, but a database with name '{branchDatabase}' already exists. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                
+
                 error = $"Trying to create a branch, but a database with name '{branchDatabase}' already exists.";
                 result.Add("ErrorMessage", error);
                 result.Add("Success", false);
@@ -163,7 +163,7 @@ ORDER BY start_on ASC, id ASC");
             {
                 // Some variables we'll need a lot, for easier access.
                 var connectionStringBuilder = new MySqlConnectionStringBuilder(connectionString);
-                
+
                 // Change connection string to one with a specific user for deleting a database.
                 if (!String.IsNullOrWhiteSpace(branchQueue.UsernameForManagingBranches) && !String.IsNullOrWhiteSpace(branchQueue.PasswordForManagingBranches))
                 {
@@ -174,7 +174,7 @@ ORDER BY start_on ASC, id ASC");
 
                 // Create the database in the same server/cluster. We already check if the database exists before this, so we can safely do this here.
                 await databaseHelpersService.CreateDatabaseAsync(branchDatabase);
-                
+
                 var originalDatabase = connectionStringBuilder.Database;
                 connectionStringBuilder.Database = branchDatabase;
 
@@ -189,23 +189,23 @@ ORDER BY TABLE_NAME ASC";
                 databaseConnection.AddParameter("currentSchema", originalDatabase);
                 databaseConnection.AddParameter("newSchema", branchDatabase);
                 var dataTable = await databaseConnection.GetAsync(query);
-                
+
                 // We don't want to copy the contents of log tables and certain other tables to the new branch.
                 var tablesToAlwaysLeaveEmpty = new List<string>
                 {
-                    WiserTableNames.WiserHistory, 
-                    WiserTableNames.WiserImport, 
-                    WiserTableNames.WiserImportLog, 
-                    WiserTableNames.WiserUsersAuthenticationTokens, 
-                    WiserTableNames.WiserCommunicationGenerated, 
-                    WiserTableNames.WtsLogs, 
+                    WiserTableNames.WiserHistory,
+                    WiserTableNames.WiserImport,
+                    WiserTableNames.WiserImportLog,
+                    WiserTableNames.WiserUsersAuthenticationTokens,
+                    WiserTableNames.WiserCommunicationGenerated,
+                    WiserTableNames.WtsLogs,
                     WiserTableNames.WtsServices,
                     WiserTableNames.WiserBranchesQueue,
                     "ais_logs",
                     "ais_services",
                     "jcl_email"
                 };
-                
+
                 // Create the tables in a new connection, because these cause implicit commits.
                 await using (var mysqlConnection = new MySqlConnection(connectionStringBuilder.ConnectionString))
                 {
@@ -225,7 +225,7 @@ ORDER BY TABLE_NAME ASC";
                 await databaseConnection.BeginTransactionAsync();
 
                 var allLinkTypes = await wiserItemsService.GetAllLinkTypeSettingsAsync();
-                
+
                 // Fill the tables with data.
                 foreach (DataRow dataRow in dataTable.Rows)
                 {
@@ -274,7 +274,7 @@ ORDER BY TABLE_NAME ASC";
                                         await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to copy recent most X items of entity type '{entity.EntityType}' to new branch, but it either had invalid settings, or the AmountOfItems setting was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                                         continue;
                                     }
-                                    
+
                                     orderBy = $"ORDER BY IFNULL(item.changed_on, item.added_on) LIMIT {entity.AmountOfItems}";
                                     break;
                                 case CreateBranchEntityModes.CreatedBefore:
@@ -283,7 +283,7 @@ ORDER BY TABLE_NAME ASC";
                                         await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to copy items created before X of entity type '{entity.EntityType}' to new branch, but it either had invalid settings, or the Start date setting was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                                         continue;
                                     }
-                                    
+
                                     databaseConnection.AddParameter(startDateParameter, entity.Start);
                                     whereClauseBuilder.AppendLine($"AND item.added_on < ?{startDateParameter}");
                                     break;
@@ -293,7 +293,7 @@ ORDER BY TABLE_NAME ASC";
                                         await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to copy items created before X of entity type '{entity.EntityType}' to new branch, but it either had invalid settings, or the End date setting was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                                         continue;
                                     }
-                                    
+
                                     databaseConnection.AddParameter(endDateParameter, entity.End);
                                     whereClauseBuilder.AppendLine($"AND item.added_on > ?{endDateParameter}");
                                     break;
@@ -308,10 +308,10 @@ ORDER BY TABLE_NAME ASC";
                                         await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to copy items created before X of entity type '{entity.EntityType}' to new branch, but it either had invalid settings, or the End date setting was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                                         continue;
                                     }
-                                    
+
                                     databaseConnection.AddParameter(endDateParameter, entity.End);
                                     databaseConnection.AddParameter(startDateParameter, entity.Start);
-                                    
+
                                     whereClauseBuilder.AppendLine($"AND added_on BETWEEN ?{startDateParameter} AND ?{endDateParameter}");
                                     break;
                                 case CreateBranchEntityModes.DataSelector:
@@ -333,7 +333,7 @@ ORDER BY TABLE_NAME ASC";
                                     {
                                         continue;
                                     }
-                                    
+
                                     var dataSelectorIds = dataSelectorResult.Select(i => i["id"]).ToList();
                                     whereClauseBuilder.AppendLine($"AND item.id IN ({String.Join(", ", dataSelectorIds)})");
                                     break;
@@ -394,7 +394,7 @@ UNION ALL
 
                             await databaseConnection.ExecuteAsync(queryBuilder.ToString());
                         }
-                        
+
                         continue;
                     }
 
@@ -456,8 +456,10 @@ AND EXTRA NOT LIKE '%GENERATED'";
 SELECT {String.Join(", ", columns)} FROM `{originalDatabase}`.`{tableName}`";
                     await databaseConnection.ExecuteAsync(query);
                 }
-                
-                // Add triggers (and stored procedures) to the new database, after inserting all data, so that the wiser_history table will still be empty.
+
+                await databaseConnection.CommitTransactionAsync();
+
+                // Add triggers to the new database, after inserting all data, so that the wiser_history table will still be empty.
                 // We use wiser_history to later synchronise all changes to production, so it needs to be empty before the user starts to make changes in the new branch.
                 query = @"SELECT 
     TRIGGER_NAME,
@@ -471,8 +473,6 @@ WHERE TRIGGER_SCHEMA = ?currentSchema
 AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
                 dataTable = await databaseConnection.GetAsync(query);
 
-                await databaseConnection.CommitTransactionAsync();
-                
                 await using (var mysqlConnection = new MySqlConnection(connectionStringBuilder.ConnectionString))
                 {
                     await mysqlConnection.OpenAsync();
@@ -481,7 +481,25 @@ AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
                         foreach (DataRow dataRow in dataTable.Rows)
                         {
                             query = $@"CREATE TRIGGER `{dataRow.Field<string>("TRIGGER_NAME")}` {dataRow.Field<string>("ACTION_TIMING")} {dataRow.Field<string>("EVENT_MANIPULATION")} ON `{branchDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("EVENT_OBJECT_TABLE")}` FOR EACH {dataRow.Field<string>("ACTION_ORIENTATION")} {dataRow.Field<string>("ACTION_STATEMENT")}";
-                            
+
+                            command.CommandText = query;
+                            await command.ExecuteNonQueryAsync();
+                        }
+
+                        // Add stored procedures/functions to the new database.
+                        query = @"SELECT
+    ROUTINE_NAME,
+    ROUTINE_TYPE
+FROM INFORMATION_SCHEMA.ROUTINES 
+WHERE ROUTINE_SCHEMA = ?currentSchema
+AND ROUTINE_NAME NOT LIKE '\_%'";
+                        dataTable = await databaseConnection.GetAsync(query);
+                        foreach (DataRow dataRow in dataTable.Rows)
+                        {
+                            query = $"SHOW CREATE {dataRow.Field<string>("ROUTINE_TYPE")} `{originalDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("ROUTINE_NAME")}`";
+                            var subDataTable = await databaseConnection.GetAsync(query);
+                            query = subDataTable.Rows[0].Field<string>("Create Function");
+
                             command.CommandText = query;
                             await command.ExecuteNonQueryAsync();
                         }
@@ -491,8 +509,8 @@ AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
             catch (Exception exception)
             {
                 // Rollback transaction if started
-                await databaseConnection.RollbackTransactionAsync(false);    
-                
+                await databaseConnection.RollbackTransactionAsync(false);
+
                 // Save the error in the queue and set the finished on datetime to now.
                 databaseConnection.AddParameter("now", DateTime.Now);
                 databaseConnection.AddParameter("error", exception.ToString());
@@ -541,20 +559,20 @@ AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
                 {"SuccessfulChanges", 0},
                 {"Errors", errors}
             };
-            
+
             // Set the start date to the current datetime.
             var queueId = dataRowWithSettings.Field<int>("id");
             databaseConnection.AddParameter("queueId", queueId);
             databaseConnection.AddParameter("now", DateTime.Now);
             await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET started_on = ?now WHERE id = ?queueId");
-            
+
             // Validate the settings.
             var settings = JsonConvert.DeserializeObject<MergeBranchSettingsModel>(dataRowWithSettings.Field<string>("data") ?? "{}");
             if (settings is not {Id: > 0} || String.IsNullOrWhiteSpace(settings.DatabaseName))
             {
                 await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to merge a branch, but it either had invalid settings, or the branch ID was empty, or the database name was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                 errors.Add($"Trying to merge a branch, but it either had invalid settings, or the branch ID was empty, or the database name was empty. Queue ID was: {queueId}");
-                
+
                 databaseConnection.AddParameter("now", DateTime.Now);
                 databaseConnection.AddParameter("error", "Trying to merge a branch, but it either had invalid settings, or the branch ID was empty, or the database name was empty.");
                 await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET finished_on = ?now, success = 0, errors = ?error WHERE id = ?queueId");
@@ -574,7 +592,7 @@ AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
             await branchConnection.OpenAsync();
             var productionTransaction = await productionConnection.BeginTransactionAsync();
             var branchTransaction = await branchConnection.BeginTransactionAsync();
-            
+
             // We have our own dictionary with SQL parameters, so that we can reuse them easier and add them easily all at once to every command we create.
             var sqlParameters = new Dictionary<string, object>();
 
@@ -1519,7 +1537,7 @@ WHERE `id` = ?id";
                         connectionStringBuilder.Password = branchQueue.PasswordForManagingBranches;
                         await databaseConnection.ChangeConnectionStringsAsync(connectionStringBuilder.ConnectionString, connectionStringBuilder.ConnectionString);
                     }
-                    
+
                     await databaseHelpersService.DropDatabaseAsync(branchDatabase);
                 }
                 catch (Exception exception)
@@ -1613,7 +1631,7 @@ WHERE `id` = ?id";
             await using var command = mySqlConnection.CreateCommand();
             command.Parameters.AddWithValue("sourceId", sourceId);
             command.Parameters.AddWithValue("destinationId", destinationId);
-            
+
             // It's possible that there are multiple link types that use the same number, so we have to check all of them.
             foreach (var linkTypeSettings in allLinkTypeSettings)
             {
@@ -1645,7 +1663,7 @@ LIMIT 1";
                 {
                     continue;
                 }
-                
+
                 // If we reached this point, it means we found the correct link type and entity types.
                 return (linkTypeSettings.SourceEntityType, sourceTablePrefix, linkTypeSettings.DestinationEntityType, destinationTablePrefix);
             }
@@ -1665,13 +1683,13 @@ LIMIT 1";
         {
             await using var productionCommand = productionConnection.CreateCommand();
             await using var environmentCommand = environmentConnection.CreateCommand();
-            
+
             productionCommand.CommandText = $"SELECT MAX(id) AS maxId FROM `{tableName}`";
             environmentCommand.CommandText = $"SELECT MAX(id) AS maxId FROM `{tableName}`";
 
             var maxProductionId = 0UL;
             var maxEnvironmentId = 0UL;
-            
+
             await using var productionReader = await productionCommand.ExecuteReaderAsync();
             if (await productionReader.ReadAsync())
             {
@@ -1707,7 +1725,7 @@ LIMIT 1";
             environmentCommand.CommandText = $@"INSERT INTO `{WiserTableNames.WiserIdMappings}` 
 (table_name, our_id, production_id)
 VALUES (?tableName, ?ourId, ?productionId)";
-            
+
             environmentCommand.Parameters.AddWithValue("tableName", tableName);
             environmentCommand.Parameters.AddWithValue("ourId", originalItemId);
             environmentCommand.Parameters.AddWithValue("productionId", newItemId);
@@ -1725,18 +1743,18 @@ VALUES (?tableName, ?ourId, ?productionId)";
             var dataTable = new DataTable();
             using var adapter = new MySqlDataAdapter(command);
             await adapter.FillAsync(dataTable);
-            
+
             foreach (DataRow dataRow in dataTable.Rows)
             {
                 var mappingRowId = dataRow.Field<ulong>("id");
                 var tableName = dataRow.Field<string>("table_name") ?? "";
                 var ourId = dataRow.Field<ulong>("our_id");
                 var productionId = dataRow.Field<ulong>("production_id");
-                
+
                 command.Parameters.AddWithValue("mappingRowId", mappingRowId);
                 command.Parameters.AddWithValue("ourId", ourId);
                 command.Parameters.AddWithValue("productionId", productionId);
-                
+
                 if (tableName.EndsWith(WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase))
                 {
                     command.CommandText = $@"SELECT entity_type FROM `{tableName}` WHERE id = ?ourId";
@@ -1752,7 +1770,7 @@ VALUES (?tableName, ?ourId, ?productionId)";
                     var allLinkTypeSettings = await wiserItemsService.GetAllLinkTypeSettingsAsync();
                     var LinkTypesWithSource = allLinkTypeSettings.Where(l => String.Equals(l.SourceEntityType, entityType, StringComparison.OrdinalIgnoreCase)).ToList();
                     var LinkTypesWithDestination = allLinkTypeSettings.Where(l => String.Equals(l.DestinationEntityType, entityType, StringComparison.OrdinalIgnoreCase)).ToList();
-                    
+
                     var tablePrefix = tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItem, "");
                     command.CommandText = $@"SET @saveHistory = FALSE;
 
@@ -1864,7 +1882,7 @@ SET id = ?productionId
 WHERE id = ?ourId;";
                     await command.ExecuteNonQueryAsync();
                 }
-                
+
                 // Delete the row when we succeeded in updating the ID.
                 command.CommandText = $"DELETE FROM `{WiserTableNames.WiserIdMappings}` WHERE id = ?mappingRowId";
                 await command.ExecuteNonQueryAsync();
