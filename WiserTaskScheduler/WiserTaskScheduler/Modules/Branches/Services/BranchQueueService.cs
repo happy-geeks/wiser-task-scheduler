@@ -8,7 +8,6 @@ using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
-using GeeksCoreLibrary.Core.Services;
 using GeeksCoreLibrary.Modules.Branches.Enumerations;
 using GeeksCoreLibrary.Modules.Branches.Helpers;
 using GeeksCoreLibrary.Modules.Branches.Models;
@@ -16,11 +15,8 @@ using GeeksCoreLibrary.Modules.Databases.Helpers;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.DataSelector.Interfaces;
 using GeeksCoreLibrary.Modules.DataSelector.Models;
-using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
-using GeeksCoreLibrary.Modules.Objects.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using MySql.Data.MySqlClient;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -404,8 +400,13 @@ UNION ALL
                         // So we can be sure that we already copied the items to the new branch and we can use the IDs of those items to copy the details of those items.
                         // This way, we don't need to create the entire WHERE statement again based on the entity settings, like we did above for wiser_item.
                         var prefix = tableName.Replace(WiserTableNames.WiserItemDetail, "");
-                        await databaseConnection.ExecuteAsync($@"INSERT INTO `{branchDatabase}`.`{tableName}` 
-SELECT detail.* FROM `{originalDatabase}`.`{tableName}` AS detail
+
+                        // We need to get all columns of the wiser_itemdetail table like this, instead of using SELECT *,
+                        // because they can have virtual columns and you can't manually insert values into those.
+                        var table = WiserTableDefinitions.TablesToUpdate.Single(x => x.Name == WiserTableNames.WiserItemDetail);
+                        var itemDetailColumns = table.Columns.Select(x => $"`{x.Name}`").ToList();
+                        await databaseConnection.ExecuteAsync($@"INSERT INTO `{branchDatabase}`.`{tableName}` ({String.Join(", ", itemDetailColumns)})
+SELECT {String.Join(", ", itemDetailColumns.Select(x => $"detail.{x}"))} FROM `{originalDatabase}`.`{tableName}` AS detail
 JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = detail.item_id");
                         continue;
                     }
@@ -489,16 +490,22 @@ AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
                         // Add stored procedures/functions to the new database.
                         query = @"SELECT
     ROUTINE_NAME,
-    ROUTINE_TYPE
+    ROUTINE_TYPE,
+    DEFINER
 FROM INFORMATION_SCHEMA.ROUTINES 
 WHERE ROUTINE_SCHEMA = ?currentSchema
 AND ROUTINE_NAME NOT LIKE '\_%'";
                         dataTable = await databaseConnection.GetAsync(query);
                         foreach (DataRow dataRow in dataTable.Rows)
                         {
+                            var definer = dataRow.Field<string>("DEFINER");
+                            var definerParts = definer.Split('@');
                             query = $"SHOW CREATE {dataRow.Field<string>("ROUTINE_TYPE")} `{originalDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("ROUTINE_NAME")}`";
                             var subDataTable = await databaseConnection.GetAsync(query);
-                            query = subDataTable.Rows[0].Field<string>("Create Function");
+                            query = subDataTable.Rows[0].Field<string>(2);
+
+                            // Replace the definer with the current user, so that the stored procedure can be created by the current user.
+                            query = query.Replace($" DEFINER=`{definerParts[0]}`@`{definerParts[1]}`", " DEFINER=CURRENT_USER");
 
                             command.CommandText = query;
                             await command.ExecuteNonQueryAsync();
