@@ -18,14 +18,16 @@ namespace WiserTaskScheduler.Core.Services
         private const string LogName = "SlackChatService";
         
         private readonly IServiceProvider serviceProvider;
+        private readonly WtsSettings wtsSettings;
         private readonly SlackSettings slackSettings;
 
         private ConcurrentDictionary<string, DateTime> sendMessages;
 
-        public SlackChatService(IServiceProvider serviceProvider, IOptions<WtsSettings> logSettings)
+        public SlackChatService(IServiceProvider serviceProvider, IOptions<WtsSettings> wtsSettings)
         {
             this.serviceProvider = serviceProvider;
-            slackSettings = logSettings.Value.SlackSettings;
+            this.wtsSettings = wtsSettings.Value;
+            slackSettings = wtsSettings.Value.SlackSettings;
             sendMessages = new ConcurrentDictionary<string, DateTime>();
         }
 
@@ -42,10 +44,10 @@ namespace WiserTaskScheduler.Core.Services
         {
             if (slackSettings != null && !String.IsNullOrWhiteSpace(slackSettings.BotToken))
             {
-                // If a hash is provided and the message has been sent within the last hour, don't send it again.
+                // If a hash is provided and the message has been sent within the set interval time, don't send it again. 30 seconds are added as a buffer.
                 if (!String.IsNullOrWhiteSpace(messageHash))
                 {
-                    if (sendMessages.TryGetValue(messageHash, out var lastSendDate) && lastSendDate > DateTime.Now.AddMinutes(-60))
+                    if (sendMessages.TryGetValue(messageHash, out var lastSendDate) && lastSendDate > DateTime.Now.AddMinutes(-wtsSettings.ErrorNotificationsIntervalInMinutes).AddSeconds(30))
                     {
                         return;
                     }

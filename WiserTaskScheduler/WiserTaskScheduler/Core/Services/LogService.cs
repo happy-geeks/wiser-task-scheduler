@@ -111,8 +111,9 @@ namespace WiserTaskScheduler.Core.Services
                         // log to slack chat service in case configured 
                         if (logLevel >= logSettings.SlackLogLevel)
                         {
-                            var title = message.Substring(0, message.IndexOf(Environment.NewLine));
-                            string slackMessage = $@"Log level: {logLevel}
+                            var linebreakIndex = message.IndexOf(Environment.NewLine, StringComparison.InvariantCulture);
+                            var title = linebreakIndex >= 0 ? message.Substring(0, linebreakIndex) : message;
+                            var slackMessage = $@"Log level: {logLevel}
 Configuration : '{configurationName}'
 Time ID: '{timeId}'
 Order: '{order}'
