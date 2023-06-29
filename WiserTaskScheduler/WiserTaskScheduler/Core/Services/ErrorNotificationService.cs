@@ -48,7 +48,7 @@ public class ErrorNotificationService : IErrorNotificationService, ISingletonSer
         }
         
         // Generate SHA 256 based on configuration name, time id, order id and message
-        var sha256 = System.Security.Cryptography.SHA256.Create();
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
         var hash = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes($"{configurationName}{subject}{content}"));
         var notificationHash = string.Join("", hash.Select(b => b.ToString("x2")));
         
