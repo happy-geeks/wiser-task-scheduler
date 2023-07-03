@@ -5,6 +5,7 @@ using System.ServiceProcess;
 using AutoUpdater.Enums;
 using AutoUpdater.Interfaces;
 using AutoUpdater.Models;
+using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Communication.Interfaces;
 using GeeksCoreLibrary.Modules.Communication.Models;
 using Microsoft.Extensions.Options;
@@ -312,6 +313,6 @@ public class UpdateService : IUpdateService
             Content = body
         };
 
-        communicationsService.SendEmailDirectlyAsync(communication, updateSettings.MailSettings);
+        communicationsService.SendEmailDirectlyAsync(communication);
     }
 }
