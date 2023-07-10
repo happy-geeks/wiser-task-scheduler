@@ -1615,7 +1615,7 @@ WHERE `id` = ?id";
 
             if (String.IsNullOrWhiteSpace(content))
             {
-                subject = defaultMessageContent;
+                content = defaultMessageContent;
             }
 
             await taskAlertsService.NotifyUserByEmailAsync(userId, addedBy, branchQueue, configurationServiceName, subject, content, replaceData, template?.GetDetailValue("sender_email"), template?.GetDetailValue("sender_name"));
