@@ -4,11 +4,8 @@ using System.Data;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Net.Http;
-using System.Net.Http.Json;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
-using GeeksCoreLibrary.Core.Enums;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Communication.Interfaces;
@@ -18,7 +15,6 @@ using GeeksCoreLibrary.Modules.Imports.Models;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
@@ -33,23 +29,19 @@ namespace WiserTaskScheduler.Modules.WiserImports.Services;
 public class WiserImportsService : IWiserImportsService, IActionsService, IScopedService
 {
     private const string DefaultSubject = "Import[if({name}!)] with the name '{name}'[endif] from {date:DateTime(dddd\\, dd MMMM yyyy,en-US)} did [if({errorCount}=0)]finish successfully[else](partially) go wrong[endif]";
-    private const string DefaultContent = "<p>The import started on {startDate:DateTime(HH\\:mm\\:ss)} and finished on {endDate:DateTime(HH\\:mm\\:ss)}. The import took a total of {hours} hour(s), {minutes} minute(s) and {seconds} second(s).</p>[if({errorCount}!0)] <br /><br />The following errors occurred during the import: {errors}[endif]";
+    private const string DefaultContent = "<p>The import started on {startDate:DateTime(HH\\:mm\\:ss)} and finished on {endDate:DateTime(HH\\:mm\\:ss)}. The import took a total of {hours} hour(s), {minutes} minute(s) and {seconds} second(s).</p>[if({errorCount}!0)] <br /><br />The following errors occurred during the import: {errors:Raw}[endif]";
 
     private readonly IServiceProvider serviceProvider;
-    private readonly WtsSettings wtsSettings;
-    private readonly IWiserService wiserService;
     private readonly ILogService logService;
     private readonly ILogger<WiserImportsService> logger;
-    private readonly JsonSerializerSettings serializerSettings = new JsonSerializerSettings() {NullValueHandling = NullValueHandling.Ignore};
-    private readonly FileExtensionContentTypeProvider fileExtensionContentTypeProvider = new FileExtensionContentTypeProvider();
+    private readonly JsonSerializerSettings serializerSettings = new() {NullValueHandling = NullValueHandling.Ignore};
+    private readonly FileExtensionContentTypeProvider fileExtensionContentTypeProvider = new();
 
     private string connectionString;
 
-    public WiserImportsService(IServiceProvider serviceProvider, IOptions<WtsSettings> wtsSettings, IWiserService wiserService, ILogService logService, ILogger<WiserImportsService> logger)
+    public WiserImportsService(IServiceProvider serviceProvider, ILogService logService, ILogger<WiserImportsService> logger)
     {
         this.serviceProvider = serviceProvider;
-        this.wtsSettings = wtsSettings.Value;
-        this.wiserService = wiserService;
         this.logService = logService;
         this.logger = logger;
     }
@@ -90,9 +82,8 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
 
         var stopwatch = new Stopwatch();
 
-        var stringReplacementsService = scope.ServiceProvider.GetRequiredService<IStringReplacementsService>();
         var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
-        var gclCommunicationsService = scope.ServiceProvider.GetRequiredService<ICommunicationsService>();
+        var taskAlertsService = scope.ServiceProvider.GetRequiredService<ITaskAlertsService>();
 
         var successfulImports = 0;
         var importsWithWarnings = 0;
@@ -177,9 +168,19 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
                 template = await wiserItemsService.GetItemDetailsAsync(wiserImport.TemplateId, userId: importRow.UserId);
             }
 
-            var subject = await stringReplacementsService.DoAllReplacementsAsync(stringReplacementsService.DoReplacements(String.IsNullOrWhiteSpace(template?.GetDetailValue("subject")) ? DefaultSubject : template.GetDetailValue("subject"), replaceData));
-            await NotifyUserByEmailAsync(wiserImport, importRow, databaseConnection, gclCommunicationsService, configurationServiceName, subject, template, replaceData, stringReplacementsService);
-            await NotifyUserByTaskAlertAsync(wiserImport, importRow, wiserItemsService, configurationServiceName, usernameForLogs, subject);
+            var subject = template?.GetDetailValue("subject");
+            var content = template?.GetDetailValue("template");
+            if (String.IsNullOrWhiteSpace(subject))
+            {
+                subject = DefaultSubject;
+            }
+            if (String.IsNullOrWhiteSpace(content))
+            {
+                subject = DefaultContent;
+            }
+
+            await taskAlertsService.NotifyUserByEmailAsync(importRow.UserId, importRow.Username, wiserImport, configurationServiceName, subject, content, replaceData, template?.GetDetailValue("sender_email"), template?.GetDetailValue("sender_name"));
+            await taskAlertsService.SendMessageToUserAsync(importRow.UserId, importRow.Username, subject, wiserImport, configurationServiceName, replaceData, importRow.UserId, usernameForLogs);
         }
 
         return new JObject()
@@ -533,87 +534,6 @@ ORDER BY added_on ASC");
                     errors.Add(e.Message);
                 }
             }
-        }
-    }
-
-    /// <summary>
-    /// Notify the user that placed the import using an email about the status of the import.
-    /// </summary>
-    /// <param name="wiserImport">The WTS information for handling the imports.</param>
-    /// <param name="importRow">The information of the import itself.</param>
-    /// <param name="databaseConnection">The connection to the database.</param>
-    /// <param name="gclCommunicationsService">The communications service from the GCL to add the email to the queue.</param>
-    /// <param name="configurationServiceName">The name of the configuration the import is executed within.</param>
-    /// <param name="subject">The subject of the email.</param>
-    /// <param name="template">An email template to use, if null the default will be used.</param>
-    /// <param name="replaceData">The data to be used for replacements.</param>
-    /// <param name="stringReplacementsService">The string replacements service to handle the replacements.</param>
-    private async Task NotifyUserByEmailAsync(WiserImportModel wiserImport, ImportRowModel importRow, IDatabaseConnection databaseConnection, ICommunicationsService gclCommunicationsService, string configurationServiceName, string subject, WiserItemModel template, Dictionary<string, object> replaceData, IStringReplacementsService stringReplacementsService)
-    {
-        databaseConnection.AddParameter("userId", importRow.UserId);
-        var userDataTable = await databaseConnection.GetAsync($"SELECT `value` AS receiver FROM {WiserTableNames.WiserItemDetail} WHERE item_id = ?userId AND `key` = 'email_address'");
-
-        if (userDataTable.Rows.Count == 0)
-        {
-            await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Could not find email address for user '{importRow.UserId}' and import '{importRow.Id}'", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
-
-            // If there is no email address to send the notification to skip it.
-            return;
-        }
-
-        var receiver = userDataTable.Rows[0].Field<string>("receiver");
-        var content = await stringReplacementsService.DoAllReplacementsAsync(stringReplacementsService.DoReplacements(String.IsNullOrWhiteSpace(template?.GetDetailValue("template")) ? DefaultContent : template.GetDetailValue("template"), replaceData));
-        await gclCommunicationsService.SendEmailAsync(receiver, subject, content, importRow.Username, sendDate: DateTime.Now, sender: template?.GetDetailValue("sender_email"), senderName: template?.GetDetailValue("sender_name"));
-    }
-
-    /// <summary>
-    /// Notify the user that placed the import using a task alert about the status of the import.
-    /// </summary>
-    /// <param name="wiserImport">The WTS information for handling the imports.</param>
-    /// <param name="importRow">The information of the import itself.</param>
-    /// <param name="wiserItemsService">The Wiser items service to save the task alert.</param>
-    /// <param name="configurationServiceName">The name of the configuration the import is executed within.</param>
-    /// <param name="usernameForLogs">The username to use for the logs in the database.</param>
-    /// <param name="subject">The subject of the task alert.</param>
-    private async Task NotifyUserByTaskAlertAsync(WiserImportModel wiserImport, ImportRowModel importRow, IWiserItemsService wiserItemsService, string configurationServiceName, string usernameForLogs, string subject)
-    {
-        // Create and save the task alert in the database.
-        var taskAlert = new WiserItemModel()
-        {
-            EntityType = "agendering",
-            ModuleId = 708,
-            PublishedEnvironment = Environments.Live,
-            Details = new List<WiserItemDetailModel>()
-            {
-                new() {Key = "agendering_date", Value = DateTime.Now.ToString("yyyy-MM-dd")},
-                new() {Key = "content", Value = subject},
-                new() {Key = "userid", Value = importRow.UserId},
-                new() {Key = "username", Value = importRow.Username},
-                new() {Key = "placed_by", Value = "WTS"},
-                new() {Key = "placed_by_id", Value = importRow.UserId}
-            }
-        };
-
-        await wiserItemsService.SaveAsync(taskAlert, username: usernameForLogs, userId: importRow.UserId);
-
-        // Push the task alert to the user to give a signal within Wiser if it is open.
-        var accessToken = await wiserService.GetAccessTokenAsync();
-
-        try
-        {
-            var client = new HttpClient();
-            var request = new HttpRequestMessage(HttpMethod.Post, $"{wtsSettings.Wiser.WiserApiUrl}api/v3/pusher/message");
-            request.Headers.Add("Authorization", $"Bearer {accessToken}");
-            request.Content = JsonContent.Create(new {userId = importRow.UserId});
-            var response = await client.SendAsync(request);
-            if (!response.IsSuccessStatusCode)
-            {
-                await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Failed to notify the user of the import through the task alert pusher, server returned status '{response.StatusCode}' with reason '{response.ReasonPhrase}'.", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
-            }
-        }
-        catch (Exception e)
-        {
-            await logService.LogError(logger, LogScopes.RunBody, wiserImport.LogSettings, $"Failed to notify the user of the import through the task alert pusher due to exception:\n{e}.", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
         }
     }
 }

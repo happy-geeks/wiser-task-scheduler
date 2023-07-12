@@ -2,13 +2,16 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using System.Xml;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Helpers;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
+using WiserTaskScheduler.Modules.ImportFiles.Enums;
 using WiserTaskScheduler.Modules.ImportFiles.Interfaces;
 using WiserTaskScheduler.Modules.ImportFiles.Models;
 
@@ -43,7 +46,7 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
 
             if (importFile.SingleFile)
             {
-                return await ImportFile(importFile, ReplacementHelper.EmptyRows, resultSets, configurationServiceName, importFile.UseResultSet);
+                return await ImportFileAsync(importFile, ReplacementHelper.EmptyRows, resultSets, configurationServiceName, importFile.UseResultSet);
             }
             
             var jArray = new JArray();
@@ -63,7 +66,7 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
             for (var i = 0; i < rows.Count; i++)
             {
                 var indexRows = new List<int> { i };
-                jArray.Add(await ImportFile(importFile, indexRows, resultSets, configurationServiceName, $"{importFile.UseResultSet}[{i}]"));
+                jArray.Add(await ImportFileAsync(importFile, indexRows, resultSets, configurationServiceName, $"{importFile.UseResultSet}[{i}]"));
             }
 
             return new JObject
@@ -81,7 +84,7 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
         /// <param name="configurationServiceName">The name of the configuration that contains this action.</param>
         /// <param name="useResultSet">The name of the result set to use, either the value as defined or added with an index.</param>
         /// <returns></returns>
-        private async Task<JObject> ImportFile(ImportFileModel importFile, List<int> rows, JObject resultSets, string configurationServiceName, string useResultSet)
+        private async Task<JObject> ImportFileAsync(ImportFileModel importFile, List<int> rows, JObject resultSets, string configurationServiceName, string useResultSet)
         {
             var filePath = importFile.FilePath;
             
@@ -110,88 +113,16 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
             try
             {
                 await logService.LogInformation(logger, LogScopes.RunBody, importFile.LogSettings, $"Importing file {filePath}.", configurationServiceName, importFile.TimeId, importFile.Order);
-                var lines = await File.ReadAllLinesAsync(filePath);
-                var jArray = new JArray();
-
-                if (!importFile.HasFieldNames)
-                {
-                    var firstColumnLenght = -1;
-
-                    for (var i = 0; i < lines.Length; i++)
-                    {
-                        if (String.IsNullOrWhiteSpace(lines[i]))
-                        {
-                            await logService.LogWarning(logger, LogScopes.RunBody, importFile.LogSettings, $"Did not import line {i} due to empty row in file {filePath}", configurationServiceName, importFile.TimeId, importFile.Order);
-                            continue;
-                        }
-
-                        var columns = new JArray(lines[i].Split(importFile.Separator));
-
-                        // Use the first row to determine the number of columns to be expected in each row.
-                        if (firstColumnLenght == -1)
-                        {
-                            firstColumnLenght = columns.Count;
-                        }
-                        else if(columns.Count != firstColumnLenght)
-                        {
-                            await logService.LogWarning(logger, LogScopes.RunBody, importFile.LogSettings, $"Did not import line {i} due to missing columns in file {filePath}", configurationServiceName, importFile.TimeId, importFile.Order);
-                            continue;
-                        }
-
-                        var row = new JObject()
-                        {
-                            {"Columns", columns }
-                        };
-                        jArray.Add(row);
-                    }
-
-                    return new JObject()
-                    {
-                        {"Success", true},
-                        {"Results", jArray}
-                    };
-                }
                 
-                var fieldNames = lines[0].Split(importFile.Separator);
-
-                for (var i = 1; i < lines.Length; i++)
+                switch (importFile.FileType)
                 {
-                    var row = new JObject();
-
-                    if (String.IsNullOrWhiteSpace(lines[i]))
-                    {
-                        await logService.LogWarning(logger, LogScopes.RunBody, importFile.LogSettings, $"Did not import line {i} due to empty row in file {filePath}", configurationServiceName, importFile.TimeId, importFile.Order);
-                        continue;
-                    }
-
-                    var columns = lines[i].Split(importFile.Separator);
-
-                    if (columns.Length != fieldNames.Length)
-                    {
-                        await logService.LogWarning(logger, LogScopes.RunBody, importFile.LogSettings, $"Did not import line {i} due to missing columns in file {filePath}", configurationServiceName, importFile.TimeId, importFile.Order);
-                        continue;
-                    }
-
-                    for (var j = 0; j < fieldNames.Length; j++)
-                    {
-                        row.Add(fieldNames[j], columns[j]);
-                    }
-
-                    jArray.Add(row);
+                    case FileTypes.CSV:
+                        return await ImportCsvFileAsync(importFile, filePath, configurationServiceName);
+                    case FileTypes.XML:
+                        return await ImportXmlFileAsync(filePath);
+                    default:
+                        throw new NotImplementedException($"File type '{importFile.FileType}' is not yet implemented to be imported.");
                 }
-
-                var fieldArray = new JArray();
-                foreach (var fieldName in fieldNames)
-                {
-                    fieldArray.Add(fieldName);
-                }
-                
-                return new JObject()
-                {
-                    {"Success", true},
-                    {"Fields",  fieldArray},
-                    {"Results", jArray}
-                };
             }
             catch (Exception e)
             {
@@ -202,6 +133,112 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
                     {"Success", false}
                 };
             }
+        }
+
+        /// <summary>
+        /// Import a CSV file.
+        /// </summary>
+        /// <param name="importFile">The information for the file to be imported.</param>
+        /// <param name="filePath">The path to the CSV file to import.</param>
+        /// <param name="configurationServiceName">The name of the configuration that contains this action.</param>
+        /// <returns></returns>
+        private async Task<JObject> ImportCsvFileAsync(ImportFileModel importFile, string filePath, string configurationServiceName)
+        {
+            var lines = await File.ReadAllLinesAsync(filePath);
+            var jArray = new JArray();
+
+            if (!importFile.HasFieldNames)
+            {
+                var firstColumnLenght = -1;
+
+                for (var i = 0; i < lines.Length; i++)
+                {
+                    if (String.IsNullOrWhiteSpace(lines[i]))
+                    {
+                        await logService.LogWarning(logger, LogScopes.RunBody, importFile.LogSettings, $"Did not import line {i} due to empty row in file {filePath}", configurationServiceName, importFile.TimeId, importFile.Order);
+                        continue;
+                    }
+
+                    var columns = new JArray(lines[i].Split(importFile.Separator));
+
+                    // Use the first row to determine the number of columns to be expected in each row.
+                    if (firstColumnLenght == -1)
+                    {
+                        firstColumnLenght = columns.Count;
+                    }
+                    else if(columns.Count != firstColumnLenght)
+                    {
+                        await logService.LogWarning(logger, LogScopes.RunBody, importFile.LogSettings, $"Did not import line {i} due to missing columns in file {filePath}", configurationServiceName, importFile.TimeId, importFile.Order);
+                        continue;
+                    }
+
+                    var row = new JObject()
+                    {
+                        {"Columns", columns }
+                    };
+                    jArray.Add(row);
+                }
+
+                return new JObject()
+                {
+                    {"Success", true},
+                    {"Results", jArray}
+                };
+            }
+            
+            var fieldNames = lines[0].Split(importFile.Separator);
+
+            for (var i = 1; i < lines.Length; i++)
+            {
+                var row = new JObject();
+
+                if (String.IsNullOrWhiteSpace(lines[i]))
+                {
+                    await logService.LogWarning(logger, LogScopes.RunBody, importFile.LogSettings, $"Did not import line {i} due to empty row in file {filePath}", configurationServiceName, importFile.TimeId, importFile.Order);
+                    continue;
+                }
+
+                var columns = lines[i].Split(importFile.Separator);
+
+                if (columns.Length != fieldNames.Length)
+                {
+                    await logService.LogWarning(logger, LogScopes.RunBody, importFile.LogSettings, $"Did not import line {i} due to missing columns in file {filePath}", configurationServiceName, importFile.TimeId, importFile.Order);
+                    continue;
+                }
+
+                for (var j = 0; j < fieldNames.Length; j++)
+                {
+                    row.Add(fieldNames[j], columns[j]);
+                }
+
+                jArray.Add(row);
+            }
+
+            var fieldArray = new JArray();
+            foreach (var fieldName in fieldNames)
+            {
+                fieldArray.Add(fieldName);
+            }
+            
+            return new JObject()
+            {
+                {"Success", true},
+                {"Fields",  fieldArray},
+                {"Results", jArray}
+            };
+        }
+
+        /// <summary>
+        /// Import an XML file.
+        /// </summary>
+        /// <param name="filePath">The path to the CSV file to import.</param>
+        /// <returns></returns>
+        private async Task<JObject> ImportXmlFileAsync(string filePath)
+        {
+            var xml = await File.ReadAllTextAsync(filePath);
+            var xmlDocument = new XmlDocument();
+            xmlDocument.LoadXml(xml);
+            return JObject.Parse(JsonConvert.SerializeXmlNode(xmlDocument));
         }
     }
 }

@@ -7,5 +7,12 @@ version: 2
 updates:
   - package-ecosystem: "nuget"
     directory: "/WiserTaskScheduler/"
+    # Make pull requests on develop branch.
+    target-branch: "develop"
+    # Set labels.
+    labels:
+      - "Dependabot"
+      - "NuGet dependencies"
+    # Check the nuget registry for updates every day (weekdays)
     schedule:
       interval: "daily"

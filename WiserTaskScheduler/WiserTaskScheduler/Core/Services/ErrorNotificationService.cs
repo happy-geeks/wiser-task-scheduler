@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -22,12 +23,17 @@ public class ErrorNotificationService : IErrorNotificationService, ISingletonSer
     private readonly IServiceProvider serviceProvider;
     private readonly ILogService logService;
     private readonly ILogger<ErrorNotificationService> logger;
+    private readonly WtsSettings wtsSettings;
+    
+    private ConcurrentDictionary<string, DateTime> sendNotifications;
 
-    public ErrorNotificationService(IServiceProvider serviceProvider, ILogService logService, ILogger<ErrorNotificationService> logger)
+    public ErrorNotificationService(IServiceProvider serviceProvider, ILogService logService, ILogger<ErrorNotificationService> logger, IOptions<WtsSettings> wtsSettings)
     {
         this.serviceProvider = serviceProvider;
         this.logService = logService;
         this.logger = logger;
+        this.wtsSettings = wtsSettings.Value;
+        sendNotifications = new ConcurrentDictionary<string, DateTime>();
     }
     
     /// <inheritdoc />
@@ -40,6 +46,19 @@ public class ErrorNotificationService : IErrorNotificationService, ISingletonSer
         {
             return;
         }
+        
+        // Generate SHA 256 based on configuration name, time id, order id and message
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        var hash = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes($"{configurationName}{subject}{content}"));
+        var notificationHash = string.Join("", hash.Select(b => b.ToString("x2")));
+        
+        // If the notification has been sent within the set interval time, don't send it again. 30 seconds are added as a buffer.
+        if (sendNotifications.TryGetValue(notificationHash, out var lastSendDate) && lastSendDate > DateTime.Now.AddMinutes(-wtsSettings.ErrorNotificationsIntervalInMinutes).AddSeconds(30))
+        {
+            return;
+        }
+
+        sendNotifications.AddOrUpdate(notificationHash, DateTime.Now, (key, oldValue) => DateTime.Now);
 
         var emailList = emails.Split(";").ToList();
         await NotifyOfErrorByEmailAsync(emailList, subject, content, logSettings, logScope, configurationName);
