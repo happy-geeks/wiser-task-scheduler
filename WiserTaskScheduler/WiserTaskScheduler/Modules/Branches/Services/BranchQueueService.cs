@@ -470,7 +470,8 @@ AND EXTRA NOT LIKE '%GENERATED'";
 SELECT {String.Join(", ", columns)} FROM `{originalDatabase}`.`{tableName}`";
                     await databaseConnection.ExecuteAsync(query);
                 }
-await databaseConnection.CommitTransactionAsync();
+
+                await databaseConnection.CommitTransactionAsync();
 
                 // Add triggers to the new database, after inserting all data, so that the wiser_history table will still be empty.
                 // We use wiser_history to later synchronise all changes to production, so it needs to be empty before the user starts to make changes in the new branch.
@@ -494,7 +495,7 @@ AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
                         foreach (DataRow dataRow in dataTable.Rows)
                         {
                             query = $@"CREATE TRIGGER `{dataRow.Field<string>("TRIGGER_NAME")}` {dataRow.Field<string>("ACTION_TIMING")} {dataRow.Field<string>("EVENT_MANIPULATION")} ON `{branchDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("EVENT_OBJECT_TABLE")}` FOR EACH {dataRow.Field<string>("ACTION_ORIENTATION")} {dataRow.Field<string>("ACTION_STATEMENT")}";
-command.CommandText = query;
+                            command.CommandText = query;
                             await command.ExecuteNonQueryAsync();
                         }
 
