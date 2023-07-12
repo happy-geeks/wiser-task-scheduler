@@ -71,7 +71,7 @@ namespace WiserTaskScheduler.Modules.Branches.Services
             var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
             var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
             var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
-var taskAlertsService = scope.ServiceProvider.GetRequiredService<ITaskAlertsService>();
+            var taskAlertsService = scope.ServiceProvider.GetRequiredService<ITaskAlertsService>();
             var branchQueue = (BranchQueueModel) action;
 
             // Make sure we connect to the correct database.
