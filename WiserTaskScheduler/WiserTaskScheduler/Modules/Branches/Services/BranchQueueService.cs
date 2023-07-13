@@ -628,6 +628,9 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
 
                 sqlParameters.Add("username", username);
 
+                // Make a list of items that have been created and deleted in this branch, so that can just skip them when we're synchronising to keep the history of the production clean.
+                var itemsCreatedInBranch = new List<ItemCreatedInBranchModel>();
+
                 // We need to lock all tables we're going to use, to make sure no other changes can be done while we're busy synchronising.
                 var tablesToLock = new List<string> {WiserTableNames.WiserHistory};
                 foreach (DataRow dataRow in dataTable.Rows)
@@ -652,6 +655,33 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                     {
                         tablesToLock.Add(wiserItemTableName);
                         tablesToLock.Add($"{wiserItemTableName}{WiserTableNames.ArchiveSuffix}");
+                    }
+
+                    var item = itemsCreatedInBranch.FirstOrDefault(i => i.ItemId == originalItemId);
+                    var action = dataRow.Field<string>("action").ToUpperInvariant();
+                    switch (action)
+                    {
+                        case "CREATE_ITEM":
+                            if (item == null)
+                            {
+                                itemsCreatedInBranch.Add(new ItemCreatedInBranchModel {ItemId = originalItemId});
+                            }
+
+                            break;
+                        case "DELETE_ITEM":
+                            if (item != null)
+                            {
+                                item.AlsoDeleted = true;
+                            }
+
+                            break;
+                        case "UNDELETE_ITEM":
+                            if (item != null)
+                            {
+                                item.AlsoUndeleted = true;
+                            }
+
+                            break;
                     }
                 }
 
@@ -883,6 +913,7 @@ LIMIT 1";
                         linkId = GetMappedId(tableName, idMapping, linkId);
                         fileId = GetMappedId(tableName, idMapping, fileId);
                         objectId = GetMappedId(tableName, idMapping, objectId) ?? 0;
+                        var itemCreatedInBranch = itemsCreatedInBranch.FirstOrDefault(i => i.ItemId == itemId);
 
                         // Figure out the entity type of the item that was updated, so that we can check if we need to do anything with it.
                         // We don't want to synchronise certain entity types, such as users, relations and baskets.
@@ -894,7 +925,13 @@ LIMIT 1";
                         {
                             if (action == "ADD_LINK")
                             {
+                                // Unlock the tables temporarily so that we can call GetEntityTypesOfLinkAsync, which calls wiserItemsService.GetTablePrefixForEntityAsync, since that method doesn't use our custom database connection.
+                                await using var productionCommand = productionConnection.CreateCommand();
+                                productionCommand.CommandText = "UNLOCK TABLES";
+                                await productionCommand.ExecuteNonQueryAsync();
                                 var linkData = await GetEntityTypesOfLinkAsync(itemId, destinationItemId, linkType.Value, branchConnection, wiserItemsService);
+                                // Lock the tables again when we're done with deleting.
+                                await LockTablesAsync(productionConnection, tablesToLock, false);
                                 if (linkData.HasValue)
                                 {
                                     entityType = linkData.Value.SourceType;
@@ -904,11 +941,17 @@ LIMIT 1";
                             else
                             {
                                 // Check if this item is saved in a dedicated table with a certain prefix.
-                                var (tablePrefix, wiserItemChange) = BranchesHelpers.GetTablePrefix(tableName, originalItemId);
-                                var isWiserItemChange = wiserItemChange;
+                                var (tablePrefix, isWiserItemChange) = BranchesHelpers.GetTablePrefix(tableName, originalItemId);
 
                                 if (isWiserItemChange && originalItemId > 0)
                                 {
+                                    if (itemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
+                                    {
+                                        // This item was created and then deleted in the branch, so we don't need to do anything.
+                                        historyItemsSynchronised.Add(historyId);
+                                        continue;
+                                    }
+
                                     sqlParameters["itemId"] = originalItemId;
                                     var itemDataTable = new DataTable();
                                     await using var environmentCommand = branchConnection.CreateCommand();
@@ -955,6 +998,13 @@ LIMIT 1";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Create)
                                 {
+                                    continue;
+                                }
+
+                                if (itemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
+                                {
+                                    // This item was created and then deleted in the branch, so we don't need to do anything.
+                                    historyItemsSynchronised.Add(historyId);
                                     continue;
                                 }
 
@@ -1041,6 +1091,13 @@ WHERE id = ?itemId";
                                     continue;
                                 }
 
+                                if (itemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
+                                {
+                                    // This item was created and then deleted in the branch, so we don't need to do anything.
+                                    historyItemsSynchronised.Add(historyId);
+                                    continue;
+                                }
+
                                 // Unlock the tables temporarily so that we can call wiserItemsService.DeleteAsync, since that method doesn't use our custom database connection.
                                 await using var productionCommand = productionConnection.CreateCommand();
                                 productionCommand.CommandText = "UNLOCK TABLES";
@@ -1056,6 +1113,13 @@ WHERE id = ?itemId";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Delete)
                                 {
+                                    continue;
+                                }
+
+                                if (itemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
+                                {
+                                    // This item was created and then deleted in the branch, so we don't need to do anything.
+                                    historyItemsSynchronised.Add(historyId);
                                     continue;
                                 }
 
@@ -1725,6 +1789,17 @@ LIMIT 1";
             if (!idMappings.ContainsKey(tableName))
             {
                 idMappings.Add(tableName, new Dictionary<ulong, ulong>());
+            }
+
+            if (idMappings[tableName].TryGetValue(originalItemId, out var otherId))
+            {
+                if (otherId == newItemId)
+                {
+                    // If we had already mapped these IDs together before, we can skip it.
+                    return;
+                }
+
+                throw new Exception($"Trying to map ID '{newItemId}' to '{originalItemId}', but it was already mapped to '{otherId}'.");
             }
 
             idMappings[tableName].Add(originalItemId, newItemId);
