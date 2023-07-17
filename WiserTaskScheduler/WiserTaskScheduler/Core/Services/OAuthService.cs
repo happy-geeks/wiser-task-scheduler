@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Extensions;
@@ -28,6 +29,9 @@ namespace WiserTaskScheduler.Core.Services
         private readonly IServiceProvider serviceProvider;
 
         private OAuthConfigurationModel configuration;
+
+        // Semaphore is a locking system that can be used with async code.
+        private static readonly SemaphoreSlim OauthApiLock = new(1, 1);
 
         public OAuthService(IOptions<GclSettings> gclSettings, ILogService logService, ILogger<OAuthService> logger, IServiceProvider serviceProvider)
         {
@@ -75,22 +79,26 @@ namespace WiserTaskScheduler.Core.Services
             }
 
             // Check if a new access token needs to be requested and request it.
-            var result = await Task.Run(() =>
-            {
-                lock (oAuthApi)
-                {
-                    if (!String.IsNullOrWhiteSpace(oAuthApi.AccessToken) && oAuthApi.ExpireTime > DateTime.Now)
-                    {
-                        return OAuthState.CurrentToken;
-                    }
+            OAuthState result;
 
+            // Lock to prevent multiple requests at once.
+            await OauthApiLock.WaitAsync();
+
+            try
+            {
+                if (!String.IsNullOrWhiteSpace(oAuthApi.AccessToken) && oAuthApi.ExpireTime > DateTime.Now)
+                {
+                    result = OAuthState.CurrentToken;
+                }
+                else
+                {
                     var formData = new List<KeyValuePair<string, string>>();
 
                     // Setup correct authentication.
                     OAuthState failState;
                     if (String.IsNullOrWhiteSpace(oAuthApi.AccessToken) || String.IsNullOrWhiteSpace(oAuthApi.RefreshToken))
                     {
-                        logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using username and password.", LogName);
+                        await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using username and password.", LogName);
 
                         failState = OAuthState.FailedLogin;
                         formData.Add(new KeyValuePair<string, string>("grant_type", "password"));
@@ -99,7 +107,7 @@ namespace WiserTaskScheduler.Core.Services
                     }
                     else
                     {
-                        logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.", LogName);
+                        await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.", LogName);
 
                         failState = OAuthState.FailedRefreshToken;
                         formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
@@ -121,39 +129,46 @@ namespace WiserTaskScheduler.Core.Services
                     request.Headers.Add("Accept", "application/json");
 
                     using var client = new HttpClient();
-                    var response = client.Send(request);
+                    var response = await client.SendAsync(request);
 
-                    using var reader = new StreamReader(response.Content.ReadAsStream());
-                    var json = reader.ReadToEnd();
+                    using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+                    var json = await reader.ReadToEndAsync();
 
                     if (!response.IsSuccessStatusCode)
                     {
-                        logService.LogError(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to get access token for {oAuthApi.ApiName}. Received: {response.StatusCode}\n{json}", LogName);
-                        return failState;
-                    }
-
-                    var body = JObject.Parse(json);
-
-                    oAuthApi.AccessToken = (string)body["access_token"];
-                    oAuthApi.TokenType = (string) body["token_type"];
-                    oAuthApi.RefreshToken = (string) body["refresh_token"];
-
-                    if (body["expires_in"].Type == JTokenType.Integer)
-                    {
-                        oAuthApi.ExpireTime = DateTime.Now.AddSeconds((int)body["expires_in"]);
+                        await logService.LogError(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to get access token for {oAuthApi.ApiName}. Received: {response.StatusCode}\n{json}", LogName);
+                        result = failState;
                     }
                     else
                     {
-                        oAuthApi.ExpireTime = DateTime.Now.AddSeconds(Convert.ToInt32((string)body["expires_in"]));
+                        var body = JObject.Parse(json);
+
+                        oAuthApi.AccessToken = (string) body["access_token"];
+                        oAuthApi.TokenType = (string) body["token_type"];
+                        oAuthApi.RefreshToken = (string) body["refresh_token"];
+
+                        if (body["expires_in"].Type == JTokenType.Integer)
+                        {
+                            oAuthApi.ExpireTime = DateTime.Now.AddSeconds((int) body["expires_in"]);
+                        }
+                        else
+                        {
+                            oAuthApi.ExpireTime = DateTime.Now.AddSeconds(Convert.ToInt32((string) body["expires_in"]));
+                        }
+
+                        oAuthApi.ExpireTime -= oAuthApi.ExpireTimeOffset;
+
+                        await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"A new access token has been retrieved for {oAuthApi.ApiName} and is valid till {oAuthApi.ExpireTime}", LogName);
+
+                        result = OAuthState.NewToken;
                     }
-
-                    oAuthApi.ExpireTime -= oAuthApi.ExpireTimeOffset;
-
-                    logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"A new access token has been retrieved for {oAuthApi.ApiName} and is valid till {oAuthApi.ExpireTime}", LogName);
-
-                    return OAuthState.NewToken;
                 }
-            });
+            }
+            finally
+            {
+                // Release the lock. This is in a finally to be 100% sure that it will always be released. Otherwise the application might freeze.
+                OauthApiLock.Release();
+            }
 
             if (result == OAuthState.FailedLogin)
             {

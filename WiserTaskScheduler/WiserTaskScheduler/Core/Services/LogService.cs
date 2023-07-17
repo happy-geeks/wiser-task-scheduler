@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Models;
@@ -110,15 +111,21 @@ namespace WiserTaskScheduler.Core.Services
                         // log to slack chat service in case configured 
                         if (logLevel >= logSettings.SlackLogLevel)
                         {
-                            var title = message.Substring(0, message.IndexOf(Environment.NewLine));
-                            string slackMessage = $@"Log level: {logLevel}
+                            var linebreakIndex = message.IndexOf(Environment.NewLine, StringComparison.InvariantCulture);
+                            var title = linebreakIndex >= 0 ? message.Substring(0, linebreakIndex) : message;
+                            var slackMessage = $@"Log level: {logLevel}
 Configuration : '{configurationName}'
 Time ID: '{timeId}'
 Order: '{order}'
 Message:
 {title}";
 
-                            await slackChatService.SendChannelMessageAsync(slackMessage,new[] { message });
+                            // Generate SHA 256 based on configuration name, time id, order id and message
+                            using var sha256 = System.Security.Cryptography.SHA256.Create();
+                            var hash = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes($"{configurationName}{timeId}{order}{message}"));
+                            var messageHash = string.Join("", hash.Select(b => b.ToString("x2")));
+                            
+                            await slackChatService.SendChannelMessageAsync(slackMessage,new[] { message },  messageHash: messageHash);
                         }
                     }
                     catch
