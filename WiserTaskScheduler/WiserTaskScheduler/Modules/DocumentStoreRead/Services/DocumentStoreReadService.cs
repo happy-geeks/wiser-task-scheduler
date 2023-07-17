@@ -56,8 +56,7 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
         IReadOnlyCollection<(WiserItemModel model, string documentId)> items;
         try
         {
-
-            items = await documentStorageService.GetItems("", new Dictionary<string, object>(), entitySettings);
+            items = await documentStorageService.GetItemsAsync("", new Dictionary<string, object>(), entitySettings);
 
             if (items.Count == 0)
             {
@@ -104,7 +103,7 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
                     continue;
                 }
                 await wiserItemsService.SaveAsync(item.model, username: documentStoreReadItem.UsernameForLogging, storeTypeOverride: StoreType.Table, userId: documentStoreReadItem.UserId);
-                await documentStorageService.DeleteItem(item.documentId, entitySettings);
+                await documentStorageService.DeleteItemAsync(item.documentId, entitySettings);
             }
         }
         catch (Exception e)
@@ -132,7 +131,7 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
             {
                 { "Success", false },
                 { "ItemsRead", 0 },
-            };;
+            };
         }
 
         return new JObject()

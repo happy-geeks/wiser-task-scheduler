@@ -12,8 +12,7 @@ public class DocumentStoreReadModel : ActionModel
     /// Leave empty if not targeting a specific entity
     /// </summary>
     public string EntityName { get; set; }
-    
-    
+
     /// <summary>
     /// Gets or Sets the wiser userId that will be used when saving items to the tables
     /// </summary>
