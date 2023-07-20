@@ -11,6 +11,8 @@ using WiserTaskScheduler.Modules.CleanupWiserHistory.Interfaces;
 using WiserTaskScheduler.Modules.CleanupWiserHistory.Models;
 using WiserTaskScheduler.Modules.Communications.Interfaces;
 using WiserTaskScheduler.Modules.Communications.Models;
+using WiserTaskScheduler.Modules.DocumentStoreRead.Interfaces;
+using WiserTaskScheduler.Modules.DocumentStoreRead.Models;
 using WiserTaskScheduler.Modules.GenerateFiles.Interfaces;
 using WiserTaskScheduler.Modules.GenerateFiles.Models;
 using WiserTaskScheduler.Modules.HttpApis.Interfaces;
@@ -75,6 +77,8 @@ namespace WiserTaskScheduler.Core.Factories
                     return serviceProvider.GetRequiredService<ICleanupWiserHistoryService>() as IActionsService;
                 case GenerateCommunicationModel:
                     return serviceProvider.GetRequiredService<IGenerateCommunicationsService>() as IActionsService;
+                case DocumentStoreReadModel:
+                    return serviceProvider.GetRequiredService<IDocumentStoreReadService>() as IActionsService;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(action), action.ToString());
             }
