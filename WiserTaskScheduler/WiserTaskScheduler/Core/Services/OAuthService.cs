@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
@@ -101,24 +102,88 @@ namespace WiserTaskScheduler.Core.Services
                         await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using username and password.", LogName);
 
                         failState = OAuthState.FailedLogin;
-                        formData.Add(new KeyValuePair<string, string>("grant_type", "password"));
-                        formData.Add(new KeyValuePair<string, string>("username", oAuthApi.Username));
-                        formData.Add(new KeyValuePair<string, string>("password", oAuthApi.Password));
+                        if (oAuthApi.OAuthJwt == null)
+                        {
+                            formData.Add(new KeyValuePair<string, string>("grant_type", "password"));
+                            formData.Add(new KeyValuePair<string, string>("username", oAuthApi.Username));
+                            formData.Add(new KeyValuePair<string, string>("password", oAuthApi.Password));
+                        }
                     }
                     else
                     {
                         await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.", LogName);
 
                         failState = OAuthState.FailedRefreshToken;
-                        formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
-                        formData.Add(new KeyValuePair<string, string>("refresh_token", oAuthApi.RefreshToken));
+                        if (oAuthApi.OAuthJwt == null)
+                        {
+                            formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
+                            formData.Add(new KeyValuePair<string, string>("refresh_token", oAuthApi.RefreshToken));
+                        }
+                    }
+
+                    string jwtToken = null;
+                    if (oAuthApi.OAuthJwt != null)
+                    {
+                        var claims = new Dictionary<string, object>
+                        {
+                            { "exp", DateTimeOffset.Now.AddSeconds(oAuthApi.OAuthJwt.ExpirationTime).ToUnixTimeSeconds() },
+                            { "iss", oAuthApi.OAuthJwt.Issuer },
+                            { "sub", oAuthApi.OAuthJwt.Subject },
+                            { "aud", oAuthApi.OAuthJwt.Audience }
+                        };
+
+                        // Add the custom claims.
+                        foreach (var claim in oAuthApi.OAuthJwt.Claims)
+                        {
+                            // Ignore the reserved claims.
+                            if (claim.Name.InList("exp", "iss", "sub", "aud"))
+                            {
+                                continue;
+                            }
+
+                            // If a data type is specified, then try to convert the value to that type.
+                            Type type = null;
+                            if (!String.IsNullOrWhiteSpace(claim.DataType))
+                            {
+                                type = Type.GetType(claim.DataType, false, true) ?? Type.GetType($"System.{claim.DataType}", false, true);
+                            }
+
+                            if (type != null)
+                            {
+                                try
+                                {
+                                    claims[claim.Name] = Convert.ChangeType(claim.Value, type);
+                                }
+                                catch (Exception exception)
+                                {
+                                    // If the conversion fails, then log it and use the string value instead.
+                                    await logService.LogWarning(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to convert claim value to specified type. Using string instead. Exception: {exception}", LogName);
+                                    claims[claim.Name] = claim.Value;
+                                }
+                            }
+                            else
+                            {
+                                // No data type specified, so just use the string value.
+                                claims[claim.Name] = claim.Value;
+                            }
+                        }
+
+                        // Load the certificate and create the token.
+                        var certificate = new X509Certificate2(oAuthApi.OAuthJwt.CertificateLocation, oAuthApi.OAuthJwt.CertificatePassword);
+                        jwtToken = Jose.JWT.Encode(claims, certificate.GetRSAPrivateKey(), Jose.JwsAlgorithm.RS256);
                     }
 
                     if (oAuthApi.FormKeyValues != null)
                     {
                         foreach (var keyValue in oAuthApi.FormKeyValues)
                         {
-                            formData.Add(new KeyValuePair<string, string>(keyValue.Key, keyValue.Value));
+                            var value = keyValue.Value;
+                            if (value.Equals("[{jwt_token}]"))
+                            {
+                                value = jwtToken ?? String.Empty;
+                            }
+
+                            formData.Add(new KeyValuePair<string, string>(keyValue.Key, value));
                         }
                     }
 

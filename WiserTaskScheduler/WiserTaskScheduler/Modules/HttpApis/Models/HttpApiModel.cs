@@ -30,6 +30,11 @@ namespace WiserTaskScheduler.Modules.HttpApis.Models
         public string OAuth { get; set; }
 
         /// <summary>
+        /// Gets or sets the JWT service to get the access token from.
+        /// </summary>
+        public string Jwt { get; set; }
+
+        /// <summary>
         /// Gets or sets if the HTTP API request needs to be requested once or more.
         /// If false the using result set needs to be set to an array.
         /// </summary>

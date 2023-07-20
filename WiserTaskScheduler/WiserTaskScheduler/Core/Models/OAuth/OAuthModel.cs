@@ -59,6 +59,12 @@ namespace WiserTaskScheduler.Core.Models.OAuth
         public FormKeyValueModel[] FormKeyValues { get; set; }
 
         /// <summary>
+        /// Gets or sets the JWT settings for the OAuth payload.
+        /// </summary>
+        [XmlElement("Jwt")]
+        public OAuthJwtModel OAuthJwt { get; set; }
+
+        /// <summary>
         /// Gets or sets the access token.
         /// </summary>
         [XmlIgnore]
