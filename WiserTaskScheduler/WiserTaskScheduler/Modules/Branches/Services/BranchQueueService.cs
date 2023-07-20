@@ -530,7 +530,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
 
                 // Rollback transaction if started
                 await databaseConnection.RollbackTransactionAsync(false);
-                logger.LogError(exception, $"Failed to create the branch '{settings.DatabaseName}'.");
+                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Failed to create the branch '{settings.DatabaseName}'. Error: {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
 
                 // Save the error in the queue and set the finished on datetime to now.
                 await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, String.IsNullOrWhiteSpace(error) ? new JArray() : new JArray(error), stopwatch, startDate, branchQueue.CreatedBranchTemplateId, CreateBranchSubject, CreateBranchTemplate);
@@ -547,7 +547,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                 }
                 catch (Exception innerException)
                 {
-                    logger.LogError(innerException, "Failed to drop new branch database, after getting an error while trying to fill it with data.");
+                    await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Failed to drop new branch database '{settings.DatabaseName}', after getting an error while trying to fill it with data. Error: {innerException}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                 }
 
                 error = exception.ToString();
@@ -1628,7 +1628,7 @@ WHERE `id` = ?id";
             }
             catch (Exception exception)
             {
-                logger.LogError(exception, $"Failed to merge the branch '{settings.DatabaseName}'.");
+                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Failed to merge the branch '{settings.DatabaseName}'. Error: {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                 errors.Add(exception.ToString());
             }
             finally
@@ -1674,7 +1674,7 @@ WHERE `id` = ?id";
                 }
                 catch (Exception exception)
                 {
-                    logger.LogWarning(exception, $"Dropping the branch database '{branchDatabase}' failed after successful merge.");
+                    await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Dropping the branch database '{branchDatabase}' failed after succesful merge. Error: {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                     errors.Add($"Het verwijderen van de branch is niet gelukt: {exception}");
                 }
             }
@@ -1737,7 +1737,6 @@ WHERE `id` = ?id";
             await taskAlertsService.NotifyUserByEmailAsync(userId, addedBy, branchQueue, configurationServiceName, subject, content, replaceData, template?.GetDetailValue("sender_email"), template?.GetDetailValue("sender_name"));
             await taskAlertsService.SendMessageToUserAsync(userId, addedBy, subject, branchQueue, configurationServiceName, replaceData, userId, addedBy);
         }
-
 
         /// <summary>
         /// Handles the merging of changes from a branch back into the main/original branch.
@@ -1816,7 +1815,7 @@ WHERE `id` = ?id";
             }
             catch (Exception exception)
             {
-                logger.LogError(exception, $"Failed to delete the branch '{settings.DatabaseName}'.");
+                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Failed to delete the branch '{settings.DatabaseName}'. Error: {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                 error = exception.ToString();
             }
 
@@ -1829,7 +1828,6 @@ WHERE `id` = ?id";
             result.Add("ErrorMessage", error);
             result.Add("Success", String.IsNullOrWhiteSpace(error));
             return result;
-
         }
 
         /// <summary>
