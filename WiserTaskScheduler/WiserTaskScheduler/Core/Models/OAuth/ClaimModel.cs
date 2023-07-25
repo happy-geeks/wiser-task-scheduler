@@ -24,6 +24,5 @@ public class ClaimModel
     /// <summary>
     /// The data type of the value.
     /// </summary>
-    [XmlAttribute(DataType = "string")]
     public string DataType { get; set; }
 }
