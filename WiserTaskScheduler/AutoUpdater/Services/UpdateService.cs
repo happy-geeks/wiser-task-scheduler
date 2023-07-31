@@ -17,6 +17,10 @@ public class UpdateService : IUpdateService
     private const string WtsTempPath = "C:/temp/wts";
     private const string WtsExeFile = "WiserTaskScheduler.exe";
 
+    private const int UpdateDelayAfterServiceShutdown = 60000;
+    private const int DeleteFileAttempts = 5;
+    private const int DeleteFileDelay = 1000;
+
     private readonly UpdateSettings updateSettings;
     private readonly ILogger<UpdateService> logger;
     private readonly IServiceProvider serviceProvider;
@@ -181,6 +185,9 @@ public class UpdateService : IUpdateService
         {
             serviceController.Stop();
             serviceController.WaitForStatus(ServiceControllerStatus.Stopped);
+            
+            // Wait for 1 minute after the service has been stopped to increase the chance all resources have been released.
+            Thread.Sleep(UpdateDelayAfterServiceShutdown);
         }
 
         try
@@ -213,6 +220,7 @@ public class UpdateService : IUpdateService
         catch (Exception e)
         {
             logger.LogError($"Exception occured while updating WTS '{wts.ServiceName}'.{Environment.NewLine}{Environment.NewLine}{e}");
+            EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Updating failed!", $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}.<br/><br/>Error when updating:<br/>{e.ToString().ReplaceLineEndings("<br/>")}", wts.ServiceName);
         }
     }
 
@@ -248,8 +256,26 @@ public class UpdateService : IUpdateService
                 continue;
             }
             
-            file.Delete();
+            // Try to delete the file 5 times with a 1 second delay between each attempt.
+            var attempts = 0;
+            do
+            {
+                attempts++;
+                try
+                {
+                    file.Delete();
+                    break;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    if (attempts == DeleteFileAttempts)
+                        throw;
+                    
+                    Thread.Sleep(DeleteFileDelay);
+                }
+            } while (attempts < DeleteFileAttempts);
         }
+        
         ZipFile.ExtractToDirectory(source, wts.PathToFolder, true);
     }
 
