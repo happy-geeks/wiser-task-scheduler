@@ -38,5 +38,12 @@ namespace WiserTaskScheduler.Modules.Branches.Models
         /// This is for sending notifications about the status of the deletion of a branch.
         /// </summary>
         public ulong DeletedBranchTemplateId { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the specific rules for copying tables.
+        /// </summary>
+        [XmlArray("CopyTableRules")]
+        [XmlArrayItem(typeof(CopyTableRuleModel))]
+        public CopyTableRuleModel[] CopyTableRules { get; set; }
     }
 }
