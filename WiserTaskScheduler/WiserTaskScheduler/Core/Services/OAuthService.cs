@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Buffers.Text;
 using System.Collections.Generic;
+using System.Data;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -99,14 +101,50 @@ namespace WiserTaskScheduler.Core.Services
                     OAuthState failState;
                     if (String.IsNullOrWhiteSpace(oAuthApi.AccessToken) || String.IsNullOrWhiteSpace(oAuthApi.RefreshToken))
                     {
-                        await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using username and password.", LogName);
-
                         failState = OAuthState.FailedLogin;
+
                         if (oAuthApi.OAuthJwt == null)
                         {
-                            formData.Add(new KeyValuePair<string, string>("grant_type", "password"));
-                            formData.Add(new KeyValuePair<string, string>("username", oAuthApi.Username));
-                            formData.Add(new KeyValuePair<string, string>("password", oAuthApi.Password));
+                            switch (oAuthApi.GrantType)
+                            {
+                                case OAuthGrantType.AuthCode:
+                                    throw new NotImplementedException("OAuthGrantType.AuthCode is not supported yet");
+                                    break;
+
+                                case OAuthGrantType.AuthCodeWithPKCE:
+                                    throw new NotImplementedException(
+                                        "OAuthGrantType.AuthCodeWithPKCE is not supported yet");
+                                    break;
+
+                                case OAuthGrantType.Implicit:
+                                    throw new NotImplementedException("OAuthGrantType.Implicit is not supported yet");
+                                    break;
+
+                                case OAuthGrantType.PasswordCredentials:
+                                    await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings,
+                                        $"Requesting new access token for '{apiName}' using username and password.",
+                                        LogName);
+
+                                    formData.Add(new KeyValuePair<string, string>("grant_type", "password"));
+                                    formData.Add(new KeyValuePair<string, string>("username", oAuthApi.Username));
+                                    formData.Add(new KeyValuePair<string, string>("password", oAuthApi.Password));
+
+                                    break;
+
+                                case OAuthGrantType.ClientCredentials:
+                                    await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings,
+                                        $"Requesting new access token for '{apiName}' using client credentials.",
+                                        LogName);
+                                    
+                                    formData.Add(new KeyValuePair<string, string>("grant_type", "client_credentials"));
+
+                                    if (oAuthApi.SendClientCredentialsInBody)
+                                    {
+                                        formData.Add(new KeyValuePair<string, string>("client_id", oAuthApi.ClientId));
+                                        formData.Add(new KeyValuePair<string, string>("client_secret", oAuthApi.ClientSecret));
+                                    }
+                                    break;
+                            }
                         }
                     }
                     else
@@ -191,7 +229,16 @@ namespace WiserTaskScheduler.Core.Services
                     {
                         Content = new FormUrlEncodedContent(formData)
                     };
+                    
                     request.Headers.Add("Accept", "application/json");
+
+                    if (!oAuthApi.SendClientCredentialsInBody && oAuthApi.GrantType == OAuthGrantType.ClientCredentials)
+                    {
+
+                        var authString = $"{oAuthApi.ClientId}:{oAuthApi.ClientSecret}";
+                        var plainTextBytes = System.Text.Encoding.UTF8.GetBytes(authString);
+                        request.Headers.Add("Authorization", "Basic " + System.Convert.ToBase64String(plainTextBytes));
+                    }
 
                     using var client = new HttpClient();
                     var response = await client.SendAsync(request);
