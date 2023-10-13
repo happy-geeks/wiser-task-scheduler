@@ -16,6 +16,11 @@ namespace WiserTaskScheduler.Modules.Body.Models
         public string ContentType { get; set; }
 
         /// <summary>
+        /// Generate PDF from HTML and save the PDF
+        /// </summary>
+        public bool GeneratePdf { get; set; } = false;
+
+        /// <summary>
         /// Gets or sets the body parts.
         /// </summary>
         [Required]
