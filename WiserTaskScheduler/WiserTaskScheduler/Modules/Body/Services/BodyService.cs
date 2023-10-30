@@ -42,12 +42,12 @@ namespace WiserTaskScheduler.Modules.Body.Services
                 var body = bodyPart.Text;
                 
                 // If an item-id is set, get the template from the database.
-                if (bodyPart.ItemId > 0)
+                if (bodyPart.WiserTemplateItemId > 0)
                 {
                     // Create a scope to get the string wiserItems service. It's needed to get the template
                     var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
 
-                    var template = wiserItemsService.GetItemDetailsAsync(bodyPart.ItemId, languageCode:bodyPart.LanguageCode, detailKey:bodyPart.PropertyName, skipPermissionsCheck: true);
+                    var template = wiserItemsService.GetItemDetailsAsync(bodyPart.WiserTemplateItemId, languageCode: bodyPart.LanguageCode, detailKey: bodyPart.PropertyName, skipPermissionsCheck: true);
                     body = template.Result.GetDetailValue(bodyPart.PropertyName);
                 }
 

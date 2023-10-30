@@ -41,7 +41,7 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
         /// <param name="logService"></param>
         /// <param name="logger"></param>
         /// <param name="serviceProvider"></param>
-        public GenerateFileService(IBodyService bodyService, ILogService logService, ILogger<GenerateFileService> logger,IServiceProvider serviceProvider)
+        public GenerateFileService(IBodyService bodyService, ILogService logService, ILogger<GenerateFileService> logger, IServiceProvider serviceProvider)
         {
             this.bodyService = bodyService;
             this.logService = logService;
