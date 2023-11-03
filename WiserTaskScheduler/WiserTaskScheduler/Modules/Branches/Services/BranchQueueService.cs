@@ -447,7 +447,10 @@ JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id
                         {
                             await databaseConnection.ExecuteAsync($@"INSERT INTO `{branchDatabase}`.`{tableName}` 
 SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
-JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = file.item_id");
+JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = file.item_id
+UNION ALL
+SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
+JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItemLink}` AS link ON link.id = file.itemlink_id");
                         }
 
                         continue;
