@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Threading.Tasks;
+using EvoPdf;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
@@ -124,6 +126,12 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                 itemId =  ReplacementHelper.ReplaceText(itemIdTuple.Item1, rows, itemIdTuple.Item2, usingResultSet, generateFile.HashSettings);
                 itemLinkId =  ReplacementHelper.ReplaceText(itemLinkIdTuple.Item1, rows, itemLinkIdTuple.Item2, usingResultSet, generateFile.HashSettings);
                 propertyName =  ReplacementHelper.ReplaceText(propertyNameTuple.Item1, rows, propertyNameTuple.Item2, usingResultSet, generateFile.HashSettings);
+                
+                foreach (var pdf in generateFile.Body.MergePdfs)
+                {
+                    var pdfWiserItemIdTuple = ReplacementHelper.PrepareText(pdf.WiserItemId, usingResultSet, remainingKey, generateFile.HashSettings);
+                    pdf.WiserItemId = ReplacementHelper.ReplaceText(pdfWiserItemIdTuple.Item1, rows, pdfWiserItemIdTuple.Item2, usingResultSet, generateFile.HashSettings);
+                }
             }
 
             var logLocation = !String.IsNullOrEmpty(fileLocation) ? $"'{fileLocation}'" : $"wiser_itemfile property '{propertyName}', item_id '{itemId}', itemlink_id '{itemLinkId}'";
@@ -141,6 +149,40 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                     Html = body
                 };
                 pdfFile = await htmlToPdfConverterService.ConvertHtmlStringToPdfAsync(pdfSettings);
+                
+                // Merge PDF's to generated PDF
+                if (generateFile.Body.MergePdfs.Where(p => !String.IsNullOrEmpty(p.WiserItemId)).ToArray().Length > 0)
+                {
+                    // Make stream of byte array
+                    var stream = new MemoryStream(pdfFile.FileContents);
+                    
+                    //  Create the merge result PDF document
+                    var mergeResultPdfDocument = new Document(stream);
+
+                    // Automatically close the merged documents when the document resulted after merge is closed
+                    mergeResultPdfDocument.AutoCloseAppendedDocs = true;
+
+                    // Set license key received after purchase to use the converter in licensed mode
+                    // Leave it not set to use the converter in demo mode
+                    mergeResultPdfDocument.LicenseKey = GclSettings.Current.EvoPdfLicenseKey;
+
+                    foreach (var pdf in generateFile.Body.MergePdfs)
+                    {
+                        if (String.IsNullOrEmpty(pdf.WiserItemId))
+                        {
+                            continue;
+                        }
+
+                        // Create a scope to get the string wiserItems service. It's needed to get the template
+                        var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
+                        var wiserItemFile = await wiserItemsService.GetItemFileAsync(Convert.ToUInt64(pdf.WiserItemId), "item_id", pdf.PropertyName);
+                        mergeResultPdfDocument.AppendDocument(new Document(new MemoryStream(wiserItemFile.Content)));
+                    }
+
+                    var saveStream = new MemoryStream();
+                    mergeResultPdfDocument.Save(saveStream);
+                    pdfFile.FileContents = saveStream.ToArray();
+                }
             }
 
             var fileGenerated = false;
