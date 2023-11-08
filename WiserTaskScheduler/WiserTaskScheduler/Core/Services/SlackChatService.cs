@@ -73,7 +73,7 @@ namespace WiserTaskScheduler.Core.Services
                         Message replyMessage = new Message
                         {
                             Text = reply,
-                            Channel = recipient,
+                            Channel = recipient != null ? recipient : (slackSettings.Channel != null ? slackSettings.Channel : "" ),
                             ThreadTs = mainMessageSend.Ts
                         };
                         
