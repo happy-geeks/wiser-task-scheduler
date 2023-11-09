@@ -226,12 +226,11 @@ ORDER BY TABLE_NAME ASC";
                             var tableName = dataRow.Field<string>("TABLE_NAME");
 
                             // Check if the structure of the table is excluded from the creation of the branch.
-                            if (branchQueue.CopyTableRules.Any(t => t.CopyType == CopyTypes.Nothing && (
-                                                                (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
-                                                                || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName.Substring(1), StringComparison.OrdinalIgnoreCase))
-                                                                || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName.Substring(0, t.TableName.Length - 1), StringComparison.OrdinalIgnoreCase))
-                                                                || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase)
-                                                            )))
+                            if (branchQueue.CopyTableRules != null && branchQueue.CopyTableRules.Any(t => t.CopyType == CopyTypes.Nothing && (
+                                                                                                         (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
+                                                                                                         || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName[1..], StringComparison.OrdinalIgnoreCase))
+                                                                                                         || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName[..^1], StringComparison.OrdinalIgnoreCase))
+                                                                                                         || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase))))
                             {
                                 continue;
                             }
@@ -466,11 +465,10 @@ JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItemLink}` AS link ON lin
                     }
 
                     // Don't copy data from tables that have specific rules. Either the table needs to stay empty or it does not exist in the new branch.
-                    if (branchQueue.CopyTableRules.Any(t => (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
-                                                       || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName.Substring(1), StringComparison.OrdinalIgnoreCase))
-                                                       || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName.Substring(0, t.TableName.Length - 1), StringComparison.OrdinalIgnoreCase))
-                                                       || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase)
-                                                   ))
+                    if (branchQueue.CopyTableRules != null && branchQueue.CopyTableRules.Any(t => (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
+                                                                                                  || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName[1..], StringComparison.OrdinalIgnoreCase))
+                                                                                                  || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName[..^1], StringComparison.OrdinalIgnoreCase))
+                                                                                                  || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase)))
                     {
                         continue;
                     }
