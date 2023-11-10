@@ -15,6 +15,7 @@ using GeeksCoreLibrary.Modules.ItemFiles;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Helpers;
@@ -35,6 +36,7 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
         private readonly ILogService logService;
         private readonly ILogger<GenerateFileService> logger;
         private readonly IServiceProvider serviceProvider;
+        private readonly GclSettings gclSettings;
 
         /// <summary>
         /// Create a new instance of <see cref="GenerateFileService"/>.
@@ -43,12 +45,14 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
         /// <param name="logService"></param>
         /// <param name="logger"></param>
         /// <param name="serviceProvider"></param>
-        public GenerateFileService(IBodyService bodyService, ILogService logService, ILogger<GenerateFileService> logger, IServiceProvider serviceProvider)
+        /// <param name="gclSettings"></param>
+        public GenerateFileService(IBodyService bodyService, ILogService logService, ILogger<GenerateFileService> logger, IServiceProvider serviceProvider, IOptions<GclSettings> gclSettings)
         {
             this.bodyService = bodyService;
             this.logService = logService;
             this.logger = logger;
             this.serviceProvider = serviceProvider;
+            this.gclSettings = gclSettings.Value;
         }
 
         /// <inheritdoc />
@@ -154,17 +158,20 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                 if (generateFile.Body.MergePdfs.Where(p => !String.IsNullOrEmpty(p.WiserItemId)).ToArray().Length > 0)
                 {
                     // Make stream of byte array
-                    var stream = new MemoryStream(pdfFile.FileContents);
-                    
-                    //  Create the merge result PDF document
-                    var mergeResultPdfDocument = new Document(stream);
+                    using var stream = new MemoryStream(pdfFile.FileContents);
 
+                    //  Create the merge result PDF document
+                    var mergeResultPdfDocument = new Document(stream);    
+                        
                     // Automatically close the merged documents when the document resulted after merge is closed
                     mergeResultPdfDocument.AutoCloseAppendedDocs = true;
 
                     // Set license key received after purchase to use the converter in licensed mode
                     // Leave it not set to use the converter in demo mode
-                    mergeResultPdfDocument.LicenseKey = GclSettings.Current.EvoPdfLicenseKey;
+                    mergeResultPdfDocument.LicenseKey = gclSettings.EvoPdfLicenseKey;
+                    
+                    // Get WiserItemsService. It's needed to get the template.
+                    var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
 
                     foreach (var pdf in generateFile.Body.MergePdfs)
                     {
@@ -173,13 +180,11 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                             continue;
                         }
 
-                        // Create a scope to get the string wiserItems service. It's needed to get the template
-                        var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
                         var wiserItemFile = await wiserItemsService.GetItemFileAsync(Convert.ToUInt64(pdf.WiserItemId), "item_id", pdf.PropertyName);
                         mergeResultPdfDocument.AppendDocument(new Document(new MemoryStream(wiserItemFile.Content)));
                     }
 
-                    var saveStream = new MemoryStream();
+                    using var saveStream = new MemoryStream();
                     mergeResultPdfDocument.Save(saveStream);
                     pdfFile.FileContents = saveStream.ToArray();
                 }

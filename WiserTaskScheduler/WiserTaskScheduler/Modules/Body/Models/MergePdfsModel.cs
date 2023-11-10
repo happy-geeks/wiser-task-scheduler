@@ -20,7 +20,5 @@ namespace WiserTaskScheduler.Modules.Body.Models
         /// </summary>
         [Required]
         public string PropertyName { get; set; }
-        
-        
     }
 }
