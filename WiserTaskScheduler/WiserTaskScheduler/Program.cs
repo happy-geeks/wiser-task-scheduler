@@ -23,11 +23,11 @@ namespace WiserTaskScheduler
         public static async Task Main(string[] args)
         {
             var host = CreateHostBuilder(args).Build();
-            
+
             using var scope = host.Services.CreateScope();
             var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
             await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WtsLogs, WiserTableNames.WtsServices});
-            
+
             await host.RunAsync();
         }
 
@@ -40,6 +40,7 @@ namespace WiserTaskScheduler
                 .ConfigureAppConfiguration((hostingContext, config) =>
                 {
                     config.SetBasePath(AppContext.BaseDirectory);
+                    config.AddEnvironmentVariables();
                     config.Sources
                         .OfType<Microsoft.Extensions.Configuration.Json.JsonConfigurationSource>()
                         .Where(x => x.Path == "appsettings.json");
@@ -88,11 +89,11 @@ namespace WiserTaskScheduler
             services.AddScoped<ConfigurationsWorker>();
 
             services.AddGclServices(hostContext.Configuration, false, false, false);
-            
+
             services.AddScoped<FtpsHandler>();
             services.AddScoped<SftpHandler>();
-            
-            // If there is a bot token provided for Slack add the service. 
+
+            // If there is a bot token provided for Slack add the service.
             var slackBotToken = hostContext.Configuration.GetSection("Wts").GetSection("SlackSettings").GetValue<string>("BotToken");
             if (!String.IsNullOrWhiteSpace(slackBotToken))
             {
