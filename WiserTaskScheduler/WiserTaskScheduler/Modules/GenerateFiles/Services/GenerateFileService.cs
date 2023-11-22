@@ -130,11 +130,14 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                 itemId =  ReplacementHelper.ReplaceText(itemIdTuple.Item1, rows, itemIdTuple.Item2, usingResultSet, generateFile.HashSettings);
                 itemLinkId =  ReplacementHelper.ReplaceText(itemLinkIdTuple.Item1, rows, itemLinkIdTuple.Item2, usingResultSet, generateFile.HashSettings);
                 propertyName =  ReplacementHelper.ReplaceText(propertyNameTuple.Item1, rows, propertyNameTuple.Item2, usingResultSet, generateFile.HashSettings);
-                
-                foreach (var pdf in generateFile.Body.MergePdfs)
+
+                if (generateFile.Body.MergePdfs != null)
                 {
-                    var pdfWiserItemIdTuple = ReplacementHelper.PrepareText(pdf.WiserItemId, usingResultSet, remainingKey, generateFile.HashSettings);
-                    pdf.WiserItemId = ReplacementHelper.ReplaceText(pdfWiserItemIdTuple.Item1, rows, pdfWiserItemIdTuple.Item2, usingResultSet, generateFile.HashSettings);
+                    foreach (var pdf in generateFile.Body.MergePdfs)
+                    {
+                        var pdfWiserItemIdTuple = ReplacementHelper.PrepareText(pdf.WiserItemId, usingResultSet, remainingKey, generateFile.HashSettings);
+                        pdf.WiserItemId = ReplacementHelper.ReplaceText(pdfWiserItemIdTuple.Item1, rows, pdfWiserItemIdTuple.Item2, usingResultSet, generateFile.HashSettings);
+                    }
                 }
             }
 
