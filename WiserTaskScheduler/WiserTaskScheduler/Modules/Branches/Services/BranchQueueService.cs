@@ -1375,6 +1375,13 @@ ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), lo
                                     continue;
                                 }
 
+                                if (idMapping.TryGetValue(tableName, out var mapping) && mapping.ContainsKey(originalObjectId))
+                                {
+                                    // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
+                                    historyItemsSynchronised.Add(historyId);
+                                    continue;
+                                }
+
                                 // oldValue contains either "item_id" or "itemlink_id", to indicate which of these columns is used for the ID that is saved in newValue.
                                 var newFileId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection);
                                 sqlParameters["fileItemId"] = newValue;
@@ -1668,8 +1675,6 @@ WHERE `id` = ?id";
                         environmentCommand.CommandText = $"DELETE FROM `{WiserTableNames.WiserHistory}` WHERE id IN ({String.Join(",", historyItemsSynchronised)})";
                         await environmentCommand.ExecuteNonQueryAsync();
                     }
-
-                    await EqualizeMappedIdsAsync(branchConnection, wiserItemsService, branchQueue, configurationServiceName);
                 }
                 catch (Exception exception)
                 {
@@ -2067,164 +2072,6 @@ VALUES (?tableName, ?ourId, ?productionId)";
             environmentCommand.Parameters.AddWithValue("ourId", originalItemId);
             environmentCommand.Parameters.AddWithValue("productionId", newItemId);
             await environmentCommand.ExecuteNonQueryAsync();
-        }
-
-        /// <summary>
-        /// This will update IDs of items/files/etc in the selected environment so that they all will have the same ID as in the production environment.
-        /// </summary>
-        /// <param name="environmentConnection">The database connection to the selected environment.</param>
-        private async Task EqualizeMappedIdsAsync(MySqlConnection environmentConnection, IWiserItemsService wiserItemsService, BranchQueueModel branchQueue, string configurationServiceName)
-        {
-            await using var command = environmentConnection.CreateCommand();
-            command.CommandText = $@"SELECT * FROM `{WiserTableNames.WiserIdMappings}` ORDER BY id DESC";
-            var dataTable = new DataTable();
-            using var adapter = new MySqlDataAdapter(command);
-            await adapter.FillAsync(dataTable);
-
-            foreach (DataRow dataRow in dataTable.Rows)
-            {
-                var mappingRowId = dataRow.Field<ulong>("id");
-                var tableName = dataRow.Field<string>("table_name") ?? "";
-                var ourId = dataRow.Field<ulong>("our_id");
-                var productionId = dataRow.Field<ulong>("production_id");
-
-                command.Parameters.Clear();
-                command.Parameters.AddWithValue("mappingRowId", mappingRowId);
-                command.Parameters.AddWithValue("ourId", ourId);
-                command.Parameters.AddWithValue("productionId", productionId);
-
-                if (tableName.EndsWith(WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase))
-                {
-                    command.CommandText = $@"SELECT entity_type FROM `{tableName}` WHERE id = ?ourId";
-                    var entityTypeDataTable = new DataTable();
-                    await adapter.FillAsync(entityTypeDataTable);
-                    if (entityTypeDataTable.Rows.Count == 0)
-                    {
-                        await logService.LogWarning(logger, LogScopes.RunStartAndStop, branchQueue.LogSettings, $"Tried to equalize ID, but the item doesn't exist anymore. Equalize table ID: {mappingRowId}, entity table name: {tableName}, ourId: {ourId}, productionId: {productionId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                        continue;
-                    }
-
-                    var entityType = entityTypeDataTable.Rows[0].Field<string>("entity_type");
-                    var allLinkTypeSettings = await wiserItemsService.GetAllLinkTypeSettingsAsync();
-                    var LinkTypesWithSource = allLinkTypeSettings.Where(l => String.Equals(l.SourceEntityType, entityType, StringComparison.OrdinalIgnoreCase)).ToList();
-                    var LinkTypesWithDestination = allLinkTypeSettings.Where(l => String.Equals(l.DestinationEntityType, entityType, StringComparison.OrdinalIgnoreCase)).ToList();
-
-                    var tablePrefix = tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItem, "");
-                    command.CommandText = $@"SET @saveHistory = FALSE;
-
--- Update the ID of the item itself.
-UPDATE `{tablePrefix}{WiserTableNames.WiserItem}`
-SET id = ?productionId
-WHERE id = ?ourId;
-
--- Update all original IDs of items that are using this ID.
-UPDATE `{tablePrefix}{WiserTableNames.WiserItem}`
-SET original_item_id = ?productionId
-WHERE original_item_id = ?ourId;
-
--- Update all parent IDs of items that are using this ID.
-UPDATE `{tablePrefix}{WiserTableNames.WiserItem}`
-SET parent_item_id = ?productionId
-WHERE parent_item_id = ?ourId;
-
--- Update item details to use the new ID.
-UPDATE `{tablePrefix}{WiserTableNames.WiserItemDetail}`
-SET item_id = ?productionId
-WHERE item_id = ?ourId;
-
--- Update item files to use the new ID.
-UPDATE `{tablePrefix}{WiserTableNames.WiserItemFile}`
-SET item_id = ?productionId
-WHERE item_id = ?ourId;";
-
-                    // We need to check if there are any dedicated wiser_itemlink tables such as 123_wiser_itemlink and update the ID of the item in there.
-                    // If there are no dedicated tables, just update it in the main wiser_itemlink table.
-                    // This first block for links where the source item is the current item.
-                    if (!LinkTypesWithSource.Any())
-                    {
-                        command.CommandText += $@"
--- Update item links to use the new ID.
-UPDATE `{WiserTableNames.WiserItemLink}`
-SET item_id = ?productionId
-WHERE item_id = ?ourId;";
-                    }
-                    else
-                    {
-                        foreach (var linkTypeSetting in LinkTypesWithSource)
-                        {
-                            var linkTablePrefix = wiserItemsService.GetTablePrefixForLink(linkTypeSetting);
-                            command.CommandText += $@"
--- Update item links to use the new ID.
-UPDATE `{linkTablePrefix}{WiserTableNames.WiserItemLink}`
-SET item_id = ?productionId
-WHERE item_id = ?ourId;";
-                        }
-                    }
-
-                    // This second block is for links where the destination is the current item.
-                    if (!LinkTypesWithDestination.Any())
-                    {
-                        command.CommandText += $@"
--- Update item links to use the new ID.
-UPDATE `{WiserTableNames.WiserItemLink}`
-SET destination_item_id = ?productionId
-WHERE destination_item_id = ?ourId;";
-                    }
-                    else
-                    {
-                        foreach (var linkTypeSetting in LinkTypesWithDestination)
-                        {
-                            var linkTablePrefix = wiserItemsService.GetTablePrefixForLink(linkTypeSetting);
-                            command.CommandText += $@"
--- Update item links to use the new ID.
-UPDATE `{linkTablePrefix}{WiserTableNames.WiserItemLink}`
-SET destination_item_id = ?productionId
-WHERE destination_item_id = ?ourId;";
-                        }
-                    }
-
-                    await command.ExecuteNonQueryAsync();
-                }
-                else if (tableName.EndsWith(WiserTableNames.WiserItemFile, StringComparison.OrdinalIgnoreCase) || tableName.EndsWith(WiserTableNames.WiserEntity, StringComparison.OrdinalIgnoreCase))
-                {
-                    command.CommandText = $@"SET @saveHistory = FALSE;
-UPDATE `{tableName.ToMySqlSafeValue(false)}` 
-SET id = ?productionId 
-WHERE id = ?ourId;";
-                    await command.ExecuteNonQueryAsync();
-                }
-                else if (tableName.EndsWith(WiserTableNames.WiserItemLink, StringComparison.OrdinalIgnoreCase))
-                {
-                    var tablePrefix = tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLink, "");
-                    command.CommandText = $@"SET @saveHistory = FALSE;
-
-UPDATE `{tablePrefix}{WiserTableNames.WiserItemLink}` 
-SET id = ?productionId 
-WHERE id = ?ourId;
-
-UPDATE `{tablePrefix}{WiserTableNames.WiserItemLinkDetail}` 
-SET itemlink_id = ?productionId 
-WHERE itemlink_id = ?ourId;
-
-UPDATE `{tablePrefix}{WiserTableNames.WiserItemFile}` 
-SET itemlink_id = ?productionId 
-WHERE itemlink_id = ?ourId;";
-                    await command.ExecuteNonQueryAsync();
-                }
-                else
-                {
-                    command.CommandText = $@"SET @saveHistory = FALSE;
-
-UPDATE `{tableName}` 
-SET id = ?productionId 
-WHERE id = ?ourId;";
-                    await command.ExecuteNonQueryAsync();
-                }
-
-                // Delete the row when we succeeded in updating the ID.
-                command.CommandText = $"DELETE FROM `{WiserTableNames.WiserIdMappings}` WHERE id = ?mappingRowId";
-                await command.ExecuteNonQueryAsync();
-            }
         }
     }
 }
