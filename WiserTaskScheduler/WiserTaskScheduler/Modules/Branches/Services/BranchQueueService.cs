@@ -188,12 +188,30 @@ ORDER BY start_on ASC, id ASC");
                 connectionStringBuilder.Database = branchDatabase;
 
                 // Get all tables that don't start with an underscore (wiser tables never start with an underscore and we often use that for temporary or backup tables).
-                var query = @"SELECT TABLE_NAME 
-FROM INFORMATION_SCHEMA.TABLES
-WHERE TABLE_SCHEMA = ?currentSchema
-AND TABLE_TYPE = 'BASE TABLE'
-AND TABLE_NAME NOT LIKE '\_%'
-ORDER BY TABLE_NAME ASC";
+                // Handle the wiser_itemfile tables as last to ensure all other tables are copied first.
+                var query = @$"SELECT *
+FROM (
+    SELECT TABLE_NAME 
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = ?currentSchema
+    AND TABLE_TYPE = 'BASE TABLE'
+    AND TABLE_NAME NOT LIKE '\_%'
+    AND TABLE_NAME NOT LIKE '%{WiserTableNames.WiserItemFile}%'
+    ORDER BY TABLE_NAME ASC
+) AS x
+
+UNION ALL
+
+SELECT *
+FROM (
+    SELECT TABLE_NAME 
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = ?currentSchema
+    AND TABLE_TYPE = 'BASE TABLE'
+    AND TABLE_NAME NOT LIKE '\_%'
+    AND TABLE_NAME LIKE '%{WiserTableNames.WiserItemFile}%'
+    ORDER BY TABLE_NAME ASC
+) AS x";
 
                 databaseConnection.AddParameter("currentSchema", originalDatabase);
                 databaseConnection.AddParameter("newSchema", branchDatabase);
@@ -437,7 +455,7 @@ JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id
 
                     if (tableName!.EndsWith(WiserTableNames.WiserItemFile, StringComparison.OrdinalIgnoreCase))
                     {
-                        // We order tables by table name, this means wiser_item always comes before wiser_itemfile.
+                        // The wiser_itemfile tables are handled last, this means wiser_item and wiser_itemfile always comes before wiser_itemfile.
                         // So we can be sure that we already copied the items to the new branch and we can use the IDs of those items to copy the details of those items.
                         // This way, we don't need to create the entire WHERE statement again based on the entity settings, like we did above for wiser_item.
                         var prefix = tableName.Replace(WiserTableNames.WiserItemFile, "");
@@ -446,10 +464,34 @@ JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id
                         {
                             await databaseConnection.ExecuteAsync($@"INSERT INTO `{branchDatabase}`.`{tableName}` 
 SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
-JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = file.item_id
-UNION ALL
+JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = file.item_id");
+                            
+                            // Copy all files that are on the links that are copied to the new branch from the given (prefixed) table.
+                            var entityTypesInTable = await databaseConnection.GetAsync($"SELECT DISTINCT entity_type FROM {prefix}{WiserTableNames.WiserItem} WHERE entity_type <> ''");
+                            if (entityTypesInTable.Rows.Count > 0)
+                            {
+                                var processedLinkTypes = new List<string>();
+                                foreach (var entityType in entityTypesInTable.Rows.Cast<DataRow>().Select(x => x.Field<string>("entity_type")))
+                                {
+                                    // Get all link types that are connected to the entity type being processed.
+                                    var linkTypes = allLinkTypes.Where(t => String.Equals(t.SourceEntityType, entityType, StringComparison.OrdinalIgnoreCase)).ToList();
+                                    foreach (var linkType in linkTypes)
+                                    {
+                                        // Check if the prefix already has been processed from the current (prefixed) table.
+                                        var linkPrefix = await wiserItemsService.GetTablePrefixForLinkAsync(linkType.Type, entityType);
+                                        if (processedLinkTypes.Contains(linkPrefix))
+                                        {
+                                            continue;
+                                        }
+                                        
+                                        await databaseConnection.ExecuteAsync($@"INSERT IGNORE INTO `{branchDatabase}`.`{tableName}`
 SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
-JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItemLink}` AS link ON link.id = file.itemlink_id");
+JOIN `{branchDatabase}`.`{linkPrefix}{WiserTableNames.WiserItemLink}` AS link ON link.id = file.itemlink_id");
+
+                                        processedLinkTypes.Add(linkPrefix);
+                                    }
+                                }
+                            }
                         }
 
                         continue;
