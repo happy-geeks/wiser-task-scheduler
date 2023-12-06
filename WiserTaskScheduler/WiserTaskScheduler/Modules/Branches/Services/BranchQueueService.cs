@@ -455,7 +455,7 @@ JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id
 
                     if (tableName!.EndsWith(WiserTableNames.WiserItemFile, StringComparison.OrdinalIgnoreCase))
                     {
-                        // The wiser_itemfile tables are handled last, this means wiser_item and wiser_itemfile always comes before wiser_itemfile.
+                        // The wiser_itemfile tables are handled last, this means wiser_item and wiser_itemlink always comes before wiser_itemfile.
                         // So we can be sure that we already copied the items to the new branch and we can use the IDs of those items to copy the details of those items.
                         // This way, we don't need to create the entire WHERE statement again based on the entity settings, like we did above for wiser_item.
                         var prefix = tableName.Replace(WiserTableNames.WiserItemFile, "");
