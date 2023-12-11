@@ -25,8 +25,8 @@ public class DocumentStoreReadModel : ActionModel
     public string UsernameForLogging { get; set; } = "WTS (Document Store Read)";
     
     /// <summary>
-    /// Set or sets what published Environment the item needs to be set as
+    /// Gets or sets what published Environment the item needs to be set as
     /// </summary>
-    public int? SetPublishedEnvironment { get; set; } = null;
+    public int? PublishedEnvironmentToSet { get; set; } = null;
     
 }
