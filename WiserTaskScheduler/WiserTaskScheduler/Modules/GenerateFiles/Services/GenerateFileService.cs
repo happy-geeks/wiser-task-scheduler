@@ -131,6 +131,7 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                 itemLinkId =  ReplacementHelper.ReplaceText(itemLinkIdTuple.Item1, rows, itemLinkIdTuple.Item2, usingResultSet, generateFile.HashSettings);
                 propertyName =  ReplacementHelper.ReplaceText(propertyNameTuple.Item1, rows, propertyNameTuple.Item2, usingResultSet, generateFile.HashSettings);
 
+                // Replace variables in the merge PDFs section and save the replaced data to the properties
                 if (generateFile.Body.MergePdfs != null)
                 {
                     foreach (var pdf in generateFile.Body.MergePdfs)
@@ -176,6 +177,7 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                     // Get WiserItemsService. It's needed to get the template.
                     var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
 
+                    var documentsAdded = false;
                     foreach (var pdf in generateFile.Body.MergePdfs)
                     {
                         if (String.IsNullOrEmpty(pdf.WiserItemId))
@@ -184,12 +186,20 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                         }
 
                         var wiserItemFile = await wiserItemsService.GetItemFileAsync(Convert.ToUInt64(pdf.WiserItemId), "item_id", pdf.PropertyName);
+                        if (wiserItemFile == null)
+                        {
+                            continue;
+                        }
                         mergeResultPdfDocument.AppendDocument(new Document(new MemoryStream(wiserItemFile.Content)));
+                        documentsAdded = true;
                     }
 
-                    using var saveStream = new MemoryStream();
-                    mergeResultPdfDocument.Save(saveStream);
-                    pdfFile.FileContents = saveStream.ToArray();
+                    if (documentsAdded)
+                    {
+                        using var saveStream = new MemoryStream();
+                        mergeResultPdfDocument.Save(saveStream);
+                        pdfFile.FileContents = saveStream.ToArray();    
+                    }
                 }
             }
 
