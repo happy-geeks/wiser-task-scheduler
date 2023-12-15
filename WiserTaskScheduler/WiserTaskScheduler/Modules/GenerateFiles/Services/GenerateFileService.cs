@@ -111,7 +111,8 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
             var itemId = generateFile.ItemId;
             var itemLinkId = generateFile.ItemLinkId;
             var propertyName = generateFile.PropertyName;
-            
+            var pdfsToMerge = new Dictionary<string, List<string>>();
+
             // Replace the file location and name if a result set is used.
             if (!String.IsNullOrWhiteSpace(useResultSet))
             {
@@ -131,13 +132,35 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                 itemLinkId =  ReplacementHelper.ReplaceText(itemLinkIdTuple.Item1, rows, itemLinkIdTuple.Item2, usingResultSet, generateFile.HashSettings);
                 propertyName =  ReplacementHelper.ReplaceText(propertyNameTuple.Item1, rows, propertyNameTuple.Item2, usingResultSet, generateFile.HashSettings);
 
-                // Replace variables in the merge PDFs section and save the replaced data to the properties
+                // Build dictionary of PDFs to merge, replace variables in itemId and propertyName
                 if (generateFile.Body.MergePdfs != null)
                 {
                     foreach (var pdf in generateFile.Body.MergePdfs)
                     {
                         var pdfWiserItemIdTuple = ReplacementHelper.PrepareText(pdf.WiserItemId, usingResultSet, remainingKey, generateFile.HashSettings);
-                        pdf.WiserItemId = ReplacementHelper.ReplaceText(pdfWiserItemIdTuple.Item1, rows, pdfWiserItemIdTuple.Item2, usingResultSet, generateFile.HashSettings);
+                        var pdfItemId = ReplacementHelper.ReplaceText(pdfWiserItemIdTuple.Item1, rows, pdfWiserItemIdTuple.Item2, usingResultSet, generateFile.HashSettings);
+                        
+                        if (String.IsNullOrEmpty(pdfItemId))
+                        {
+                            continue;
+                        }
+                        
+                        var pdfWiserPropertyNameTuple = ReplacementHelper.PrepareText(pdf.PropertyName, usingResultSet, remainingKey, generateFile.HashSettings);
+                        var pdfPropertyName = ReplacementHelper.ReplaceText(pdfWiserPropertyNameTuple.Item1, rows, pdfWiserPropertyNameTuple.Item2, usingResultSet, generateFile.HashSettings);
+                        
+                        if (String.IsNullOrEmpty(pdfPropertyName))
+                        {
+                            continue;
+                        }
+
+                        if (pdfsToMerge.ContainsKey(pdfItemId))
+                        {
+                            pdfsToMerge[pdfItemId].Add(pdfPropertyName);
+                        }
+                        else
+                        {
+                            pdfsToMerge.Add(pdfItemId, new List<string>() { pdfPropertyName });
+                        }
                     }
                 }
             }
@@ -159,7 +182,7 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                 pdfFile = await htmlToPdfConverterService.ConvertHtmlStringToPdfAsync(pdfSettings);
                 
                 // Merge PDFs to generated PDF
-                if (generateFile.Body.MergePdfs != null && generateFile.Body.MergePdfs.Where(p => !String.IsNullOrEmpty(p.WiserItemId)).ToArray().Length > 0)
+                if (pdfsToMerge.Count > 0)
                 {
                     // Make stream of byte array
                     using var stream = new MemoryStream(pdfFile.FileContents);
@@ -178,20 +201,18 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
                     var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
 
                     var documentsAdded = false;
-                    foreach (var pdf in generateFile.Body.MergePdfs)
+                    foreach (var pdf in pdfsToMerge)
                     {
-                        if (String.IsNullOrEmpty(pdf.WiserItemId))
+                        foreach (var propertyNameToReplace in pdf.Value)
                         {
-                            continue;
+                            var wiserItemFile = await wiserItemsService.GetItemFileAsync(Convert.ToUInt64(pdf.Key), "item_id", propertyNameToReplace);
+                            if (wiserItemFile == null)
+                            {
+                                continue;
+                            }
+                            mergeResultPdfDocument.AppendDocument(new Document(new MemoryStream(wiserItemFile.Content)));
+                            documentsAdded = true;   
                         }
-
-                        var wiserItemFile = await wiserItemsService.GetItemFileAsync(Convert.ToUInt64(pdf.WiserItemId), "item_id", pdf.PropertyName);
-                        if (wiserItemFile == null)
-                        {
-                            continue;
-                        }
-                        mergeResultPdfDocument.AppendDocument(new Document(new MemoryStream(wiserItemFile.Content)));
-                        documentsAdded = true;
                     }
 
                     if (documentsAdded)
