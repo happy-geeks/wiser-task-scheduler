@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Core.Services;
 using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json.Linq;
@@ -38,13 +40,23 @@ namespace WiserTaskScheduler.Modules.Body.Services
             foreach (var bodyPart in bodyModel.BodyParts)
             {
                 var body = bodyPart.Text;
+                
+                // If an item-id is set, get the template from the database.
+                if (bodyPart.WiserTemplateItemId > 0)
+                {
+                    // Create a scope to get the string wiserItems service. It's needed to get the template
+                    var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
+
+                    var template = wiserItemsService.GetItemDetailsAsync(bodyPart.WiserTemplateItemId, languageCode: bodyPart.LanguageCode, detailKey: bodyPart.PropertyName, skipPermissionsCheck: true);
+                    body = template.Result.GetDetailValue(bodyPart.PropertyName);
+                }
 
                 // If the part needs a result set, apply it.
                 if (!String.IsNullOrWhiteSpace(bodyPart.UseResultSet))
                 {
                     var keyParts = bodyPart.UseResultSet.Split('.');
                     var remainingKey = keyParts.Length > 1 ? bodyPart.UseResultSet.Substring(keyParts[0].Length + 1) : "";
-                    var tuple = ReplacementHelper.PrepareText(bodyPart.Text, (JObject)resultSets[keyParts[0]], remainingKey, hashSettings);
+                    var tuple = ReplacementHelper.PrepareText(body, (JObject)resultSets[keyParts[0]], remainingKey, hashSettings);
                     body = tuple.Item1;
                     var parameterKeys = tuple.Item2;
 

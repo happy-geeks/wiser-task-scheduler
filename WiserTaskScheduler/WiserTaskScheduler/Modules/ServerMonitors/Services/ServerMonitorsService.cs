@@ -65,7 +65,7 @@ namespace WiserTaskScheduler.Modules.ServerMonitors.Services
         {
             var monitorItem = (ServerMonitorModel)action;
             using var scope = serviceProvider.CreateScope();
-            using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+            await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
             await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
 

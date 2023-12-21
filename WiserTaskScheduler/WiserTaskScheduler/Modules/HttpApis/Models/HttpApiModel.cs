@@ -41,6 +41,12 @@ namespace WiserTaskScheduler.Modules.HttpApis.Models
         public bool IgnoreSSLValidationErrors { get; set; } = false;
 
         /// <summary>
+        /// If set will override the timeout value of the request with the default which is 100 seconds
+        /// value is in seconds
+        /// </summary>
+        public int Timeout { get; set; } = -1;
+
+        /// <summary>
         /// Gets or sets the property of a response from which the next URL is taken.
         /// </summary>
         public string NextUrlProperty { get; set; }

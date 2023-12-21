@@ -1,8 +1,12 @@
 ﻿using System;
+using System.Buffers.Text;
 using System.Collections.Generic;
+using System.Data;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Security.Cryptography.X509Certificates;
+using System.Threading;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Extensions;
@@ -28,6 +32,9 @@ namespace WiserTaskScheduler.Core.Services
         private readonly IServiceProvider serviceProvider;
 
         private OAuthConfigurationModel configuration;
+
+        // Semaphore is a locking system that can be used with async code.
+        private static readonly SemaphoreSlim OauthApiLock = new(1, 1);
 
         public OAuthService(IOptions<GclSettings> gclSettings, ILogService logService, ILogger<OAuthService> logger, IServiceProvider serviceProvider)
         {
@@ -75,42 +82,146 @@ namespace WiserTaskScheduler.Core.Services
             }
 
             // Check if a new access token needs to be requested and request it.
-            var result = await Task.Run(() =>
-            {
-                lock (oAuthApi)
-                {
-                    if (!String.IsNullOrWhiteSpace(oAuthApi.AccessToken) && oAuthApi.ExpireTime > DateTime.Now)
-                    {
-                        return OAuthState.CurrentToken;
-                    }
+            OAuthState result;
 
+            // Lock to prevent multiple requests at once.
+            await OauthApiLock.WaitAsync();
+
+            try
+            {
+                if (!String.IsNullOrWhiteSpace(oAuthApi.AccessToken) && oAuthApi.ExpireTime > DateTime.Now)
+                {
+                    result = OAuthState.CurrentToken;
+                }
+                else
+                {
                     var formData = new List<KeyValuePair<string, string>>();
 
                     // Setup correct authentication.
                     OAuthState failState;
                     if (String.IsNullOrWhiteSpace(oAuthApi.AccessToken) || String.IsNullOrWhiteSpace(oAuthApi.RefreshToken))
                     {
-                        logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using username and password.", LogName);
-
                         failState = OAuthState.FailedLogin;
-                        formData.Add(new KeyValuePair<string, string>("grant_type", "password"));
-                        formData.Add(new KeyValuePair<string, string>("username", oAuthApi.Username));
-                        formData.Add(new KeyValuePair<string, string>("password", oAuthApi.Password));
+
+                        if (oAuthApi.OAuthJwt == null)
+                        {
+                            switch (oAuthApi.GrantType)
+                            {
+                                case OAuthGrantType.AuthCode:
+                                    throw new NotImplementedException("OAuthGrantType.AuthCode is not supported yet");
+                                    break;
+
+                                case OAuthGrantType.AuthCodeWithPKCE:
+                                    throw new NotImplementedException(
+                                        "OAuthGrantType.AuthCodeWithPKCE is not supported yet");
+                                    break;
+
+                                case OAuthGrantType.Implicit:
+                                    throw new NotImplementedException("OAuthGrantType.Implicit is not supported yet");
+                                    break;
+
+                                case OAuthGrantType.PasswordCredentials:
+                                    await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings,
+                                        $"Requesting new access token for '{apiName}' using username and password.",
+                                        LogName);
+
+                                    formData.Add(new KeyValuePair<string, string>("grant_type", "password"));
+                                    formData.Add(new KeyValuePair<string, string>("username", oAuthApi.Username));
+                                    formData.Add(new KeyValuePair<string, string>("password", oAuthApi.Password));
+
+                                    break;
+
+                                case OAuthGrantType.ClientCredentials:
+                                    await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings,
+                                        $"Requesting new access token for '{apiName}' using client credentials.",
+                                        LogName);
+                                    
+                                    formData.Add(new KeyValuePair<string, string>("grant_type", "client_credentials"));
+
+                                    if (oAuthApi.SendClientCredentialsInBody)
+                                    {
+                                        formData.Add(new KeyValuePair<string, string>("client_id", oAuthApi.ClientId));
+                                        formData.Add(new KeyValuePair<string, string>("client_secret", oAuthApi.ClientSecret));
+                                    }
+                                    break;
+                            }
+                        }
                     }
                     else
                     {
-                        logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.", LogName);
+                        await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.", LogName);
 
                         failState = OAuthState.FailedRefreshToken;
-                        formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
-                        formData.Add(new KeyValuePair<string, string>("refresh_token", oAuthApi.RefreshToken));
+                        if (oAuthApi.OAuthJwt == null)
+                        {
+                            formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
+                            formData.Add(new KeyValuePair<string, string>("refresh_token", oAuthApi.RefreshToken));
+                        }
+                    }
+
+                    string jwtToken = null;
+                    if (oAuthApi.OAuthJwt != null)
+                    {
+                        var claims = new Dictionary<string, object>
+                        {
+                            { "exp", DateTimeOffset.Now.AddSeconds(oAuthApi.OAuthJwt.ExpirationTime).ToUnixTimeSeconds() },
+                            { "iss", oAuthApi.OAuthJwt.Issuer },
+                            { "sub", oAuthApi.OAuthJwt.Subject },
+                            { "aud", oAuthApi.OAuthJwt.Audience }
+                        };
+
+                        // Add the custom claims.
+                        foreach (var claim in oAuthApi.OAuthJwt.Claims)
+                        {
+                            // Ignore the reserved claims.
+                            if (claim.Name.InList("exp", "iss", "sub", "aud"))
+                            {
+                                continue;
+                            }
+
+                            // If a data type is specified, then try to convert the value to that type.
+                            Type type = null;
+                            if (!String.IsNullOrWhiteSpace(claim.DataType))
+                            {
+                                type = Type.GetType(claim.DataType, false, true) ?? Type.GetType($"System.{claim.DataType}", false, true);
+                            }
+
+                            if (type != null)
+                            {
+                                try
+                                {
+                                    claims[claim.Name] = Convert.ChangeType(claim.Value, type);
+                                }
+                                catch (Exception exception)
+                                {
+                                    // If the conversion fails, then log it and use the string value instead.
+                                    await logService.LogWarning(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to convert claim value to specified type. Using string instead. Exception: {exception}", LogName);
+                                    claims[claim.Name] = claim.Value;
+                                }
+                            }
+                            else
+                            {
+                                // No data type specified, so just use the string value.
+                                claims[claim.Name] = claim.Value;
+                            }
+                        }
+
+                        // Load the certificate and create the token.
+                        var certificate = new X509Certificate2(oAuthApi.OAuthJwt.CertificateLocation, oAuthApi.OAuthJwt.CertificatePassword);
+                        jwtToken = Jose.JWT.Encode(claims, certificate.GetRSAPrivateKey(), Jose.JwsAlgorithm.RS256);
                     }
 
                     if (oAuthApi.FormKeyValues != null)
                     {
                         foreach (var keyValue in oAuthApi.FormKeyValues)
                         {
-                            formData.Add(new KeyValuePair<string, string>(keyValue.Key, keyValue.Value));
+                            var value = keyValue.Value;
+                            if (value.Equals("[{jwt_token}]"))
+                            {
+                                value = jwtToken ?? String.Empty;
+                            }
+
+                            formData.Add(new KeyValuePair<string, string>(keyValue.Key, value));
                         }
                     }
 
@@ -118,42 +229,58 @@ namespace WiserTaskScheduler.Core.Services
                     {
                         Content = new FormUrlEncodedContent(formData)
                     };
+                    
                     request.Headers.Add("Accept", "application/json");
 
-                    using var client = new HttpClient();
-                    var response = client.Send(request);
+                    if (!oAuthApi.SendClientCredentialsInBody && oAuthApi.GrantType == OAuthGrantType.ClientCredentials)
+                    {
 
-                    using var reader = new StreamReader(response.Content.ReadAsStream());
-                    var json = reader.ReadToEnd();
+                        var authString = $"{oAuthApi.ClientId}:{oAuthApi.ClientSecret}";
+                        var plainTextBytes = System.Text.Encoding.UTF8.GetBytes(authString);
+                        request.Headers.Add("Authorization", "Basic " + System.Convert.ToBase64String(plainTextBytes));
+                    }
+
+                    using var client = new HttpClient();
+                    var response = await client.SendAsync(request);
+
+                    using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+                    var json = await reader.ReadToEndAsync();
 
                     if (!response.IsSuccessStatusCode)
                     {
-                        logService.LogError(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to get access token for {oAuthApi.ApiName}. Received: {response.StatusCode}\n{json}", LogName);
-                        return failState;
-                    }
-
-                    var body = JObject.Parse(json);
-
-                    oAuthApi.AccessToken = (string)body["access_token"];
-                    oAuthApi.TokenType = (string) body["token_type"];
-                    oAuthApi.RefreshToken = (string) body["refresh_token"];
-
-                    if (body["expires_in"].Type == JTokenType.Integer)
-                    {
-                        oAuthApi.ExpireTime = DateTime.Now.AddSeconds((int)body["expires_in"]);
+                        await logService.LogError(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to get access token for {oAuthApi.ApiName}. Received: {response.StatusCode}\n{json}", LogName);
+                        result = failState;
                     }
                     else
                     {
-                        oAuthApi.ExpireTime = DateTime.Now.AddSeconds(Convert.ToInt32((string)body["expires_in"]));
+                        var body = JObject.Parse(json);
+
+                        oAuthApi.AccessToken = (string) body["access_token"];
+                        oAuthApi.TokenType = (string) body["token_type"];
+                        oAuthApi.RefreshToken = (string) body["refresh_token"];
+
+                        if (body["expires_in"].Type == JTokenType.Integer)
+                        {
+                            oAuthApi.ExpireTime = DateTime.Now.AddSeconds((int) body["expires_in"]);
+                        }
+                        else
+                        {
+                            oAuthApi.ExpireTime = DateTime.Now.AddSeconds(Convert.ToInt32((string) body["expires_in"]));
+                        }
+
+                        oAuthApi.ExpireTime -= oAuthApi.ExpireTimeOffset;
+
+                        await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"A new access token has been retrieved for {oAuthApi.ApiName} and is valid till {oAuthApi.ExpireTime}", LogName);
+
+                        result = OAuthState.NewToken;
                     }
-
-                    oAuthApi.ExpireTime -= oAuthApi.ExpireTimeOffset;
-
-                    logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"A new access token has been retrieved for {oAuthApi.ApiName} and is valid till {oAuthApi.ExpireTime}", LogName);
-
-                    return OAuthState.NewToken;
                 }
-            });
+            }
+            finally
+            {
+                // Release the lock. This is in a finally to be 100% sure that it will always be released. Otherwise the application might freeze.
+                OauthApiLock.Release();
+            }
 
             if (result == OAuthState.FailedLogin)
             {

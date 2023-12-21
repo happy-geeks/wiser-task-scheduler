@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,27 +18,43 @@ namespace WiserTaskScheduler.Core.Services
         private const string LogName = "SlackChatService";
         
         private readonly IServiceProvider serviceProvider;
+        private readonly WtsSettings wtsSettings;
         private readonly SlackSettings slackSettings;
 
-        public SlackChatService(IServiceProvider serviceProvider, IOptions<WtsSettings> logSettings)
+        private ConcurrentDictionary<string, DateTime> sendMessages;
+
+        public SlackChatService(IServiceProvider serviceProvider, IOptions<WtsSettings> wtsSettings)
         {
             this.serviceProvider = serviceProvider;
-            this.slackSettings = logSettings.Value.SlackSettings;
+            this.wtsSettings = wtsSettings.Value;
+            slackSettings = wtsSettings.Value.SlackSettings;
+            sendMessages = new ConcurrentDictionary<string, DateTime>();
         }
 
 #if DEBUG
         /// <inheritdoc />
-        public async Task SendChannelMessageAsync(string message, string[] replies = null, string recipient = null)
+        public async Task SendChannelMessageAsync(string message, string[] replies = null, string recipient = null, string messageHash = null)
         {
             return;
             // Only send messages to Slack for production Wiser Task Schedulers to prevent exceptions during developing/testing to trigger it.
         }
 #else
         /// <inheritdoc />
-        public async Task SendChannelMessageAsync(string message, string[] replies = null, string recipient = null)
+        public async Task SendChannelMessageAsync(string message, string[] replies = null, string recipient = null, string messageHash = null)
         {
             if (slackSettings != null && !String.IsNullOrWhiteSpace(slackSettings.BotToken))
             {
+                // If a hash is provided and the message has been sent within the set interval time, don't send it again. 30 seconds are added as a buffer.
+                if (!String.IsNullOrWhiteSpace(messageHash))
+                {
+                    if (sendMessages.TryGetValue(messageHash, out var lastSendDate) && lastSendDate > DateTime.Now.AddMinutes(-wtsSettings.ErrorNotificationsIntervalInMinutes).AddSeconds(30))
+                    {
+                        return;
+                    }
+
+                    sendMessages.AddOrUpdate(messageHash, DateTime.Now, (key, oldValue) => DateTime.Now);
+                }
+                
                 Message slackMessage = new Message
                 {
                     Text = message,
@@ -55,7 +73,7 @@ namespace WiserTaskScheduler.Core.Services
                         Message replyMessage = new Message
                         {
                             Text = reply,
-                            Channel = recipient,
+                            Channel = recipient != null ? recipient : (slackSettings.Channel != null ? slackSettings.Channel : "" ),
                             ThreadTs = mainMessageSend.Ts
                         };
                         

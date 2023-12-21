@@ -48,6 +48,11 @@ namespace WiserTaskScheduler.Core.Models
         public string ServiceFailedNotificationEmails { get; set; }
         
         /// <summary>
+        /// The number of minutes to wait before sending the same error notification again.
+        /// </summary>
+        public int ErrorNotificationsIntervalInMinutes { get; set; } = 60;
+        
+        /// <summary>
         /// Gets or sets the credentials from the secrets app settings.
         /// </summary>
         public IReadOnlyDictionary<string, string> Credentials { get; set; }

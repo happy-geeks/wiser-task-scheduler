@@ -9,12 +9,16 @@ namespace WiserTaskScheduler.Modules.Wiser.Interfaces
     /// </summary>
     public interface IWiserService
     {
-        string AccessToken { get; }
-
         /// <summary>
         /// Make a request to the API to get all XML configurations.
         /// </summary>
         /// <returns></returns>
         Task<List<TemplateSettingsModel>> RequestConfigurations();
+
+        /// <summary>
+        /// Get the access token and gets a new token if none is available or if it has expired.
+        /// </summary>
+        /// <returns>The access token to authenticate with the Wiser API.</returns>
+        Task<string> GetAccessTokenAsync();
     }
 }

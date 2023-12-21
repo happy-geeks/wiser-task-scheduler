@@ -125,7 +125,11 @@ namespace WiserTaskScheduler.Core.Services
                 configuration.FtpGroup,
                 configuration.Ftps,
                 configuration.CleanupWiserHistoryGroup,
-                configuration.CleanupWiserHistories
+                configuration.CleanupWiserHistories,
+                configuration.GenerateCommunicationGroup,
+                configuration.GenerateCommunications,
+                configuration.DocumentStoreReadersGroup,
+                configuration.DocumentStoreReader
             };
 
             var allActions = new List<ActionModel>();
