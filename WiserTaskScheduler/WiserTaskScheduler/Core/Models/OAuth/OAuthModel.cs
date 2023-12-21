@@ -2,6 +2,7 @@
 using System.ComponentModel;
 using System.Xml;
 using System.Xml.Serialization;
+using WiserTaskScheduler.Core.Enums;
 
 namespace WiserTaskScheduler.Core.Models.OAuth
 {
@@ -17,16 +18,41 @@ namespace WiserTaskScheduler.Core.Models.OAuth
         /// Gets or sets the URL to the endpoint where the OAuth needs to be done.
         /// </summary>
         public string Endpoint { get; set; }
-
+        
+        /// <summary>
+        /// Gets or sets the GrantType used to receive the token
+        /// Currently only PasswordCredentials and ClientCredentials are supported
+        /// </summary>
+        public OAuthGrantType GrantType { get; set; } = OAuthGrantType.PasswordCredentials;
+        
+        /// <summary>
+        /// When using GrantType = ClientCredentials, either send the data in the body or as auth basic header(default)
+        /// </summary>
+        public bool SendClientCredentialsInBody { get; set; } = false;
+        
         /// <summary>
         /// Gets or sets the username to login with when no access token or refresh token is available.
+        /// This field is required when using PasswordCredentials type
         /// </summary>
         public string Username { get; set; }
 
         /// <summary>
         /// Gets or sets the password to login with when no access token or refresh token is available.
+        /// /// This field is required when using PasswordCredentials type
         /// </summary>
         public string Password { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the Client Id to login with when no access token or refresh token is available.
+        /// This field is required when using ClientCredentials type
+        /// </summary>
+        public string ClientId { get; set; }
+
+        /// <summary>
+        /// Gets or sets the Client Secret to login with when no access token or refresh token is available.
+        /// /// This field is required when using ClientCredentials type
+        /// </summary>
+        public string ClientSecret { get; set; }
 
         /// <summary>
         /// Gets or sets the offset from the expire time.
@@ -57,6 +83,12 @@ namespace WiserTaskScheduler.Core.Models.OAuth
         [XmlArray("FormKeyValues")]
         [XmlArrayItem(typeof(FormKeyValueModel))]
         public FormKeyValueModel[] FormKeyValues { get; set; }
+
+        /// <summary>
+        /// Gets or sets the JWT settings for the OAuth payload.
+        /// </summary>
+        [XmlElement("Jwt")]
+        public OAuthJwtModel OAuthJwt { get; set; }
 
         /// <summary>
         /// Gets or sets the access token.

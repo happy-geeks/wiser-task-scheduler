@@ -14,6 +14,21 @@ namespace WiserTaskScheduler.Modules.Body.Models
         /// </summary>
         [Required]
         public string Text { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the item-id of the used template
+        /// </summary>
+        public ulong WiserTemplateItemId { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the item-id of the used template
+        /// </summary>
+        public string LanguageCode { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the item-id of the used template
+        /// </summary>
+        public string PropertyName { get; set; }
 
         /// <summary>
         /// Gets or sets if the body part is added once or for each row in the result set.

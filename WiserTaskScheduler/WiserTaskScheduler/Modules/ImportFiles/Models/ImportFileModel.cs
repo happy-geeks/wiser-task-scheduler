@@ -1,5 +1,6 @@
 ﻿using System.Xml.Serialization;
 using WiserTaskScheduler.Core.Models;
+using WiserTaskScheduler.Modules.ImportFiles.Enums;
 
 namespace WiserTaskScheduler.Modules.ImportFiles.Models
 {
@@ -10,6 +11,11 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Models
         /// Gets or sets the full path to the file.
         /// </summary>
         public string FilePath { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the file type to be imported.
+        /// </summary>
+        public FileTypes FileType { get; set; } = FileTypes.CSV;
 
         /// <summary>
         /// Gets or sets the separator to split a line on.

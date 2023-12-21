@@ -26,5 +26,20 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Models
         /// Gets or sets the body to save in the file.
         /// </summary>
         public BodyModel Body { get; set; }
+        
+        /// <summary>
+        /// Item ID when generated file must be saved to wiser_itemfile table
+        /// </summary>
+        public string ItemId { get; set; }
+
+        /// <summary>
+        /// Item Link ID when generated file must be saved to wiser_itemfile table
+        /// </summary>
+        public string ItemLinkId { get; set; }
+
+        /// <summary>
+        /// Property name when generated file must be saved to wiser_itemfile table
+        /// </summary>
+        public string PropertyName { get; set; }
     }
 }

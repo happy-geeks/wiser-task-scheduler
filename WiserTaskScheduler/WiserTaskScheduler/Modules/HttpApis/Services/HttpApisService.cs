@@ -202,6 +202,11 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
 
             using var client = new HttpClient(httpHandler);
 
+            if (httpApi.Timeout >= 0)
+            {
+                client.Timeout = TimeSpan.FromSeconds(httpApi.Timeout);
+            }
+            
             using var response = await client.SendAsync(request);
 
             // If the request was unauthorized retry the request if it has an OAuth API name set and it hasn't retried before.

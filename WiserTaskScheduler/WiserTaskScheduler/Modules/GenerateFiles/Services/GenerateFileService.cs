@@ -1,9 +1,21 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Net;
+using System.Text;
 using System.Threading.Tasks;
+using EvoPdf;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Interfaces;
+using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Core.Services;
+using GeeksCoreLibrary.Modules.GclConverters.Models;
+using GeeksCoreLibrary.Modules.ItemFiles;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Helpers;
@@ -23,6 +35,8 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
         private readonly IBodyService bodyService;
         private readonly ILogService logService;
         private readonly ILogger<GenerateFileService> logger;
+        private readonly IServiceProvider serviceProvider;
+        private readonly GclSettings gclSettings;
 
         /// <summary>
         /// Create a new instance of <see cref="GenerateFileService"/>.
@@ -30,11 +44,15 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
         /// <param name="bodyService"></param>
         /// <param name="logService"></param>
         /// <param name="logger"></param>
-        public GenerateFileService(IBodyService bodyService, ILogService logService, ILogger<GenerateFileService> logger)
+        /// <param name="serviceProvider"></param>
+        /// <param name="gclSettings"></param>
+        public GenerateFileService(IBodyService bodyService, ILogService logService, ILogger<GenerateFileService> logger, IServiceProvider serviceProvider, IOptions<GclSettings> gclSettings)
         {
             this.bodyService = bodyService;
             this.logService = logService;
             this.logger = logger;
+            this.serviceProvider = serviceProvider;
+            this.gclSettings = gclSettings.Value;
         }
 
         /// <inheritdoc />
@@ -90,7 +108,10 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
         {
             var fileLocation = generateFile.FileLocation;
             var fileName = generateFile.FileName;
-
+            var itemId = generateFile.ItemId;
+            var itemLinkId = generateFile.ItemLinkId;
+            var propertyName = generateFile.PropertyName;
+            
             // Replace the file location and name if a result set is used.
             if (!String.IsNullOrWhiteSpace(useResultSet))
             {
@@ -100,33 +121,138 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
 
                 var fileLocationTuple = ReplacementHelper.PrepareText(fileLocation, usingResultSet, remainingKey, generateFile.HashSettings);
                 var fileNameTuple = ReplacementHelper.PrepareText(fileName, usingResultSet, remainingKey, generateFile.HashSettings);
+                var itemIdTuple = ReplacementHelper.PrepareText(itemId, usingResultSet, remainingKey, generateFile.HashSettings);
+                var itemLinkIdTuple = ReplacementHelper.PrepareText(itemLinkId, usingResultSet, remainingKey, generateFile.HashSettings);
+                var propertyNameTuple = ReplacementHelper.PrepareText(propertyName, usingResultSet, remainingKey, generateFile.HashSettings);
 
                 fileLocation = ReplacementHelper.ReplaceText(fileLocationTuple.Item1, rows, fileLocationTuple.Item2, usingResultSet, generateFile.HashSettings);
                 fileName = ReplacementHelper.ReplaceText(fileNameTuple.Item1, rows, fileNameTuple.Item2, usingResultSet, generateFile.HashSettings);
+                itemId =  ReplacementHelper.ReplaceText(itemIdTuple.Item1, rows, itemIdTuple.Item2, usingResultSet, generateFile.HashSettings);
+                itemLinkId =  ReplacementHelper.ReplaceText(itemLinkIdTuple.Item1, rows, itemLinkIdTuple.Item2, usingResultSet, generateFile.HashSettings);
+                propertyName =  ReplacementHelper.ReplaceText(propertyNameTuple.Item1, rows, propertyNameTuple.Item2, usingResultSet, generateFile.HashSettings);
+
+                // Replace variables in the merge PDFs section and save the replaced data to the properties
+                if (generateFile.Body.MergePdfs != null)
+                {
+                    foreach (var pdf in generateFile.Body.MergePdfs)
+                    {
+                        var pdfWiserItemIdTuple = ReplacementHelper.PrepareText(pdf.WiserItemId, usingResultSet, remainingKey, generateFile.HashSettings);
+                        pdf.WiserItemId = ReplacementHelper.ReplaceText(pdfWiserItemIdTuple.Item1, rows, pdfWiserItemIdTuple.Item2, usingResultSet, generateFile.HashSettings);
+                    }
+                }
             }
 
-            await logService.LogInformation(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"Generating file '{fileName}' at '{fileLocation}'.", configurationServiceName, generateFile.TimeId, generateFile.Order);
-
+            var logLocation = !String.IsNullOrEmpty(fileLocation) ? $"'{fileLocation}'" : $"wiser_itemfile property '{propertyName}', item_id '{itemId}', itemlink_id '{itemLinkId}'";
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"Generating file '{fileName}' at {logLocation}.", configurationServiceName, generateFile.TimeId, generateFile.Order);
             var body = bodyService.GenerateBody(generateFile.Body, rows, resultSets, generateFile.HashSettings, forcedIndex);
+            FileContentResult pdfFile = null;
+            
+            // Generate PDF if needed
+            if (generateFile.Body.GeneratePdf)
+            {
+                using var scope = serviceProvider.CreateScope();
+                var htmlToPdfConverterService = scope.ServiceProvider.GetRequiredService<GeeksCoreLibrary.Modules.GclConverters.Interfaces.IHtmlToPdfConverterService>();
+                var pdfSettings = new HtmlToPdfRequestModel
+                {
+                    Html = body
+                };
+                pdfFile = await htmlToPdfConverterService.ConvertHtmlStringToPdfAsync(pdfSettings);
+                
+                // Merge PDFs to generated PDF
+                if (generateFile.Body.MergePdfs != null && generateFile.Body.MergePdfs.Where(p => !String.IsNullOrEmpty(p.WiserItemId)).ToArray().Length > 0)
+                {
+                    // Make stream of byte array
+                    using var stream = new MemoryStream(pdfFile.FileContents);
+
+                    //  Create the merge result PDF document
+                    var mergeResultPdfDocument = new Document(stream);    
+                        
+                    // Automatically close the merged documents when the document resulted after merge is closed
+                    mergeResultPdfDocument.AutoCloseAppendedDocs = true;
+
+                    // Set license key received after purchase to use the converter in licensed mode
+                    // Leave it not set to use the converter in demo mode
+                    mergeResultPdfDocument.LicenseKey = gclSettings.EvoPdfLicenseKey;
+                    
+                    // Get WiserItemsService. It's needed to get the template.
+                    var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
+
+                    var documentsAdded = false;
+                    foreach (var pdf in generateFile.Body.MergePdfs)
+                    {
+                        if (String.IsNullOrEmpty(pdf.WiserItemId))
+                        {
+                            continue;
+                        }
+
+                        var wiserItemFile = await wiserItemsService.GetItemFileAsync(Convert.ToUInt64(pdf.WiserItemId), "item_id", pdf.PropertyName);
+                        if (wiserItemFile == null)
+                        {
+                            continue;
+                        }
+                        mergeResultPdfDocument.AppendDocument(new Document(new MemoryStream(wiserItemFile.Content)));
+                        documentsAdded = true;
+                    }
+
+                    if (documentsAdded)
+                    {
+                        using var saveStream = new MemoryStream();
+                        mergeResultPdfDocument.Save(saveStream);
+                        pdfFile.FileContents = saveStream.ToArray();    
+                    }
+                }
+            }
 
             var fileGenerated = false;
             try
             {
-                Directory.CreateDirectory(fileLocation);
-                await File.WriteAllTextAsync(Path.Combine(fileLocation, fileName), body);
+                if (!String.IsNullOrEmpty(fileLocation)) // Save to file location on disk
+                {
+                    Directory.CreateDirectory(fileLocation);
+                    if (pdfFile == null)
+                    {
+                        await File.WriteAllTextAsync(Path.Combine(fileLocation, fileName), body);
+                    }
+                    else
+                    {
+                        await File.WriteAllBytesAsync(Path.Combine(fileLocation, fileName), pdfFile.FileContents);
+                    }
+                }
+                else // Save to wiser_itemfile table in database
+                {
+                    var itemFile = new WiserItemFileModel
+                    {
+                        ItemId = Convert.ToUInt64(String.IsNullOrEmpty(itemId) ? "0" : itemId),
+                        ItemLinkId = Convert.ToUInt64(String.IsNullOrEmpty(itemLinkId) ? "0" : itemLinkId),
+                        PropertyName = propertyName,
+                        FileName = fileName,
+                        Content = (pdfFile == null) ? Encoding.UTF8.GetBytes(body) : pdfFile.FileContents,
+                        ContentType = generateFile.Body.ContentType,
+                        AddedOn = DateTime.UtcNow,
+                        AddedBy = "WiserTaskScheduler"
+                    };
+                    
+                    using var scope = serviceProvider.CreateScope();
+                    var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
+                    await wiserItemsService.AddItemFileAsync(itemFile, "WiserTaskScheduler", skipPermissionsCheck: true);
+                }
+                
                 fileGenerated = true;
-                await logService.LogInformation(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"File '{fileName}' generated at '{fileLocation}'.", configurationServiceName, generateFile.TimeId, generateFile.Order);
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"File '{fileName}' generated at {logLocation}.", configurationServiceName, generateFile.TimeId, generateFile.Order);
             }
             catch (Exception e)
             {
-                await logService.LogError(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"Failed to generate file '{fileName}' at '{fileLocation}'.\n{e}", configurationServiceName, generateFile.TimeId, generateFile.Order);
+                await logService.LogError(logger, LogScopes.RunStartAndStop, generateFile.LogSettings, $"Failed to generate file '{fileName}' at {logLocation}.\n{e}", configurationServiceName, generateFile.TimeId, generateFile.Order);
             }
             
             return new JObject()
             {
                 {"FileName", fileName},
                 {"FileLocation", fileLocation},
-                {"Success", fileGenerated}
+                {"Success", fileGenerated},
+                {"ItemId", itemId},
+                {"ItemLinkId", itemLinkId},
+                {"PropertyName", propertyName}
             };
         }
     }

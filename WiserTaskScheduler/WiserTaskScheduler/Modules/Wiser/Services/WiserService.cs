@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Enums;
@@ -32,7 +33,8 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
         private DateTime accessTokenExpireTime;
         private string refreshToken;
 
-        public string AccessToken => GetAccessToken();
+        // Semaphore is a locking system that can be used with async code.
+        private static readonly SemaphoreSlim AccessTokenLock = new(1, 1);
 
         public WiserService(IOptions<WtsSettings> wtsSettings, ILogService logService, ILogger<WiserService> logger)
         {
@@ -46,41 +48,45 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
             refreshToken = "";
         }
 
-        /// <summary>
-        /// Get the access token and gets a new token if none is available or if it has expired.
-        /// </summary>
-        /// <returns></returns>
-        private string GetAccessToken()
+        /// <inheritdoc />
+        public async Task<string> GetAccessTokenAsync()
         {
             // Lock to prevent multiple requests at once.
-            lock (accessToken)
+            await AccessTokenLock.WaitAsync();
+
+            try
             {
                 if (String.IsNullOrWhiteSpace(accessToken))
                 {
-                    Login();
+                    await LoginAsync();
                 }
                 else if (accessTokenExpireTime <= DateTime.Now)
                 {
                     if (String.IsNullOrWhiteSpace(refreshToken))
                     {
-                        Login();
+                        await LoginAsync();
                     }
                     else
                     {
-                        Login(true);
+                        await LoginAsync(true);
                     }
                 }
 
                 return accessToken;
+            }
+            finally
+            {
+                // Release the lock. This is in a finally to be 100% sure that it will always be released. Otherwise the application might freeze.
+                AccessTokenLock.Release();
             }
         }
 
         /// <summary>
         /// DO NOT CALL THIS BY YOURSELF!
         /// Login to the Wiser API.
-        /// This method is called when using <see cref="AccessToken"/> or <see cref="GetAccessToken"/> with a lock.
+        /// This method is called when using <see cref="AccessToken"/> or <see cref="GetAccessTokenAsync"/> with a lock.
         /// </summary>
-        private void Login(bool useRefreshToken = false)
+        private async Task LoginAsync(bool useRefreshToken = false)
         {
             var formData = new List<KeyValuePair<string, string>>()
             {
@@ -107,22 +113,22 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
                 Content = new FormUrlEncodedContent(formData)
             };
             request.Headers.Add("Accept", "application/json");
-            
-            logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"URL: {request.RequestUri}\nHeaders: {request.Headers}\nBody: {String.Join(' ', formData)}", "WiserService");
-            
+
+            await logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"URL: {request.RequestUri}\nHeaders: {request.Headers}\nBody: {String.Join(' ', formData)}", "WiserService");
+
             using var client = new HttpClient();
             try
             {
-                var response = client.Send(request);
+                var response = await client.SendAsync(request);
                 if (response.StatusCode != HttpStatusCode.OK)
                 {
-                    logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to login to the Wiser API.", "WiserService");
+                    await logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to login to the Wiser API.", "WiserService");
                     return;
                 }
 
-                using var reader = new StreamReader(response.Content.ReadAsStream());
-                var body = reader.ReadToEnd();
-                logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"Response body: {body}", "WiserService");
+                using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+                var body = await reader.ReadToEndAsync();
+                await logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"Response body: {body}", "WiserService");
                 var wiserLoginResponse = JsonConvert.DeserializeObject<WiserLoginResponseModel>(body);
 
                 accessToken = wiserLoginResponse.AccessToken;
@@ -131,66 +137,62 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
             }
             catch (Exception e)
             {
-                logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to login to the Wiser API.\n{e}", "WiserService");
+                await logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to login to the Wiser API.\n{e}", "WiserService");
             }
         }
 
         /// <inheritdoc />
         public async Task<List<TemplateSettingsModel>> RequestConfigurations()
         {
-            // Lock cannot be used inside an async function. This way we can wait till the request has completed.
-            return await Task.Run(() =>
-            {  
 #if DEBUG
-                var environment = Environments.Development;
+            var environment = Environments.Development;
 #else
-                var environment = Environments.Live;
+            var environment = Environments.Live;
 #endif
-                
-                var configurationPaths = String.IsNullOrWhiteSpace(wiserSettings.ConfigurationPath) ? new[] { "" } : wiserSettings.ConfigurationPath.Split(";");
-                using var client = new HttpClient();
-                
-                var configurations = new List<TemplateSettingsModel>();
-                
-                foreach (var configurationPath in configurationPaths)
+
+            var configurationPaths = String.IsNullOrWhiteSpace(wiserSettings.ConfigurationPath) ? new[] { "" } : wiserSettings.ConfigurationPath.Split(";");
+            using var client = new HttpClient();
+
+            var configurations = new List<TemplateSettingsModel>();
+
+            foreach (var configurationPath in configurationPaths)
+            {
+                try
                 {
-                    try
+                    var request = new HttpRequestMessage(HttpMethod.Get, $"{wiserSettings.WiserApiUrl}api/v3/templates/entire-tree-view?startFrom=SERVICES{(String.IsNullOrWhiteSpace(configurationPath) ? "" : $",{configurationPath}")}&environment={environment}");
+                    request.Headers.Add("Authorization", $"Bearer {await GetAccessTokenAsync()}");
+
+                    var response = await client.SendAsync(request);
+
+                    if (response.StatusCode != HttpStatusCode.OK)
                     {
-                        var request = new HttpRequestMessage(HttpMethod.Get, $"{wiserSettings.WiserApiUrl}api/v3/templates/entire-tree-view?startFrom=SERVICES{(String.IsNullOrWhiteSpace(configurationPath) ? "" : $",{configurationPath}")}&environment={environment}");
-                        request.Headers.Add("Authorization", $"Bearer {AccessToken}");
-
-                        var response = client.Send(request);
-
-                        if (response.StatusCode != HttpStatusCode.OK)
-                        {
-                            logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configurations from the Wiser API.", "WiserService");
-                            return null;
-                        }
-
-                        using var reader = new StreamReader(response.Content.ReadAsStream());
-                        var body = reader.ReadToEnd();
-                        
-                        // The call to wiser configuration responds with an html document when Wiser is updating
-                        // We check for both html tag and doctype so this document is more free to change
-                        if (body.StartsWith("<html", StringComparison.InvariantCultureIgnoreCase) || body.StartsWith("<!DOCTYPE html", StringComparison.InvariantCultureIgnoreCase))
-                        {
-                            logService.LogInformation(logger, LogScopes.RunStartAndStop, logSettings, "Unable to get configuration due to Wiser update.", "WiserService");
-                            return null;
-                        }
-                        
-                        var templateTrees = JsonConvert.DeserializeObject<List<TemplateTreeViewModel>>(body);
-
-                        configurations.AddRange(FlattenTree(templateTrees));
-                    }
-                    catch (Exception e)
-                    {
-                        logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.\n{e}", "WiserService");
+                        await logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configurations from the Wiser API.", "WiserService");
                         return null;
                     }
-                }
 
-                return configurations;
-            });
+                    using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+                    var body = await reader.ReadToEndAsync();
+
+                    // The call to wiser configuration responds with an html document when Wiser is updating
+                    // We check for both html tag and doctype so this document is more free to change
+                    if (body.StartsWith("<html", StringComparison.InvariantCultureIgnoreCase) || body.StartsWith("<!DOCTYPE html", StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        await logService.LogInformation(logger, LogScopes.RunStartAndStop, logSettings, "Unable to get configuration due to Wiser update.", "WiserService");
+                        return null;
+                    }
+
+                    var templateTrees = JsonConvert.DeserializeObject<List<TemplateTreeViewModel>>(body);
+
+                    configurations.AddRange(FlattenTree(templateTrees));
+                }
+                catch (Exception e)
+                {
+                    await logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.\n{e}", "WiserService");
+                    return null;
+                }
+            }
+
+            return configurations;
         }
 
         private List<TemplateSettingsModel> FlattenTree(List<TemplateTreeViewModel> templateTrees)

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -47,6 +48,7 @@ namespace WiserTaskScheduler.Core.Services
             
             await CleanupFilesAsync();
             await CleanupDatabaseLogsAsync(databaseConnection, databaseHelpersService);
+            await CleanupDatabaseRenderTimesAsync(databaseConnection, databaseHelpersService);
         }
 
         /// <summary>
@@ -98,6 +100,8 @@ namespace WiserTaskScheduler.Core.Services
         /// <summary>
         /// Cleanup logs in the database older than the set number of days in the WTS logs.
         /// </summary>
+        /// <param name="databaseConnection">The database connection to use.</param>
+        /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
         private async Task CleanupDatabaseLogsAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
         {
             databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStore));
@@ -107,6 +111,36 @@ namespace WiserTaskScheduler.Core.Services
             if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
             {
                 await databaseHelpersService.OptimizeTablesAsync(WiserTableNames.WtsLogs);
+            }
+        }
+
+        /// <summary>
+        /// Cleanup render times in the database older than the set number of days.
+        /// </summary>
+        /// <param name="databaseConnection">The database connection to use.</param>
+        /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
+        private async Task CleanupDatabaseRenderTimesAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
+        {
+            databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStoreRenderTimes));
+            var optimizeRenderLogTables = new List<string>();
+
+            if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserTemplateRenderLog))
+            {
+                var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserTemplateRenderLog} WHERE end < ?cleanupDate", cleanUp: true);
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserTemplateRenderLog}'.", LogName);
+                optimizeRenderLogTables.Add(WiserTableNames.WiserTemplateRenderLog);
+            }
+
+            if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserDynamicContentRenderLog))
+            {
+                var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserDynamicContentRenderLog} WHERE end < ?cleanupDate", cleanUp: true);
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserDynamicContentRenderLog}'.", LogName);
+                optimizeRenderLogTables.Add(WiserTableNames.WiserDynamicContentRenderLog);
+            }
+
+            if (cleanupServiceSettings.OptimizeRenderTimesTableAfterCleanup && optimizeRenderLogTables.Any())
+            {
+                await databaseHelpersService.OptimizeTablesAsync(optimizeRenderLogTables.ToArray());
             }
         }
     }
