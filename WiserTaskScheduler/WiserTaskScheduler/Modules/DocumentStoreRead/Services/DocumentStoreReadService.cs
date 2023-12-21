@@ -102,6 +102,12 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
                 {
                     continue;
                 }
+
+                if (documentStoreReadItem.PublishedEnvironmentToSet != null)
+                {
+                    item.model.PublishedEnvironment = (Environments)documentStoreReadItem.PublishedEnvironmentToSet;
+                }
+                
                 await wiserItemsService.SaveAsync(item.model, username: documentStoreReadItem.UsernameForLogging, storeTypeOverride: StoreType.Table, userId: documentStoreReadItem.UserId);
                 await documentStorageService.DeleteItemAsync(item.documentId, entitySettings);
             }

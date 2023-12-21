@@ -32,7 +32,11 @@ namespace WiserTaskScheduler.Core.Helpers
         /// <returns></returns>
         public static Tuple<string, List<ParameterKeyModel>, List<KeyValuePair<string, string>>> PrepareText(string originalString, JObject usingResultSet, string remainingKey, HashSettingsModel hashSettings, bool insertValues = true, bool htmlEncode = false)
         {
-            var result = originalString;
+            var result = "";
+            if (!String.IsNullOrEmpty(originalString))
+            {
+                result = originalString;
+            }
             var parameterKeys = new List<ParameterKeyModel>();
             var insertedParameters = new List<KeyValuePair<string, string>>();
 

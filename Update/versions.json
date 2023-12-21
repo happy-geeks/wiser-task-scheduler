@@ -2,6 +2,34 @@
   {
     "Major": 1,
     "Minor": 3,
+    "Build": 6,
+    "Revision": 0,
+    "ContainsBreakingChanges": false
+  },
+  {
+    "Major": 1,
+    "Minor": 3,
+    "Build": 5,
+    "Revision": 0,
+    "ContainsBreakingChanges": false
+  },
+  {
+    "Major": 1,
+    "Minor": 3,
+    "Build": 4,
+    "Revision": 0,
+    "ContainsBreakingChanges": false
+  },
+  {
+    "Major": 1,
+    "Minor": 3,
+    "Build": 3,
+    "Revision": 0,
+    "ContainsBreakingChanges": false
+  },
+  {
+    "Major": 1,
+    "Minor": 3,
     "Build": 2,
     "Revision": 0,
     "ContainsBreakingChanges": false

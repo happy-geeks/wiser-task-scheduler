@@ -188,12 +188,30 @@ ORDER BY start_on ASC, id ASC");
                 connectionStringBuilder.Database = branchDatabase;
 
                 // Get all tables that don't start with an underscore (wiser tables never start with an underscore and we often use that for temporary or backup tables).
-                var query = @"SELECT TABLE_NAME 
-FROM INFORMATION_SCHEMA.TABLES
-WHERE TABLE_SCHEMA = ?currentSchema
-AND TABLE_TYPE = 'BASE TABLE'
-AND TABLE_NAME NOT LIKE '\_%'
-ORDER BY TABLE_NAME ASC";
+                // Handle the wiser_itemfile tables as last to ensure all other tables are copied first.
+                var query = @$"SELECT *
+FROM (
+    SELECT TABLE_NAME 
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = ?currentSchema
+    AND TABLE_TYPE = 'BASE TABLE'
+    AND TABLE_NAME NOT LIKE '\_%'
+    AND TABLE_NAME NOT LIKE '%{WiserTableNames.WiserItemFile}%'
+    ORDER BY TABLE_NAME ASC
+) AS x
+
+UNION ALL
+
+SELECT *
+FROM (
+    SELECT TABLE_NAME 
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = ?currentSchema
+    AND TABLE_TYPE = 'BASE TABLE'
+    AND TABLE_NAME NOT LIKE '\_%'
+    AND TABLE_NAME LIKE '%{WiserTableNames.WiserItemFile}%'
+    ORDER BY TABLE_NAME ASC
+) AS x";
 
                 databaseConnection.AddParameter("currentSchema", originalDatabase);
                 databaseConnection.AddParameter("newSchema", branchDatabase);
@@ -226,12 +244,11 @@ ORDER BY TABLE_NAME ASC";
                             var tableName = dataRow.Field<string>("TABLE_NAME");
 
                             // Check if the structure of the table is excluded from the creation of the branch.
-                            if (branchQueue.CopyTableRules.Any(t => t.CopyType == CopyTypes.Nothing && (
-                                                                (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
-                                                                || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName.Substring(1), StringComparison.OrdinalIgnoreCase))
-                                                                || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName.Substring(0, t.TableName.Length - 1), StringComparison.OrdinalIgnoreCase))
-                                                                || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase)
-                                                            )))
+                            if (branchQueue.CopyTableRules != null && branchQueue.CopyTableRules.Any(t => t.CopyType == CopyTypes.Nothing && (
+                                                                                                         (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
+                                                                                                         || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName[1..], StringComparison.OrdinalIgnoreCase))
+                                                                                                         || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName[..^1], StringComparison.OrdinalIgnoreCase))
+                                                                                                         || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase))))
                             {
                                 continue;
                             }
@@ -438,7 +455,7 @@ JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id
 
                     if (tableName!.EndsWith(WiserTableNames.WiserItemFile, StringComparison.OrdinalIgnoreCase))
                     {
-                        // We order tables by table name, this means wiser_item always comes before wiser_itemfile.
+                        // The wiser_itemfile tables are handled last, this means wiser_item and wiser_itemlink always comes before wiser_itemfile.
                         // So we can be sure that we already copied the items to the new branch and we can use the IDs of those items to copy the details of those items.
                         // This way, we don't need to create the entire WHERE statement again based on the entity settings, like we did above for wiser_item.
                         var prefix = tableName.Replace(WiserTableNames.WiserItemFile, "");
@@ -448,6 +465,33 @@ JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id
                             await databaseConnection.ExecuteAsync($@"INSERT INTO `{branchDatabase}`.`{tableName}` 
 SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
 JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = file.item_id");
+                            
+                            // Copy all files that are on the links that are copied to the new branch from the given (prefixed) table.
+                            var entityTypesInTable = await databaseConnection.GetAsync($"SELECT DISTINCT entity_type FROM {prefix}{WiserTableNames.WiserItem} WHERE entity_type <> ''");
+                            if (entityTypesInTable.Rows.Count > 0)
+                            {
+                                var processedLinkTypes = new List<string>();
+                                foreach (var entityType in entityTypesInTable.Rows.Cast<DataRow>().Select(x => x.Field<string>("entity_type")))
+                                {
+                                    // Get all link types that are connected to the entity type being processed.
+                                    var linkTypes = allLinkTypes.Where(t => String.Equals(t.SourceEntityType, entityType, StringComparison.OrdinalIgnoreCase)).ToList();
+                                    foreach (var linkType in linkTypes)
+                                    {
+                                        // Check if the prefix already has been processed from the current (prefixed) table.
+                                        var linkPrefix = await wiserItemsService.GetTablePrefixForLinkAsync(linkType.Type, entityType);
+                                        if (processedLinkTypes.Contains(linkPrefix))
+                                        {
+                                            continue;
+                                        }
+                                        
+                                        await databaseConnection.ExecuteAsync($@"INSERT IGNORE INTO `{branchDatabase}`.`{tableName}`
+SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
+JOIN `{branchDatabase}`.`{linkPrefix}{WiserTableNames.WiserItemLink}` AS link ON link.id = file.itemlink_id");
+
+                                        processedLinkTypes.Add(linkPrefix);
+                                    }
+                                }
+                            }
                         }
 
                         continue;
@@ -463,11 +507,10 @@ JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id
                     }
 
                     // Don't copy data from tables that have specific rules. Either the table needs to stay empty or it does not exist in the new branch.
-                    if (branchQueue.CopyTableRules.Any(t => (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
-                                                       || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName.Substring(1), StringComparison.OrdinalIgnoreCase))
-                                                       || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName.Substring(0, t.TableName.Length - 1), StringComparison.OrdinalIgnoreCase))
-                                                       || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase)
-                                                   ))
+                    if (branchQueue.CopyTableRules != null && branchQueue.CopyTableRules.Any(t => (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
+                                                                                                  || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName[1..], StringComparison.OrdinalIgnoreCase))
+                                                                                                  || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName[..^1], StringComparison.OrdinalIgnoreCase))
+                                                                                                  || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase)))
                     {
                         continue;
                     }
@@ -538,8 +581,8 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                             var subDataTable = await databaseConnection.GetAsync(query);
                             query = subDataTable.Rows[0].Field<string>(2);
 
-                            // Replace the definer with the current user, so that the stored procedure can be created by the current user.
-                            query = query.Replace($" DEFINER=`{definerParts[0]}`@`{definerParts[1]}`", " DEFINER=CURRENT_USER");
+                            // Set the names and collation from the original and replace the definer with the current user, so that the stored procedure can be created by the current user.
+                            query = $"SET NAMES {subDataTable.Rows[0].Field<string>(3)} COLLATE {subDataTable.Rows[0].Field<string>(4)}; {query.Replace($" DEFINER=`{definerParts[0]}`@`{definerParts[1]}`", " DEFINER=CURRENT_USER")}";
                             command.CommandText = query;
                             await command.ExecuteNonQueryAsync();
                         }
@@ -1374,6 +1417,13 @@ ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), lo
                                     continue;
                                 }
 
+                                if (idMapping.TryGetValue(tableName, out var mapping) && mapping.ContainsKey(originalObjectId))
+                                {
+                                    // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
+                                    historyItemsSynchronised.Add(historyId);
+                                    continue;
+                                }
+
                                 // oldValue contains either "item_id" or "itemlink_id", to indicate which of these columns is used for the ID that is saved in newValue.
                                 var newFileId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection);
                                 sqlParameters["fileItemId"] = newValue;
@@ -1667,8 +1717,6 @@ WHERE `id` = ?id";
                         environmentCommand.CommandText = $"DELETE FROM `{WiserTableNames.WiserHistory}` WHERE id IN ({String.Join(",", historyItemsSynchronised)})";
                         await environmentCommand.ExecuteNonQueryAsync();
                     }
-
-                    await EqualizeMappedIdsAsync(branchConnection, wiserItemsService, branchQueue, configurationServiceName);
                 }
                 catch (Exception exception)
                 {
@@ -2066,164 +2114,6 @@ VALUES (?tableName, ?ourId, ?productionId)";
             environmentCommand.Parameters.AddWithValue("ourId", originalItemId);
             environmentCommand.Parameters.AddWithValue("productionId", newItemId);
             await environmentCommand.ExecuteNonQueryAsync();
-        }
-
-        /// <summary>
-        /// This will update IDs of items/files/etc in the selected environment so that they all will have the same ID as in the production environment.
-        /// </summary>
-        /// <param name="environmentConnection">The database connection to the selected environment.</param>
-        private async Task EqualizeMappedIdsAsync(MySqlConnection environmentConnection, IWiserItemsService wiserItemsService, BranchQueueModel branchQueue, string configurationServiceName)
-        {
-            await using var command = environmentConnection.CreateCommand();
-            command.CommandText = $@"SELECT * FROM `{WiserTableNames.WiserIdMappings}` ORDER BY id DESC";
-            var dataTable = new DataTable();
-            using var adapter = new MySqlDataAdapter(command);
-            await adapter.FillAsync(dataTable);
-
-            foreach (DataRow dataRow in dataTable.Rows)
-            {
-                var mappingRowId = dataRow.Field<ulong>("id");
-                var tableName = dataRow.Field<string>("table_name") ?? "";
-                var ourId = dataRow.Field<ulong>("our_id");
-                var productionId = dataRow.Field<ulong>("production_id");
-
-                command.Parameters.Clear();
-                command.Parameters.AddWithValue("mappingRowId", mappingRowId);
-                command.Parameters.AddWithValue("ourId", ourId);
-                command.Parameters.AddWithValue("productionId", productionId);
-
-                if (tableName.EndsWith(WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase))
-                {
-                    command.CommandText = $@"SELECT entity_type FROM `{tableName}` WHERE id = ?ourId";
-                    var entityTypeDataTable = new DataTable();
-                    await adapter.FillAsync(entityTypeDataTable);
-                    if (entityTypeDataTable.Rows.Count == 0)
-                    {
-                        await logService.LogWarning(logger, LogScopes.RunStartAndStop, branchQueue.LogSettings, $"Tried to equalize ID, but the item doesn't exist anymore. Equalize table ID: {mappingRowId}, entity table name: {tableName}, ourId: {ourId}, productionId: {productionId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                        continue;
-                    }
-
-                    var entityType = entityTypeDataTable.Rows[0].Field<string>("entity_type");
-                    var allLinkTypeSettings = await wiserItemsService.GetAllLinkTypeSettingsAsync();
-                    var LinkTypesWithSource = allLinkTypeSettings.Where(l => String.Equals(l.SourceEntityType, entityType, StringComparison.OrdinalIgnoreCase)).ToList();
-                    var LinkTypesWithDestination = allLinkTypeSettings.Where(l => String.Equals(l.DestinationEntityType, entityType, StringComparison.OrdinalIgnoreCase)).ToList();
-
-                    var tablePrefix = tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItem, "");
-                    command.CommandText = $@"SET @saveHistory = FALSE;
-
--- Update the ID of the item itself.
-UPDATE `{tablePrefix}{WiserTableNames.WiserItem}`
-SET id = ?productionId
-WHERE id = ?ourId;
-
--- Update all original IDs of items that are using this ID.
-UPDATE `{tablePrefix}{WiserTableNames.WiserItem}`
-SET original_item_id = ?productionId
-WHERE original_item_id = ?ourId;
-
--- Update all parent IDs of items that are using this ID.
-UPDATE `{tablePrefix}{WiserTableNames.WiserItem}`
-SET parent_item_id = ?productionId
-WHERE parent_item_id = ?ourId;
-
--- Update item details to use the new ID.
-UPDATE `{tablePrefix}{WiserTableNames.WiserItemDetail}`
-SET item_id = ?productionId
-WHERE item_id = ?ourId;
-
--- Update item files to use the new ID.
-UPDATE `{tablePrefix}{WiserTableNames.WiserItemFile}`
-SET item_id = ?productionId
-WHERE item_id = ?ourId;";
-
-                    // We need to check if there are any dedicated wiser_itemlink tables such as 123_wiser_itemlink and update the ID of the item in there.
-                    // If there are no dedicated tables, just update it in the main wiser_itemlink table.
-                    // This first block for links where the source item is the current item.
-                    if (!LinkTypesWithSource.Any())
-                    {
-                        command.CommandText += $@"
--- Update item links to use the new ID.
-UPDATE `{WiserTableNames.WiserItemLink}`
-SET item_id = ?productionId
-WHERE item_id = ?ourId;";
-                    }
-                    else
-                    {
-                        foreach (var linkTypeSetting in LinkTypesWithSource)
-                        {
-                            var linkTablePrefix = wiserItemsService.GetTablePrefixForLink(linkTypeSetting);
-                            command.CommandText += $@"
--- Update item links to use the new ID.
-UPDATE `{linkTablePrefix}{WiserTableNames.WiserItemLink}`
-SET item_id = ?productionId
-WHERE item_id = ?ourId;";
-                        }
-                    }
-
-                    // This second block is for links where the destination is the current item.
-                    if (!LinkTypesWithDestination.Any())
-                    {
-                        command.CommandText += $@"
--- Update item links to use the new ID.
-UPDATE `{WiserTableNames.WiserItemLink}`
-SET destination_item_id = ?productionId
-WHERE destination_item_id = ?ourId;";
-                    }
-                    else
-                    {
-                        foreach (var linkTypeSetting in LinkTypesWithDestination)
-                        {
-                            var linkTablePrefix = wiserItemsService.GetTablePrefixForLink(linkTypeSetting);
-                            command.CommandText += $@"
--- Update item links to use the new ID.
-UPDATE `{linkTablePrefix}{WiserTableNames.WiserItemLink}`
-SET destination_item_id = ?productionId
-WHERE destination_item_id = ?ourId;";
-                        }
-                    }
-
-                    await command.ExecuteNonQueryAsync();
-                }
-                else if (tableName.EndsWith(WiserTableNames.WiserItemFile, StringComparison.OrdinalIgnoreCase) || tableName.EndsWith(WiserTableNames.WiserEntity, StringComparison.OrdinalIgnoreCase))
-                {
-                    command.CommandText = $@"SET @saveHistory = FALSE;
-UPDATE `{tableName.ToMySqlSafeValue(false)}` 
-SET id = ?productionId 
-WHERE id = ?ourId;";
-                    await command.ExecuteNonQueryAsync();
-                }
-                else if (tableName.EndsWith(WiserTableNames.WiserItemLink, StringComparison.OrdinalIgnoreCase))
-                {
-                    var tablePrefix = tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLink, "");
-                    command.CommandText = $@"SET @saveHistory = FALSE;
-
-UPDATE `{tablePrefix}{WiserTableNames.WiserItemLink}` 
-SET id = ?productionId 
-WHERE id = ?ourId;
-
-UPDATE `{tablePrefix}{WiserTableNames.WiserItemLinkDetail}` 
-SET itemlink_id = ?productionId 
-WHERE itemlink_id = ?ourId;
-
-UPDATE `{tablePrefix}{WiserTableNames.WiserItemFile}` 
-SET itemlink_id = ?productionId 
-WHERE itemlink_id = ?ourId;";
-                    await command.ExecuteNonQueryAsync();
-                }
-                else
-                {
-                    command.CommandText = $@"SET @saveHistory = FALSE;
-
-UPDATE `{tableName}` 
-SET id = ?productionId 
-WHERE id = ?ourId;";
-                    await command.ExecuteNonQueryAsync();
-                }
-
-                // Delete the row when we succeeded in updating the ID.
-                command.CommandText = $"DELETE FROM `{WiserTableNames.WiserIdMappings}` WHERE id = ?mappingRowId";
-                await command.ExecuteNonQueryAsync();
-            }
         }
     }
 }
