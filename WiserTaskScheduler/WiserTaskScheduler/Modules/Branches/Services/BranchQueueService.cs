@@ -102,7 +102,7 @@ ORDER BY start_on ASC, id ASC");
                         results.Add(await HandleMergeBranchActionAsync(dataRow, branchQueue, configurationServiceName, databaseConnection, databaseHelpersService, wiserItemsService, taskAlertsService));
                         break;
                     case "delete":
-                        results.Add(await HandleDeleteBranchActionAsync(dataRow, branchQueue, configurationServiceName, databaseConnection, databaseHelpersService, wiserItemsService));
+                        results.Add(await HandleDeleteBranchActionAsync(dataRow, branchQueue, configurationServiceName, databaseConnection, databaseHelpersService, wiserItemsService, taskAlertsService));
                         break;
                     default:
                         throw new ArgumentOutOfRangeException(nameof(branchAction), branchAction);
@@ -1901,15 +1901,18 @@ WHERE `id` = ?id";
         /// <param name="wiserItemsService">The <see cref="IWiserItemsService"/> for getting settings of entity types and for (un)deleting items.</param>
         /// <returns>An <see cref="JObject"/> with properties "Success" and "ErrorMessage".</returns>
         /// <exception cref="ArgumentOutOfRangeException">Then we get unknown options in enums.</exception>
-        private async Task<JToken> HandleDeleteBranchActionAsync(DataRow dataRowWithSettings, BranchQueueModel branchQueue, string configurationServiceName, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService)
+        private async Task<JToken> HandleDeleteBranchActionAsync(DataRow dataRowWithSettings, BranchQueueModel branchQueue, string configurationServiceName, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService, ITaskAlertsService taskAlertsService)
         {
             var error = "";
             var result = new JObject();
+            var startDate = DateTime.Now;
+            var stopwatch = new Stopwatch();
+            stopwatch.Start();
 
             // Set the start date to the current datetime.
             var queueId = dataRowWithSettings.Field<int>("id");
             databaseConnection.AddParameter("queueId", queueId);
-            databaseConnection.AddParameter("now", DateTime.Now);
+            databaseConnection.AddParameter("now", startDate);
             await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET started_on = ?now WHERE id = ?queueId");
 
             // Get and validate the settings.
@@ -1921,9 +1924,8 @@ WHERE `id` = ?id";
                 error = "Trying to delete a branch, but it either had invalid settings, or the database name was empty.";
                 result.Add("ErrorMessage", error);
                 result.Add("Success", false);
-                databaseConnection.AddParameter("now", DateTime.Now);
-                databaseConnection.AddParameter("error", error);
-                await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET finished_on = ?now, success = 0, errors = ?error WHERE id = ?queueId");
+
+                await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, String.IsNullOrWhiteSpace(error) ? new JArray() : new JArray(error), stopwatch, startDate, branchQueue.CreatedBranchTemplateId, DeleteBranchSubject, DeleteBranchTemplate);
                 return result;
             }
 
@@ -1935,9 +1937,8 @@ WHERE `id` = ?id";
                 error = "Trying to delete a branch, but it looks to be the main branch and for safety reasons we don't allow the main branch to be deleted.";
                 result.Add("ErrorMessage", error);
                 result.Add("Success", false);
-                databaseConnection.AddParameter("now", DateTime.Now);
-                databaseConnection.AddParameter("error", error);
-                await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET finished_on = ?now, success = 0, errors = ?error WHERE id = ?queueId");
+
+                await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, String.IsNullOrWhiteSpace(error) ? new JArray() : new JArray(error), stopwatch, startDate, branchQueue.CreatedBranchTemplateId, DeleteBranchSubject, DeleteBranchTemplate);
                 return result;
             }
 
@@ -1950,9 +1951,8 @@ WHERE `id` = ?id";
                 error = "Trying to delete a branch, but it looks like this branch does not belong to the customer that this WTS is connected to.";
                 result.Add("ErrorMessage", error);
                 result.Add("Success", false);
-                databaseConnection.AddParameter("now", DateTime.Now);
-                databaseConnection.AddParameter("error", error);
-                await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET finished_on = ?now, success = 0, errors = ?error WHERE id = ?queueId");
+
+                await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, String.IsNullOrWhiteSpace(error) ? new JArray() : new JArray(error), stopwatch, startDate, branchQueue.CreatedBranchTemplateId, DeleteBranchSubject, DeleteBranchTemplate);
                 return result;
             }
 
@@ -1971,11 +1971,7 @@ WHERE `id` = ?id";
             }
 
             // Set the finish time to the current datetime, so that we can see how long it took.
-            databaseConnection.AddParameter("queueId", queueId); // Set the queue ID again because if a data selector is used the parameters are cleared.
-            databaseConnection.AddParameter("now", DateTime.Now);
-            databaseConnection.AddParameter("error", error);
-            databaseConnection.AddParameter("success", String.IsNullOrWhiteSpace(error));
-            await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET finished_on = ?now, success = ?success, errors = ?error WHERE id = ?queueId");
+            await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, String.IsNullOrWhiteSpace(error) ? new JArray() : new JArray(error), stopwatch, startDate, branchQueue.CreatedBranchTemplateId, DeleteBranchSubject, DeleteBranchTemplate);
             result.Add("ErrorMessage", error);
             result.Add("Success", String.IsNullOrWhiteSpace(error));
             return result;
