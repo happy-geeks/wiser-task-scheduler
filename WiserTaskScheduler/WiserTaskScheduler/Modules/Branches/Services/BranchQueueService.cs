@@ -890,6 +890,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                                         {
                                             // This should never happen, but just in case the ID somehow doesn't exist anymore, log a warning and continue on to the next item.
                                             await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find link with id '{itemId}' in database '{branchDatabase}'. Skipping this history record in synchronisation to production.", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                            historyItemsSynchronised.Add(historyId);
                                             continue;
                                         }
                                     }
@@ -958,6 +959,7 @@ LIMIT 1";
                                 await adapter.FillAsync(fileDataTable);
                                 if (fileDataTable.Rows.Count == 0)
                                 {
+                                    historyItemsSynchronised.Add(historyId);
                                     continue;
                                 }
 
@@ -1058,6 +1060,7 @@ LIMIT 1";
                                         if (itemDataTable.Rows.Count == 0)
                                         {
                                             await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find item with ID '{originalItemId}', so skipping it...", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                            historyItemsSynchronised.Add(historyId);
                                             continue;
                                         }
                                     }
