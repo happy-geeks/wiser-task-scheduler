@@ -756,7 +756,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                 // Add tables from wiser_id_mappings to tables to lock.
                 await using (var command = branchConnection.CreateCommand())
                 {
-                    command.CommandText = $@"SELECT DISTINCT table_name FROM `{WiserTableNames.WiserIdMappings}`";
+                    command.CommandText = $"SELECT DISTINCT table_name FROM `{WiserTableNames.WiserIdMappings}`";
                     var mappingDataTable = new DataTable();
                     using var adapter = new MySqlDataAdapter(command);
                     await adapter.FillAsync(mappingDataTable);
@@ -847,6 +847,14 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                     ulong? oldItemId = null;
                     ulong? oldDestinationItemId = null;
                     (string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)? linkData = null;
+
+                    var objectCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalObjectId && String.Equals(i.TableName, tableName, StringComparison.OrdinalIgnoreCase));
+                    if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
+                    {
+                        // This item was created and then deleted in the branch, so we don't need to do anything.
+                        historyItemsSynchronised.Add(historyId);
+                        continue;
+                    }
 
                     try
                     {
@@ -987,7 +995,6 @@ LIMIT 1";
                         linkId = GetMappedId(tableName, idMapping, linkId);
                         fileId = GetMappedId(tableName, idMapping, fileId);
                         objectId = GetMappedId(tableName, idMapping, objectId) ?? 0;
-                        var objectCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalObjectId && String.Equals(i.TableName, tableName, StringComparison.OrdinalIgnoreCase));
                         var linkSourceItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalItemId && String.Equals(i.TableName, $"{linkData?.SourceTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
                         var linkDestinationItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalDestinationItemId && String.Equals(i.TableName, $"{linkData?.DestinationTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
 
@@ -1038,13 +1045,6 @@ LIMIT 1";
 
                                 if (isWiserItemChange && originalItemId > 0)
                                 {
-                                    if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                    {
-                                        // This item was created and then deleted in the branch, so we don't need to do anything.
-                                        historyItemsSynchronised.Add(historyId);
-                                        continue;
-                                    }
-
                                     sqlParameters["itemId"] = originalItemId;
                                     var itemDataTable = new DataTable();
                                     await using var environmentCommand = branchConnection.CreateCommand();
@@ -1095,13 +1095,6 @@ LIMIT 1";
                                     continue;
                                 }
 
-                                if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                {
-                                    // This item was created and then deleted in the branch, so we don't need to do anything.
-                                    historyItemsSynchronised.Add(historyId);
-                                    continue;
-                                }
-
                                 if (idMapping.TryGetValue(tableName, out var mapping) && mapping.ContainsKey(originalItemId))
                                 {
                                     // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
@@ -1128,13 +1121,6 @@ INSERT INTO `{tableName}` (id, entity_type) VALUES (?newId, '')";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Update)
                                 {
-                                    continue;
-                                }
-
-                                if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                {
-                                    // This item was created and then deleted in the branch, so we don't need to do anything.
-                                    historyItemsSynchronised.Add(historyId);
                                     continue;
                                 }
 
@@ -1178,13 +1164,6 @@ ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), lo
                                     continue;
                                 }
 
-                                if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                {
-                                    // This item was created and then deleted in the branch, so we don't need to do anything.
-                                    historyItemsSynchronised.Add(historyId);
-                                    continue;
-                                }
-
                                 sqlParameters["itemId"] = itemId;
                                 sqlParameters["newValue"] = newValue;
 
@@ -1203,13 +1182,6 @@ WHERE id = ?itemId";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Delete)
                                 {
-                                    continue;
-                                }
-
-                                if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                {
-                                    // This item was created and then deleted in the branch, so we don't need to do anything.
-                                    historyItemsSynchronised.Add(historyId);
                                     continue;
                                 }
 
@@ -1232,13 +1204,6 @@ WHERE id = ?itemId";
                                     continue;
                                 }
 
-                                if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                {
-                                    // This item was created and then deleted in the branch, so we don't need to do anything.
-                                    historyItemsSynchronised.Add(historyId);
-                                    continue;
-                                }
-
                                 // Unlock the tables temporarily so that we can call wiserItemsService.DeleteAsync, since that method doesn't use our custom database connection.
                                 await using var productionCommand = productionConnection.CreateCommand();
                                 productionCommand.CommandText = "UNLOCK TABLES";
@@ -1258,7 +1223,7 @@ WHERE id = ?itemId";
                                     continue;
                                 }
 
-                                if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
+                                if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
                                 {
                                     // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
                                     historyItemsSynchronised.Add(historyId);
@@ -1319,7 +1284,7 @@ VALUES (?newId, ?itemId, ?destinationItemId, ?ordering, ?type);";
                                     continue;
                                 }
 
-                                if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
+                                if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
                                 {
                                     // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
                                     historyItemsSynchronised.Add(historyId);
@@ -1350,7 +1315,7 @@ AND type = ?type";
                                     continue;
                                 }
 
-                                if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
+                                if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
                                 {
                                     // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
                                     historyItemsSynchronised.Add(historyId);
@@ -1379,7 +1344,7 @@ AND type = ?type";
                                     continue;
                                 }
 
-                                if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
+                                if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
                                 {
                                     // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
                                     historyItemsSynchronised.Add(historyId);
@@ -1425,13 +1390,6 @@ ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), lo
                                     continue;
                                 }
 
-                                if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                {
-                                    // This file was created and then deleted in the branch, so we don't need to do anything.
-                                    historyItemsSynchronised.Add(historyId);
-                                    continue;
-                                }
-
                                 if (idMapping.TryGetValue(tableName, out var mapping) && mapping.ContainsKey(originalObjectId))
                                 {
                                     // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
@@ -1461,13 +1419,6 @@ VALUES (?newId, ?fileItemId)";
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Update)
                                 {
-                                    continue;
-                                }
-
-                                if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                {
-                                    // This file was created and then deleted in the branch, so we don't need to do anything.
-                                    historyItemsSynchronised.Add(historyId);
                                     continue;
                                 }
 
@@ -1523,13 +1474,6 @@ WHERE id = ?fileId";
                                     continue;
                                 }
 
-                                if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                {
-                                    // This file was created and then deleted in the branch, so we don't need to do anything.
-                                    historyItemsSynchronised.Add(historyId);
-                                    continue;
-                                }
-
                                 sqlParameters["itemId"] = newValue;
 
                                 await using var productionCommand = productionConnection.CreateCommand();
@@ -1578,13 +1522,6 @@ WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
                                         continue;
                                     case WiserTableNames.WiserRoles when roleMergeSettings is not {Create: true}:
                                         continue;
-                                }
-
-                                if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                {
-                                    // This item was created and then deleted in the branch, so we don't need to do anything.
-                                    historyItemsSynchronised.Add(historyId);
-                                    continue;
                                 }
 
                                 if (idMapping.TryGetValue(tableName, out var mapping) && mapping.ContainsKey(originalObjectId))
@@ -1667,13 +1604,6 @@ VALUES (?newId)";
                                         continue;
                                 }
 
-                                if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                {
-                                    // This item was created and then deleted in the branch, so we don't need to do anything.
-                                    historyItemsSynchronised.Add(historyId);
-                                    continue;
-                                }
-
                                 sqlParameters["id"] = objectId;
                                 sqlParameters["newValue"] = newValue;
 
@@ -1724,13 +1654,6 @@ WHERE id = ?id";
                                         continue;
                                     case WiserTableNames.WiserRoles when roleMergeSettings is not {Delete: true}:
                                         continue;
-                                }
-
-                                if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
-                                {
-                                    // This item was created and then deleted in the branch, so we don't need to do anything.
-                                    historyItemsSynchronised.Add(historyId);
-                                    continue;
                                 }
 
                                 sqlParameters["id"] = objectId;
