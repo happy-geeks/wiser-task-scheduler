@@ -88,7 +88,8 @@ public class UpdateService : IUpdateService
             File.Delete(filePath);
         }
         
-        using var request = new HttpRequestMessage(HttpMethod.Get, updateSettings.VersionDownloadUrl);
+        var downloadUrl = updateSettings.VersionDownloadUrl.EndsWith("/") ? updateSettings.VersionDownloadUrl : $"{updateSettings.VersionDownloadUrl}/";
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{downloadUrl}version{version.ToString()}.zip");
         using var client = new HttpClient(new HttpClientHandler() {AllowAutoRedirect = true});
         using var response = await client.SendAsync(request);
         await File.WriteAllBytesAsync(filePath, await response.Content.ReadAsByteArrayAsync());

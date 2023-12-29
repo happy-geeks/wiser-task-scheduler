@@ -50,12 +50,12 @@ If the auto updater is not used or if the auto updater has indicated that a manu
 
 ## Creating a new (release) build
 1. **Only at release**: open `WiserTaskScheduler.csproj` in a text editor and increase the version number at "Version", "AssemblyVersion" and "FileVersion";
-2. Start the project in favorite sde (preferably 'Jetbrains Rider');
+2. Start the project in your favorite SDE;
 3. Right click on the project and click "Publish";
 4. Click "Publish WiserTaskScheduler to folder" or "Publish AutoUpdater to folder" (depending on which project to create a new build);
 5. The application will be published in the project folder "bin\Release\net7.0\win-x64\publish\";
 6. Check that all DLL files are present in the publish folder, about 400 files should be present. If these are missing, the application is built as a "Single file" and cannot be started.
-7. **Only at release**: Place all files **EXCLUDING** appsettings in a zip file called "Update.zip" and place it in the "Update" folder;
+7. **Only at release**: Place all files **EXCLUDING** appsettings in a zip file called "version{version}.zip" (e.g. version1.3.6.0.zip) and upload it to the server that hosts the WTS versions;
 8. **Only at release**: Update the "version.json" file in the "Update" folder;
 9. **Only at release**: Merge to main.
 

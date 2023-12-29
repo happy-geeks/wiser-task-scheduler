@@ -10,9 +10,9 @@ public class UpdateSettings
     public string VersionListUrl { get; set; } = "https://raw.githubusercontent.com/happy-geeks/wiser-task-scheduler/main/Update/versions.json";
 
     /// <summary>
-    /// The URL to the ZIP file containing the latest version of the WTS.
+    /// The URL to the location where the ZIP file containing the latest version of the WTS is located.
     /// </summary>
-    public string VersionDownloadUrl { get; set; } = "https://github.com/happy-geeks/wiser-task-scheduler/raw/main/Update/Update.zip";
+    public string VersionDownloadUrl { get; set; } = "https://wts.happyhorizon.dev/";
 
     /// <summary>
     /// The information of the multiple WTS instances to update.
