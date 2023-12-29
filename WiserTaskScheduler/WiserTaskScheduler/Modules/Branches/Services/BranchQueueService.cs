@@ -948,6 +948,27 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                                 linkId = String.Equals(oldValue, "itemlink_id", StringComparison.OrdinalIgnoreCase) ? UInt64.Parse(newValue) : 0;
                                 originalLinkId = linkId;
 
+                                if (linkId > 0)
+                                {
+                                    sqlParameters["linkId"] = linkId;
+                                    var itemLinkTableName = tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemFile, WiserTableNames.WiserItemLink);
+                                    await using var branchCommand = branchConnection.CreateCommand();
+                                    AddParametersToCommand(sqlParameters, branchCommand);
+                                    branchCommand.CommandText = $"SELECT item_id, destination_item_id, type FROM `{itemLinkTableName}` WHERE id = ?linkId LIMIT 1";
+                                    var fileDataTable = new DataTable();
+                                    using var adapter = new MySqlDataAdapter(branchCommand);
+                                    await adapter.FillAsync(fileDataTable);
+                                    if (fileDataTable.Rows.Count == 0)
+                                    {
+                                        historyItemsSynchronised.Add(historyId);
+                                        continue;
+                                    }
+
+                                    itemId = Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]);
+                                    destinationItemId = Convert.ToUInt64(fileDataTable.Rows[0]["destination_item_id"]);
+                                    linkType = Convert.ToInt32(fileDataTable.Rows[0]["type"]);
+                                }
+
                                 break;
                             }
                             case "UPDATE_FILE":
@@ -1006,7 +1027,7 @@ LIMIT 1";
                         }
                         else if (String.IsNullOrWhiteSpace(entityType))
                         {
-                            if (action is "ADD_LINK" or "CHANGE_LINK" or "REMOVE_LINK")
+                            if (action is "ADD_LINK" or "CHANGE_LINK" or "REMOVE_LINK" || (action is "ADD_FILE" or "UPDATE_FILE" or "DELETE_FILE" && linkId > 0))
                             {
                                 // Unlock the tables temporarily so that we can call GetEntityTypesOfLinkAsync, which calls wiserItemsService.GetTablePrefixForEntityAsync, since that method doesn't use our custom database connection.
                                 await using var productionCommand = productionConnection.CreateCommand();
@@ -1034,9 +1055,17 @@ LIMIT 1";
                                     }
                                 }
 
-                                // Lock the tables again when we're done with deleting.
+                                // Lock the tables again when we're done.
                                 await LockTablesAsync(productionConnection, tablesToLock, false);
                                 await LockTablesAsync(branchConnection, tablesToLock, true);
+
+                                // If we couldn't find any link data, then most likely one of the items doesn't exist anymore, so skip this history record.
+                                // The other reason could be that the link type is not configured (correctly), in that case we also can't do anything, so skip it as well.
+                                if (!linkData.HasValue)
+                                {
+                                    historyItemsSynchronised.Add(historyId);
+                                    continue;
+                                }
                             }
                             else
                             {
