@@ -343,6 +343,14 @@ public class UpdateService : IUpdateService
             Content = body
         };
 
-        communicationsService.SendEmailDirectlyAsync(communication);
+        try
+        {
+            communicationsService.SendEmailDirectlyAsync(communication);
+        }
+        catch (Exception e)
+        {
+            logger.LogError($"Failed to send email to '{receiver}' for '{serviceName}'.{Environment.NewLine}{Environment.NewLine}{e}");
+            throw;
+        }
     }
 }
