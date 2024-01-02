@@ -1,8 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml;
+using System.Xml.XPath;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
@@ -100,9 +103,9 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
                 filePath = ReplacementHelper.ReplaceText(tuple.Item1, rows, tuple.Item2, usingResultSet, importFile.HashSettings);
             }
 
-            if (!File.Exists(filePath))
+            if (!File.Exists(filePath) && !Directory.Exists(filePath))
             {
-                await logService.LogError(logger, LogScopes.RunStartAndStop, importFile.LogSettings, $"Failed to import file '{importFile.FilePath}'. Path does not exists.", configurationServiceName, importFile.TimeId, importFile.Order);
+                await logService.LogError(logger, LogScopes.RunStartAndStop, importFile.LogSettings, $"Failed to import file or directory '{importFile.FilePath}'. Path does not exists.", configurationServiceName, importFile.TimeId, importFile.Order);
 
                 return new JObject()
                 {
@@ -112,17 +115,69 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
 
             try
             {
-                await logService.LogInformation(logger, LogScopes.RunBody, importFile.LogSettings, $"Importing file {filePath}.", configurationServiceName, importFile.TimeId, importFile.Order);
+                if (!String.IsNullOrEmpty(importFile.ProcessedFolder) && !Directory.Exists(importFile.ProcessedFolder))
+                {
+                    Directory.CreateDirectory(importFile.ProcessedFolder);
+                }
                 
+                if (!Directory.Exists(filePath)) // Single file to import
+                {
+                    return await ImportSingleFile(importFile, filePath, configurationServiceName);
+                }
+
+                // Directory with files to import
+                var jArray = new JArray();
+                foreach(var file in Directory.GetFiles(filePath, importFile.SearchPattern, SearchOption.TopDirectoryOnly))
+                {
+                   JObject result = await ImportSingleFile(importFile, file, configurationServiceName);
+                   if (result.ContainsKey("Success") && !(bool) result["Success"]) // Don't add failed imports to the result set.
+                   {
+                       continue;
+                   }
+                   jArray.Add(result);
+                }
+
+                return new JObject
+                {
+                    {"Results", jArray}
+                };
+            }
+            catch (Exception e)
+            {
+                return new JObject()
+                {
+                    {"Success", false}
+                };
+            }
+        }
+
+        private async Task<JObject> ImportSingleFile(ImportFileModel importFile, string filePath, string configurationServiceName)
+        {
+            try
+            {
+                await logService.LogInformation(logger, LogScopes.RunBody, importFile.LogSettings, $"Importing file {filePath}.", configurationServiceName, importFile.TimeId, importFile.Order);
+
+                JObject importResult;
                 switch (importFile.FileType)
                 {
                     case FileTypes.CSV:
-                        return await ImportCsvFileAsync(importFile, filePath, configurationServiceName);
+                        importResult = await ImportCsvFileAsync(importFile, filePath, configurationServiceName);
+                        break;
                     case FileTypes.XML:
-                        return await ImportXmlFileAsync(filePath);
+                        importResult = await ImportXmlFileAsync(importFile, filePath);
+                        break;
                     default:
                         throw new NotImplementedException($"File type '{importFile.FileType}' is not yet implemented to be imported.");
                 }
+                
+                if (String.IsNullOrEmpty(importFile.ProcessedFolder))
+                {
+                    return importResult;    
+                }
+
+                // Move file if successfully imported.
+                File.Move(filePath, Path.Combine(importFile.ProcessedFolder, Path.GetFileName(filePath)));
+                return importResult;
             }
             catch (Exception e)
             {
@@ -134,6 +189,7 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
                 };
             }
         }
+        
 
         /// <summary>
         /// Import a CSV file.
@@ -231,14 +287,34 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
         /// <summary>
         /// Import an XML file.
         /// </summary>
+        /// <param name="importFile">The ImportFileModel object.</param>
         /// <param name="filePath">The path to the CSV file to import.</param>
         /// <returns></returns>
-        private async Task<JObject> ImportXmlFileAsync(string filePath)
+        private async Task<JObject> ImportXmlFileAsync(ImportFileModel importFile, string filePath)
         {
             var xml = await File.ReadAllTextAsync(filePath);
+            xml = Regex.Replace(xml, "\\sxmlns[^\"]+\"[^\"]+\"", ""); // Remove namespaces from the xml, because this gives problemns with the xpath expressions.
             var xmlDocument = new XmlDocument();
             xmlDocument.LoadXml(xml);
-            return JObject.Parse(JsonConvert.SerializeXmlNode(xmlDocument));
+
+            if (importFile.XmlMapping?.Any() != true) // No mapping supplied, return the whole document.
+            {
+                return JObject.Parse(JsonConvert.SerializeXmlNode(xmlDocument));
+            }
+
+            // Mapping supplied, return the mapped values.
+            var result = new JObject();
+            foreach (XmlMapModel xmlMap in importFile.XmlMapping)
+            {
+                XmlNode xmlNode = xmlDocument.SelectSingleNode(xmlMap.XPathExpression);
+                result.Add(xmlMap.ResultSetName, xmlNode?.InnerText ?? "");
+            }
+            
+            return new JObject()
+            {
+                {"Success", true},
+                {"Results", new JArray(result)}
+            };
         }
     }
 }
