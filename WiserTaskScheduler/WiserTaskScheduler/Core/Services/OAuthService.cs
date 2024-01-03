@@ -2,6 +2,7 @@
 using System.Buffers.Text;
 using System.Collections.Generic;
 using System.Data;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -65,7 +66,16 @@ namespace WiserTaskScheduler.Core.Services
                 oAuth.TokenType = await objectsService.GetSystemObjectValueAsync($"WTS_{oAuth.ApiName}_TokenType");
                 oAuth.RefreshToken = (await objectsService.GetSystemObjectValueAsync($"WTS_{oAuth.ApiName}_RefreshToken"))?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
                 var expireTime = await objectsService.GetSystemObjectValueAsync($"WTS_{oAuth.ApiName}_ExpireTime");
-                oAuth.ExpireTime = String.IsNullOrWhiteSpace(expireTime) ? DateTime.MinValue : Convert.ToDateTime(expireTime);
+
+                // Try to parse the DateTime. If it fails, then set it to DateTime.MinValue to prevent errors.
+                if (!String.IsNullOrWhiteSpace(expireTime) && DateTime.TryParse(expireTime, CultureInfo.InvariantCulture, DateTimeStyles.None, out var expireTimeParsed))
+                {
+                    oAuth.ExpireTime = expireTimeParsed;
+                }
+                else
+                {
+                    oAuth.ExpireTime = DateTime.MinValue;
+                }
 
                 oAuth.LogSettings ??= this.configuration.LogSettings;
             }
@@ -339,7 +349,7 @@ namespace WiserTaskScheduler.Core.Services
             await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_AccessToken", oAuthApi.AccessToken.EncryptWithAes(gclSettings.DefaultEncryptionKey));
             await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_TokenType", oAuthApi.TokenType);
             await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_RefreshToken", oAuthApi.RefreshToken.EncryptWithAes(gclSettings.DefaultEncryptionKey));
-            await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_ExpireTime", oAuthApi.ExpireTime.ToString());
+            await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_ExpireTime", oAuthApi.ExpireTime.ToString(CultureInfo.InvariantCulture));
         }
     }
 }
