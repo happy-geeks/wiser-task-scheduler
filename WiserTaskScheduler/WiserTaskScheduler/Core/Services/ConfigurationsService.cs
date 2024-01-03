@@ -265,13 +265,13 @@ namespace WiserTaskScheduler.Core.Services
                     
                     if (statusCode != parts[1])
                     {
-                        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Skipped action because status code was '{statusCode}'.", configurationServiceName, action.TimeId, action.Order);
+                        await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Skipped action because status code was '{statusCode}'.", configurationServiceName, action.TimeId, action.Order);
                         return true;
                     }
                 }
                 catch (Exception e)
                 {
-                    await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to validate status code, skipping action. Exception: {e}", configurationServiceName, action.TimeId, action.Order);
+                    await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Failed to validate status code, skipping action. Exception: {e}", configurationServiceName, action.TimeId, action.Order);
                     return true;
                 }
             }
@@ -294,13 +294,13 @@ namespace WiserTaskScheduler.Core.Services
                     
                     if (state != parts[1])
                     {
-                        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Skipped action because success state was '{state}'.", configurationServiceName, action.TimeId, action.Order);
+                        await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Skipped action because success state was '{state}'.", configurationServiceName, action.TimeId, action.Order);
                         return true;
                     }
                 }
                 catch (Exception e)
                 {
-                    await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to validate action success, skipping action. Exception: {e}", configurationServiceName, action.TimeId, action.Order);
+                    await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Failed to validate action success, skipping action. Exception: {e}", configurationServiceName, action.TimeId, action.Order);
                     return true;
                 }
             }
