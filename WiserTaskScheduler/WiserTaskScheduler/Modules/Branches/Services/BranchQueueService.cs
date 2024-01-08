@@ -950,23 +950,12 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
 
                                 if (linkId > 0)
                                 {
-                                    sqlParameters["linkId"] = linkId;
-                                    var itemLinkTableName = tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemFile, WiserTableNames.WiserItemLink);
-                                    await using var branchCommand = branchConnection.CreateCommand();
-                                    AddParametersToCommand(sqlParameters, branchCommand);
-                                    branchCommand.CommandText = $"SELECT item_id, destination_item_id, type FROM `{itemLinkTableName}` WHERE id = ?linkId LIMIT 1";
-                                    var fileDataTable = new DataTable();
-                                    using var adapter = new MySqlDataAdapter(branchCommand);
-                                    await adapter.FillAsync(fileDataTable);
-                                    if (fileDataTable.Rows.Count == 0)
+                                    (itemId, destinationItemId, linkType) = await GetLinkDataAsync(linkId, sqlParameters, tableName, branchConnection, historyItemsSynchronised, historyId);
+                                    if (itemId == 0)
                                     {
                                         historyItemsSynchronised.Add(historyId);
                                         continue;
                                     }
-
-                                    itemId = Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]);
-                                    destinationItemId = Convert.ToUInt64(fileDataTable.Rows[0]["destination_item_id"]);
-                                    linkType = Convert.ToInt32(fileDataTable.Rows[0]["type"]);
                                 }
 
                                 break;
@@ -996,6 +985,16 @@ LIMIT 1";
                                 originalItemId = itemId;
                                 linkId = Convert.ToUInt64(fileDataTable.Rows[0]["itemlink_id"]);
                                 originalLinkId = linkId;
+
+                                if (linkId > 0)
+                                {
+                                    (itemId, destinationItemId, linkType) = await GetLinkDataAsync(linkId, sqlParameters, tableName, branchConnection, historyItemsSynchronised, historyId);
+                                    if (itemId == 0)
+                                    {
+                                        historyItemsSynchronised.Add(historyId);
+                                        continue;
+                                    }
+                                }
 
                                 break;
                             }
@@ -1027,7 +1026,7 @@ LIMIT 1";
                         }
                         else if (String.IsNullOrWhiteSpace(entityType))
                         {
-                            if (action is "ADD_LINK" or "CHANGE_LINK" or "REMOVE_LINK" || (action is "ADD_FILE" or "UPDATE_FILE" or "DELETE_FILE" && linkId > 0))
+                            if (action is "ADD_LINK" or "CHANGE_LINK" or "REMOVE_LINK" || (action is "ADD_FILE" or "UPDATE_FILE" or "DELETE_FILE" && linkId > 0 && linkType is > 0))
                             {
                                 // Unlock the tables temporarily so that we can call GetEntityTypesOfLinkAsync, which calls wiserItemsService.GetTablePrefixForEntityAsync, since that method doesn't use our custom database connection.
                                 await using var productionCommand = productionConnection.CreateCommand();
@@ -1264,7 +1263,7 @@ WHERE id = ?itemId";
                                 sqlParameters["ordering"] = linkOrdering;
                                 sqlParameters["destinationItemId"] = destinationItemId;
                                 sqlParameters["originalDestinationItemId"] = originalDestinationItemId;
-                                sqlParameters["type"] = linkType;
+                                sqlParameters["type"] = linkType ?? 0;
 
                                 // Get the original link ID, so we can map it to the new one.
                                 await using (var environmentCommand = branchConnection.CreateCommand())
@@ -1323,7 +1322,7 @@ VALUES (?newId, ?itemId, ?destinationItemId, ?ordering, ?type);";
                                 sqlParameters["oldItemId"] = oldItemId;
                                 sqlParameters["oldDestinationItemId"] = oldDestinationItemId;
                                 sqlParameters["newValue"] = newValue;
-                                sqlParameters["type"] = linkType.Value;
+                                sqlParameters["type"] = linkType ?? 0;
 
                                 await using var productionCommand = productionConnection.CreateCommand();
                                 AddParametersToCommand(sqlParameters, productionCommand);
@@ -1353,7 +1352,7 @@ AND type = ?type";
 
                                 sqlParameters["oldItemId"] = oldItemId;
                                 sqlParameters["oldDestinationItemId"] = oldDestinationItemId;
-                                sqlParameters["type"] = linkType.Value;
+                                sqlParameters["type"] = linkType ?? 0;
 
                                 await using var productionCommand = productionConnection.CreateCommand();
                                 AddParametersToCommand(sqlParameters, productionCommand);
@@ -1788,6 +1787,21 @@ WHERE `id` = ?id";
             await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, errors, stopwatch, startDate, branchQueue.MergedBranchTemplateId, MergeBranchSubject, MergeBranchTemplate);
 
             return result;
+        }
+
+        private static async Task<(ulong SourceItemId, ulong DestinationItemId, int LinkType)> GetLinkDataAsync(ulong? linkId, Dictionary<string, object> sqlParameters, string tableName, MySqlConnection branchConnection, List<ulong> historyItemsSynchronised, ulong historyId)
+        {
+            sqlParameters["linkId"] = linkId;
+            var itemLinkTableName = tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemFile, WiserTableNames.WiserItemLink);
+            await using var branchCommand = branchConnection.CreateCommand();
+            AddParametersToCommand(sqlParameters, branchCommand);
+            branchCommand.CommandText = $"SELECT item_id, destination_item_id, type FROM `{itemLinkTableName}` WHERE id = ?linkId LIMIT 1";
+            var fileDataTable = new DataTable();
+            using var adapter = new MySqlDataAdapter(branchCommand);
+            await adapter.FillAsync(fileDataTable);
+            return fileDataTable.Rows.Count == 0
+                ? (0, 0, 0)
+                : (Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]), Convert.ToUInt64(fileDataTable.Rows[0]["destination_item_id"]), Convert.ToInt32(fileDataTable.Rows[0]["type"]));
         }
 
         private static async Task FinishBranchActionAsync(int queueId, DataRow dataRowWithSettings, BranchQueueModel branchQueue, string configurationServiceName, IDatabaseConnection databaseConnection, IWiserItemsService wiserItemsService, ITaskAlertsService taskAlertsService, JArray errors, Stopwatch stopwatch, DateTime startDate, ulong templateId, string defaultMessageSubject, string defaultMessageContent)
