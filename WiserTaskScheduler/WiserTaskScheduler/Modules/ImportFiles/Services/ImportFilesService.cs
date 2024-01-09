@@ -122,14 +122,14 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
                 
                 if (!Directory.Exists(filePath)) // Single file to import
                 {
-                    return await ImportSingleFile(importFile, filePath, configurationServiceName);
+                    return await ImportSingleFileAsync(importFile, filePath, configurationServiceName);
                 }
 
                 // Directory with files to import
                 var jArray = new JArray();
                 foreach(var file in Directory.GetFiles(filePath, importFile.SearchPattern, SearchOption.TopDirectoryOnly))
                 {
-                   JObject result = await ImportSingleFile(importFile, file, configurationServiceName);
+                   JObject result = await ImportSingleFileAsync(importFile, file, configurationServiceName);
                    if (result.ContainsKey("Success") && !(bool) result["Success"]) // Don't add failed imports to the result set.
                    {
                        continue;
@@ -151,7 +151,7 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
             }
         }
 
-        private async Task<JObject> ImportSingleFile(ImportFileModel importFile, string filePath, string configurationServiceName)
+        private async Task<JObject> ImportSingleFileAsync(ImportFileModel importFile, string filePath, string configurationServiceName)
         {
             try
             {
@@ -297,7 +297,7 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
             var xmlDocument = new XmlDocument();
             xmlDocument.LoadXml(xml);
 
-            if (importFile.XmlMapping?.Any() != true) // No mapping supplied, return the whole document.
+            if (importFile.XmlMapping?.Any() == false) // No mapping supplied, return the whole document.
             {
                 return JObject.Parse(JsonConvert.SerializeXmlNode(xmlDocument));
             }
