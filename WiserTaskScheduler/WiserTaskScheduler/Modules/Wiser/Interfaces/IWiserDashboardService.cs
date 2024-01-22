@@ -45,8 +45,8 @@ public interface IWiserDashboardService
     /// <param name="paused">Optional: The paused state of the service. Leave null to keep the current value.</param>
     /// <param name="extraRun">Optional: If the service need to be run an extra time. Leave null to keep the current value.</param>
     /// <param name="templateId">Optional: The ID of the template that of the service</param>
-    /// <returns></returns>
-    Task UpdateServiceAsync(string configuration, int timeId, string action = null, string scheme = null, DateTime? lastRun = null, DateTime? nextRun = null, TimeSpan? runTime = null, string state = null, bool? paused = null, bool? extraRun = null, int templateId = -1);
+    /// <returns>Returns if the update succeeded.</returns>
+    Task<bool> UpdateServiceAsync(string configuration, int timeId, string action = null, string scheme = null, DateTime? lastRun = null, DateTime? nextRun = null, TimeSpan? runTime = null, string state = null, bool? paused = null, bool? extraRun = null, int templateId = -1);
 
     /// <summary>
     /// Get the unique states that logs have been written to since a certain time for a run scheme.
@@ -54,7 +54,7 @@ public interface IWiserDashboardService
     /// <param name="configuration">The name of the configuration.</param>
     /// <param name="timeId">The time ID of the run scheme.</param>
     /// <param name="runStartTime">The datetime the run scheme started.</param>
-    /// <returns></returns>
+    /// <returns>A list with all unique result states</returns>
     Task<List<string>> GetLogStatesFromLastRun(string configuration, int timeId, DateTime runStartTime);
 
     /// <summary>
@@ -62,14 +62,14 @@ public interface IWiserDashboardService
     /// </summary>
     /// <param name="configuration">The name of the configuration.</param>
     /// <param name="timeId">The time ID of the run scheme.</param>
-    /// <returns></returns>
-    Task<bool> IsServicePaused(string configuration, int timeId);
+    /// <returns>If the service is currently paused, null if call failed</returns>
+    Task<bool?> IsServicePaused(string configuration, int timeId);
 
     /// <summary>
-    /// Check if the service is already running.
+    /// Check if the service currently has the "running" state.
     /// </summary>
     /// <param name="configuration">The name of the configuration.</param>
     /// <param name="timeId">The time ID of the run scheme.</param>
-    /// <returns></returns>
-    Task<bool> IsServiceRunning(string configuration, int timeId);
+    /// <returns>If the service is currently running, null if call failed</returns>
+    Task<bool?> IsServiceRunning(string configuration, int timeId);
 }

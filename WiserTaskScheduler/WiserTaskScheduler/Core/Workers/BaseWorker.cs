@@ -101,24 +101,30 @@ namespace WiserTaskScheduler.Core.Workers
                     await WaitTillNextRun(stoppingToken);
                 }
 
+                var updateSucceeded = true;
                 while (!stoppingToken.IsCancellationRequested)
                 {
-                    var paused = false;
-                    var alreadyRunning = false;
+                    var state = "success";
+                    var stopWatch = new Stopwatch();
+                    bool? paused = false;
+                    bool? alreadyRunning = false;
                     
                     if (!String.IsNullOrWhiteSpace(ConfigurationName))
                     {
                         alreadyRunning = await wiserDashboardService.IsServiceRunning(ConfigurationName, RunScheme.TimeId);
                         paused = await wiserDashboardService.IsServicePaused(ConfigurationName, RunScheme.TimeId);
-                        if (paused && !alreadyRunning)
+                        // only save paused state if we know for sure it is paused and not currently running (if it is running, it will be set to paused by that thread after the execution)
+                        if (paused.HasValue && paused.Value && alreadyRunning.HasValue && !alreadyRunning.Value)
                         {
                             await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "paused");
                         }
                     }
 
-                    if (!alreadyRunning)
+                    // skip if already running or we don't know if it's running, except when we know the previous state sync failed
+                    if ((alreadyRunning.HasValue && !alreadyRunning.Value) || !updateSucceeded)
                     {
-                        if (!paused || SingleRun)
+                        // also skip if paused, or we don't know if it's paused, except when it's a manual run
+                        if ((paused.HasValue && !paused.Value) || SingleRun)
                         {
                             await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} started at: {DateTime.Now}", Name, RunScheme.TimeId);
                             if (!String.IsNullOrWhiteSpace(ConfigurationName))
@@ -127,7 +133,6 @@ namespace WiserTaskScheduler.Core.Workers
                             }
 
                             var runStartTime = DateTime.Now;
-                            var stopWatch = new Stopwatch();
                             stopWatch.Start();
 
                             await ExecuteActionAsync();
@@ -138,23 +143,35 @@ namespace WiserTaskScheduler.Core.Workers
 
                             if (!String.IsNullOrWhiteSpace(ConfigurationName))
                             {
-                                var states = await wiserDashboardService.GetLogStatesFromLastRun(ConfigurationName, RunScheme.TimeId, runStartTime);
-
-                                var state = "success";
-                                if (await wiserDashboardService.IsServicePaused(ConfigurationName, RunScheme.TimeId))
+                                paused = await wiserDashboardService.IsServicePaused(ConfigurationName, RunScheme.TimeId);
+                                // only set state to paused if we are sure it's paused
+                                if (paused.HasValue && paused.Value)
                                 {
                                     state = "paused";
                                 }
-                                else if (states.Contains("Critical", StringComparer.OrdinalIgnoreCase) || states.Contains("Error", StringComparer.OrdinalIgnoreCase))
+                                else
                                 {
-                                    state = "failed";
-                                }
-                                else if (states.Contains("Warning", StringComparer.OrdinalIgnoreCase))
-                                {
-                                    state = "warning";
+                                    var states = await wiserDashboardService.GetLogStatesFromLastRun(ConfigurationName, RunScheme.TimeId, runStartTime);
+                                    if (states.Contains("Critical", StringComparer.OrdinalIgnoreCase) || states.Contains("Error", StringComparer.OrdinalIgnoreCase))
+                                    {
+                                        state = "failed";
+                                    }
+                                    else if (states.Contains("Warning", StringComparer.OrdinalIgnoreCase))
+                                    {
+                                        state = "warning";
+                                    }
+                                    else if (states.Count == 0) // exception occurred in getting states
+                                    {
+                                        state = "unknown";
+                                    }
                                 }
 
-                                await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme), lastRun: DateTime.Now, runTime: stopWatch.Elapsed, state: state, extraRun: false);
+                                // if storing the state of this run fails, the state will stay on "running", which will prevent any future runs, so keep track of the success
+                                updateSucceeded = await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme), lastRun: DateTime.Now, runTime: stopWatch.Elapsed, state: state, extraRun: false);
+                                if (!updateSucceeded)
+                                {
+                                    await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} of '{wtsSettings.Name}' status save failed.", $"Wiser Task Scheduler '{wtsSettings.Name}' failed to save the service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} state of the last run, which is '{state}', to the database. The service will continue running and the next run will attempt a new state save. Until then, the service state in the database will be incorrect.", RunScheme.LogSettings, LogScopes.RunBody, ConfigurationName ?? Name);
+                                }
                             }
                         }
                         else
@@ -166,6 +183,16 @@ namespace WiserTaskScheduler.Core.Workers
                     // If the configuration only needs to be run once break out of the while loop. State will not be set on stopped because the normal configuration is still active.
                     if (SingleRun)
                     {
+                        // if storing the result of this run failed the first time, try again now, otherwise the state will stay on running and it will never run again
+                        if (!updateSucceeded)
+                        {
+                            updateSucceeded = await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme), lastRun: DateTime.Now, runTime: stopWatch.Elapsed, state: state, extraRun: false);
+                            if (!updateSucceeded)
+                            {
+                                await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} of '{wtsSettings.Name}' status save failed.", $"Wiser Task Scheduler '{wtsSettings.Name}' failed to save the service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} state of the last run, which is '{state}', to the database a second time. Since this was a single run configuration, no more attempts will be made to correct this. The service state will now permanently be incorrect until it is manually updated.", RunScheme.LogSettings, LogScopes.RunStartAndStop, ConfigurationName ?? Name);
+                            }
+                        }
+
                         break;
                     }
 

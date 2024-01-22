@@ -4,10 +4,14 @@ using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
 using WiserTaskScheduler.Modules.Wiser.Interfaces;
+using WiserTaskScheduler.Core.Interfaces;
+using WiserTaskScheduler.Core.Enums;
+using WiserTaskScheduler.Core.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.WiserDashboard.Models;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace WiserTaskScheduler.Modules.Wiser.Services;
@@ -15,10 +19,16 @@ namespace WiserTaskScheduler.Modules.Wiser.Services;
 public class WiserDashboardService : IWiserDashboardService, ISingletonService
 {
     private readonly IServiceProvider serviceProvider;
+    private readonly ILogService logService;
+    private readonly ILogger<WiserDashboardService> logger;
+    private readonly LogSettings logSettings;
 
-    public WiserDashboardService(IServiceProvider serviceProvider)
+    public WiserDashboardService(IServiceProvider serviceProvider, ILogService logService, ILogger<WiserDashboardService> logger)
     {
         this.serviceProvider = serviceProvider;
+        this.logService = logService;
+        this.logger = logger;
+        this.logSettings = new LogSettings();
     }
     
     /// <inheritdoc />
@@ -70,7 +80,7 @@ FROM {WiserTableNames.WtsServices}
     }
 
     /// <inheritdoc />
-    public async Task UpdateServiceAsync(string configuration, int timeId, string action = null, string scheme = null, DateTime? lastRun = null, DateTime? nextRun = null, TimeSpan? runTime = null, string state = null, bool? paused = null, bool? extraRun = null, int templateId = -1)
+    public async Task<bool> UpdateServiceAsync(string configuration, int timeId, string action = null, string scheme = null, DateTime? lastRun = null, DateTime? nextRun = null, TimeSpan? runTime = null, string state = null, bool? paused = null, bool? extraRun = null, int templateId = -1)
     {
         var querySetParts = new List<string>();
         var parameters = new Dictionary<string, object>()
@@ -129,7 +139,7 @@ FROM {WiserTableNames.WtsServices}
 
         if (!querySetParts.Any())
         {
-            return;
+            return true;
         }
 
         if (templateId >= 0)
@@ -138,8 +148,18 @@ FROM {WiserTableNames.WtsServices}
             parameters.Add("templateId", templateId);
         }
 
-        var query = $"UPDATE {WiserTableNames.WtsServices} SET {String.Join(',', querySetParts)} WHERE configuration = ?configuration AND time_id = ?timeId";
-        await ExecuteQueryAsync(query, parameters);
+        try
+        {
+            var query = $"UPDATE {WiserTableNames.WtsServices} SET {String.Join(',', querySetParts)} WHERE configuration = ?configuration AND time_id = ?timeId";
+            await ExecuteQueryAsync(query, parameters);
+        }
+        catch (Exception e)
+        {
+            await logService.LogError(logger, LogScopes.RunBody, logSettings, $"{configuration} failed updating service status to {state} with exception {e}", configuration, timeId);
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -200,65 +220,86 @@ FROM {WiserTableNames.WtsServices}
     public async Task<List<string>> GetLogStatesFromLastRun(string configuration, int timeId, DateTime runStartTime)
     {
         var states = new List<string>();
-        
-        using var scope = serviceProvider.CreateScope();
-        await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        try
+        {
+            using var scope = serviceProvider.CreateScope();
+            await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
-        databaseConnection.AddParameter("runStartTime", runStartTime);
-        databaseConnection.AddParameter("configuration", configuration);
-        databaseConnection.AddParameter("timeId", timeId);
+            databaseConnection.AddParameter("runStartTime", runStartTime);
+            databaseConnection.AddParameter("configuration", configuration);
+            databaseConnection.AddParameter("timeId", timeId);
         
-        var data = await databaseConnection.GetAsync($@"SELECT DISTINCT level
+            var data = await databaseConnection.GetAsync($@"SELECT DISTINCT level
 FROM {WiserTableNames.WtsLogs}
 WHERE added_on >= ?runStartTime
 AND configuration = ?configuration
 AND time_id = ?timeId");
 
-        foreach (DataRow row in data.Rows)
-        {
-            states.Add(row.Field<string>("level"));
+            foreach (DataRow row in data.Rows)
+            {
+                states.Add(row.Field<string>("level"));
+            }
         }
-
+        catch (Exception e)
+        {
+            await logService.LogError(logger, LogScopes.RunBody, logSettings, $"{configuration} failed getting log states with exception {e}", configuration, timeId);
+        }
         return states;
     }
 
     /// <inheritdoc />
-    public async Task<bool> IsServicePaused(string configuration, int timeId)
+    public async Task<bool?> IsServicePaused(string configuration, int timeId)
     {
-        using var scope = serviceProvider.CreateScope();
-        await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        try
+        {
+            using var scope = serviceProvider.CreateScope();
+            await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
-        databaseConnection.AddParameter("configuration", configuration);
-        databaseConnection.AddParameter("timeId", timeId);
+            databaseConnection.AddParameter("configuration", configuration);
+            databaseConnection.AddParameter("timeId", timeId);
 
-        var dataTable = await databaseConnection.GetAsync($@"SELECT paused
+            var dataTable = await databaseConnection.GetAsync($@"SELECT paused
 FROM {WiserTableNames.WtsServices}
 WHERE configuration = ?configuration
 AND time_id = ?timeId");
 
-        // If no service is found for this combination treat it as paused to prevent unwanted executions.
-        if (dataTable.Rows.Count == 0)
-        {
-            return true;
-        }
+            // If no service is found for this combination treat it as paused to prevent unwanted executions.
+            if (dataTable.Rows.Count == 0)
+            {
+                return true;
+            }
 
-        return dataTable.Rows[0].Field<bool>("paused");
+            return dataTable.Rows[0].Field<bool>("paused");
+        }
+        catch (Exception e)
+        {
+            await logService.LogError(logger, LogScopes.RunBody, logSettings, $"{configuration} failed getting service paused status with exception {e}", configuration, timeId);
+            return null;
+        }
     }
     
     /// <inheritdoc />
-    public async Task<bool> IsServiceRunning(string configuration, int timeId)
+    public async Task<bool?> IsServiceRunning(string configuration, int timeId)
     {
-        using var scope = serviceProvider.CreateScope();
-        await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        try
+        {
+            using var scope = serviceProvider.CreateScope();
+            await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
-        databaseConnection.AddParameter("configuration", configuration);
-        databaseConnection.AddParameter("timeId", timeId);
+            databaseConnection.AddParameter("configuration", configuration);
+            databaseConnection.AddParameter("timeId", timeId);
 
-        var dataTable = await databaseConnection.GetAsync($@"SELECT state
+            var dataTable = await databaseConnection.GetAsync($@"SELECT state
 FROM {WiserTableNames.WtsServices}
 WHERE configuration = ?configuration
 AND time_id = ?timeId");
         
-        return dataTable.Rows[0].Field<string>("state").Equals("running", StringComparison.InvariantCultureIgnoreCase);
+            return dataTable.Rows[0].Field<string>("state").Equals("running", StringComparison.InvariantCultureIgnoreCase);
+        }
+        catch (Exception e)
+        {
+            await logService.LogError(logger, LogScopes.RunBody, logSettings, $"{configuration} failed getting service running status with exception {e}", configuration, timeId);
+            return null;
+        }
     }
 }
