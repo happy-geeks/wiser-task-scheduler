@@ -104,6 +104,13 @@ public class UpdateService : IUpdateService
     /// <param name="versionList">All the versions of the WTS to be checked against.</param>
     private void UpdateWts(WtsModel wts, List<VersionModel> versionList)
     {
+        // If the update time is in the future wait until the update time.
+        if (wts.UpdateTime > DateTime.Now.TimeOfDay)
+        {
+            logger.LogInformation($"WTS '{wts.ServiceName}' will be updated at {wts.UpdateTime}.");
+            Thread.Sleep(wts.UpdateTime - DateTime.Now.TimeOfDay);
+        }
+        
         logger.LogInformation($"Updating WTS '{wts.ServiceName}'.");
         
         var versionInfo = FileVersionInfo.GetVersionInfo(Path.Combine(wts.PathToFolder, WtsExeFile));
