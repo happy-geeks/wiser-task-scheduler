@@ -104,14 +104,7 @@ public class UpdateService : IUpdateService
     /// <param name="versionList">All the versions of the WTS to be checked against.</param>
     private void UpdateWts(WtsModel wts, List<VersionModel> versionList)
     {
-        // If the update time is in the future wait until the update time.
-        if (wts.UpdateTime > DateTime.Now.TimeOfDay)
-        {
-            logger.LogInformation($"WTS '{wts.ServiceName}' will be updated at {wts.UpdateTime}.");
-            Thread.Sleep(wts.UpdateTime - DateTime.Now.TimeOfDay);
-        }
-        
-        logger.LogInformation($"Updating WTS '{wts.ServiceName}'.");
+        logger.LogInformation($"Checking updates for WTS '{wts.ServiceName}'.");
         
         var versionInfo = FileVersionInfo.GetVersionInfo(Path.Combine(wts.PathToFolder, WtsExeFile));
         var version = new Version(versionInfo.FileVersion);
@@ -127,6 +120,15 @@ public class UpdateService : IUpdateService
                 EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Manual action required", $"Could not update WTS '{wts.ServiceName}' to version {versionList[0].Version} due to breaking changes since the current version of the WTS ({version}).<br/>Please check the release logs and resolve the breaking changes before manually updating the WTS.", wts.ServiceName);
                 return;
             case UpdateStates.Update:
+                // If the update time is in the future wait until the update time.
+                if (wts.UpdateTime > DateTime.Now.TimeOfDay)
+                {
+                    logger.LogInformation($"WTS '{wts.ServiceName}' will be updated at {wts.UpdateTime}.");
+                    Thread.Sleep(wts.UpdateTime - DateTime.Now.TimeOfDay);
+                }
+        
+                logger.LogInformation($"Updating WTS '{wts.ServiceName}'.");
+                
                 PerformUpdate(wts, version, versionList[0].Version);
                 return;
             default:
