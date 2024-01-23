@@ -113,17 +113,17 @@ namespace WiserTaskScheduler.Core.Workers
                     {
                         alreadyRunning = await wiserDashboardService.IsServiceRunning(ConfigurationName, RunScheme.TimeId);
                         paused = await wiserDashboardService.IsServicePaused(ConfigurationName, RunScheme.TimeId);
-                        // only save paused state if we know for sure it is paused and not currently running (if it is running, it will be set to paused by that thread after the execution)
+                        // Only save paused state if we know for sure it is paused and not currently running (if it is running, it will be set to paused by that thread after the execution).
                         if (paused.HasValue && paused.Value && alreadyRunning.HasValue && !alreadyRunning.Value)
                         {
                             await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, state: "paused");
                         }
                     }
 
-                    // skip if already running or we don't know if it's running, except when we know the previous state sync failed
+                    // Skip if already running or we don't know if it's running, except when we know the previous state sync failed.
                     if ((alreadyRunning.HasValue && !alreadyRunning.Value) || !updateSucceeded)
                     {
-                        // also skip if paused, or we don't know if it's paused, except when it's a manual run
+                        // Also skip if paused, or we don't know if it's paused, except when it's a manual run.
                         if ((paused.HasValue && !paused.Value) || SingleRun)
                         {
                             await logService.LogInformation(logger, LogScopes.RunStartAndStop, RunScheme.LogSettings, $"{Name} started at: {DateTime.Now}", Name, RunScheme.TimeId);
@@ -144,7 +144,7 @@ namespace WiserTaskScheduler.Core.Workers
                             if (!String.IsNullOrWhiteSpace(ConfigurationName))
                             {
                                 paused = await wiserDashboardService.IsServicePaused(ConfigurationName, RunScheme.TimeId);
-                                // only set state to paused if we are sure it's paused
+                                // Only set state to paused if we are sure it's paused.
                                 if (paused.HasValue && paused.Value)
                                 {
                                     state = "paused";
@@ -152,7 +152,7 @@ namespace WiserTaskScheduler.Core.Workers
                                 else
                                 {
                                     var states = await wiserDashboardService.GetLogStatesFromLastRun(ConfigurationName, RunScheme.TimeId, runStartTime);
-                                    if (states == null) // exception occurred in getting states
+                                    if (states == null) // Exception occurred in getting states.
                                     {
                                         state = "unknown";
                                     }
@@ -166,7 +166,7 @@ namespace WiserTaskScheduler.Core.Workers
                                     }
                                 }
 
-                                // if storing the state of this run fails, the state will stay on "running", which will prevent any future runs, so keep track of the success
+                                // If storing the state of this run fails, the state will stay on "running", which will prevent any future runs, so keep track of the success.
                                 updateSucceeded = await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme), lastRun: DateTime.Now, runTime: stopWatch.Elapsed, state: state, extraRun: false);
                                 if (!updateSucceeded)
                                 {
@@ -183,7 +183,7 @@ namespace WiserTaskScheduler.Core.Workers
                     // If the configuration only needs to be run once break out of the while loop. State will not be set on stopped because the normal configuration is still active.
                     if (SingleRun)
                     {
-                        // if storing the result of this run failed the first time, try again now, otherwise the state will stay on running and it will never run again
+                        // If storing the result of this run failed the first time, try again now, otherwise the state will stay on running and it will never run again.
                         if (!updateSucceeded)
                         {
                             updateSucceeded = await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme), lastRun: DateTime.Now, runTime: stopWatch.Elapsed, state: state, extraRun: false);
