@@ -243,6 +243,7 @@ AND time_id = ?timeId");
         catch (Exception e)
         {
             await logService.LogError(logger, LogScopes.RunBody, logSettings, $"{configuration} failed getting log states with exception {e}", configuration, timeId);
+            return null;
         }
         return states;
     }

@@ -152,17 +152,17 @@ namespace WiserTaskScheduler.Core.Workers
                                 else
                                 {
                                     var states = await wiserDashboardService.GetLogStatesFromLastRun(ConfigurationName, RunScheme.TimeId, runStartTime);
-                                    if (states.Contains("Critical", StringComparer.OrdinalIgnoreCase) || states.Contains("Error", StringComparer.OrdinalIgnoreCase))
+                                    if (states == null) // exception occurred in getting states
+                                    {
+                                        state = "unknown";
+                                    }
+                                    else if (states.Contains("Critical", StringComparer.OrdinalIgnoreCase) || states.Contains("Error", StringComparer.OrdinalIgnoreCase))
                                     {
                                         state = "failed";
                                     }
                                     else if (states.Contains("Warning", StringComparer.OrdinalIgnoreCase))
                                     {
                                         state = "warning";
-                                    }
-                                    else if (states.Count == 0) // exception occurred in getting states
-                                    {
-                                        state = "unknown";
                                     }
                                 }
 
