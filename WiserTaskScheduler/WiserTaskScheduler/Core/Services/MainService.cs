@@ -99,7 +99,7 @@ namespace WiserTaskScheduler.Core.Services
                     }
 
                     // If the configuration is already running but on a different version stop the current active one.
-                    var configurationStopTasks = StopConfiguration(configuration.ServiceName);
+                    var configurationStopTasks = await StopConfigurationAsync(configuration.ServiceName);
                     await WaitTillConfigurationsStoppedAsync(configurationStopTasks);
                     activeConfigurations.TryRemove(new KeyValuePair<string, ActiveConfigurationModel>(configuration.ServiceName, activeConfigurations[configuration.ServiceName]));
                 }
@@ -155,7 +155,7 @@ namespace WiserTaskScheduler.Core.Services
                     continue;
                 }
 
-                var configurationStopTasks = StopConfiguration(activeConfiguration.Key);
+                var configurationStopTasks = await StopConfigurationAsync(activeConfiguration.Key);
                 await WaitTillConfigurationsStoppedAsync(configurationStopTasks);
                 activeConfigurations.TryRemove(new KeyValuePair<string, ActiveConfigurationModel>(activeConfiguration.Key, activeConfigurations[activeConfiguration.Key]));
             }
@@ -164,36 +164,44 @@ namespace WiserTaskScheduler.Core.Services
         /// <inheritdoc />
         public async Task StopAllConfigurationsAsync()
         {
-            var configurationStopTasks = new List<Task>();
+            var configurationStopTasks = new List<(ConfigurationsWorker worker, Task task)>();
 
             foreach (var configuration in activeConfigurations)
             {
-                configurationStopTasks.AddRange(StopConfiguration(configuration.Key));
+                configurationStopTasks.AddRange(await StopConfigurationAsync(configuration.Key));
             }
 
             await WaitTillConfigurationsStoppedAsync(configurationStopTasks);
         }
 
-        private List<Task> StopConfiguration(string configurationName)
+        /// <summary>
+        /// Call the stop method on all workers for the specified configuration.
+        /// </summary>
+        /// <param name="configurationName">The name of the configuration that needs to be stopped.</param>
+        /// <returns>Returns a list with the configurations that are stopping and the tasks to wait for.</returns>
+        private async Task<List<(ConfigurationsWorker worker, Task task)>> StopConfigurationAsync(string configurationName)
         {
-            var configurationStopTasks = new List<Task>();
+            var configurationStopTasks = new List<(ConfigurationsWorker worker, Task task)>();
             var cancellationToken = new CancellationToken();
 
             // If the configuration is already running but on a different version stop the current active one.
             foreach (var worker in activeConfigurations[configurationName].WorkerPerTimeId)
             {
-                configurationStopTasks.Add(worker.Value.StopAsync(cancellationToken));
+                await logService.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"Stopping configuration {configurationName} with time ID {worker.Key} (version {activeConfigurations[configurationName].Version}).", configurationName, worker.Key);
+                configurationStopTasks.Add((worker.Value, worker.Value.StopAsync(cancellationToken)));
             }
 
             return configurationStopTasks;
         }
 
-        private async Task WaitTillConfigurationsStoppedAsync(List<Task> configurationStopTasks)
+        private async Task WaitTillConfigurationsStoppedAsync(List<(ConfigurationsWorker worker, Task task)> configurationStopTasks)
         {
             for (var i = 0; i < configurationStopTasks.Count; i++)
             {
-                await configurationStopTasks[i];
+                await configurationStopTasks[i].task;
+                configurationStopTasks[i].worker.Dispose();
 
+                await logService.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"Stopped configuration {configurationStopTasks[i].worker.Configuration.ServiceName} with time ID {configurationStopTasks[i].worker.RunScheme.TimeId}.", configurationStopTasks[i].worker.Configuration.ServiceName, configurationStopTasks[i].worker.RunScheme.TimeId);
                 await logService.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.", LogName);
             }
         }
