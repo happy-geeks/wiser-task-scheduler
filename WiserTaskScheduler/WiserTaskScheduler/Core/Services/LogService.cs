@@ -22,11 +22,13 @@ namespace WiserTaskScheduler.Core.Services
     {
         private readonly IServiceProvider serviceProvider;
         private readonly ISlackChatService slackChatService;
+        private readonly WtsSettings settings;
         
         public LogService(IServiceProvider serviceProvider, ISlackChatService slackChatService, IOptions<WtsSettings> settings)
         {
             this.serviceProvider = serviceProvider;
             this.slackChatService = slackChatService;
+            this.settings = settings.Value;
         }
 
         /// <inheritdoc />
@@ -66,6 +68,8 @@ namespace WiserTaskScheduler.Core.Services
             {
                 return;
             }
+
+            message = ObfuscateText(message);
 
             switch (logScope)
             {
@@ -145,6 +149,26 @@ Message:
                 default:
                     throw new ArgumentOutOfRangeException(nameof(logScope), logScope.ToString());
             }
+        }
+
+        /// <summary>
+        /// Obfuscate the text based on the credentials in the settings.
+        /// </summary>
+        /// <param name="text">The text to obfuscate.</param>
+        /// <returns>Returns the given text with all credentials obfuscated.</returns>
+        private string ObfuscateText(string text)
+        {
+            if (settings.Credentials == null)
+            {
+                return text;
+            }
+            
+            foreach(var credential in settings.Credentials)
+            {
+                text = text.Replace(credential.Value, "*****");
+            }
+
+            return text;
         }
     }
 }
