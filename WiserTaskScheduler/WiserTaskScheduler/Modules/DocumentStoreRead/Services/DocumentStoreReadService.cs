@@ -24,6 +24,9 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
     private readonly ILogService logService;
     private readonly ILogger<CleanupItemsService> logger;
 
+    private string connectionString;
+    private string documentStoreConnectionString;
+
     public DocumentStoreReadService(IServiceProvider serviceProvider, ILogService logService, ILogger<CleanupItemsService> logger)
     {
         this.serviceProvider = serviceProvider;
@@ -34,6 +37,8 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
     /// <inheritdoc />
     public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
     {
+        connectionString = configuration.ConnectionString;
+        documentStoreConnectionString = configuration.DocumentStoreConnectionString;
         return Task.CompletedTask;
     }
 
@@ -43,6 +48,12 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
         var documentStoreReadItem = (DocumentStoreReadModel)action;
 
         using var scope = serviceProvider.CreateScope();
+
+        var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
+
+        var documentStoreConnection = scope.ServiceProvider.GetRequiredService<IDocumentStoreConnection>();
+        documentStoreConnection.ChangeConnectionString(documentStoreConnectionString);
 
         var documentStorageService = scope.ServiceProvider.GetRequiredService<IDocumentStorageService>();
         var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();

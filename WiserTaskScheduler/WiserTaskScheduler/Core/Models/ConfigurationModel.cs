@@ -51,6 +51,11 @@ namespace WiserTaskScheduler.Core.Models
         public string ConnectionString { get; set; }
 
         /// <summary>
+        /// Gets or sets the connection string that is used for the document store.
+        /// </summary>
+        public string DocumentStoreConnectionString { get; set; }
+
+        /// <summary>
         /// Gets or sets the log settings.
         /// </summary>
         public LogSettings LogSettings { get; set; }
