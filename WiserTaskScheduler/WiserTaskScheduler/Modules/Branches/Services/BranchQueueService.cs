@@ -138,6 +138,7 @@ ORDER BY start_on ASC, id ASC");
             var stopwatch = new Stopwatch();
             stopwatch.Start();
             var queueId = dataRowWithSettings.Field<int>("id");
+            databaseConnection.SetCommandTimeout(900);
             databaseConnection.AddParameter("queueId", queueId);
             databaseConnection.AddParameter("now", startDate);
             await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET started_on = ?now WHERE id = ?queueId");
@@ -414,16 +415,19 @@ UNION ALL
                             }
                             else
                             {
-                                foreach (var linkType in linkTypes)
+                                for (var i = 0; i < linkTypes.Count; i++)
                                 {
+                                    var linkType = linkTypes[i];
                                     var linkTablePrefix = wiserItemsService.GetTablePrefixForLink(linkType);
                                     var itemTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkType.SourceEntityType);
+                                    databaseConnection.AddParameter($"linkType{i}", linkType.Type);
+                                    databaseConnection.AddParameter($"sourceEntityType{i}", linkType.SourceEntityType);
                                     queryBuilder.AppendLine($@"UNION ALL
 (
     SELECT {String.Format(columnsClause, "linkedItem.")}
     FROM `{originalDatabase}`.`{tableName}` AS item
-    JOIN `{originalDatabase}`.`{linkTablePrefix}{WiserTableNames.WiserItemLink}` AS link ON link.destination_item_id = item.id
-    JOIN `{originalDatabase}`.`{itemTablePrefix}{WiserTableNames.WiserItem}` AS linkedItem ON linkedItem.id = link.item_id
+    JOIN `{originalDatabase}`.`{linkTablePrefix}{WiserTableNames.WiserItemLink}` AS link ON link.destination_item_id = item.id AND link.type = ?linkType{i}
+    JOIN `{originalDatabase}`.`{itemTablePrefix}{WiserTableNames.WiserItem}` AS linkedItem ON linkedItem.id = link.item_id AND linkedItem.entity_type = ?sourceEntityType{i}
     {whereClause}
     {orderBy}
 )");
