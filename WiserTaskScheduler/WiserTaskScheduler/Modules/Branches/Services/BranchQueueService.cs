@@ -260,8 +260,6 @@ FROM (
                     }
                 }
 
-                await databaseConnection.BeginTransactionAsync();
-
                 var allLinkTypes = await wiserItemsService.GetAllLinkTypeSettingsAsync();
 
                 // Fill the tables with data.
@@ -548,8 +546,6 @@ SELECT {String.Join(", ", columns)} FROM `{originalDatabase}`.`{tableName}`";
                     await databaseConnection.ExecuteAsync(query);
                 }
 
-                await databaseConnection.CommitTransactionAsync();
-
                 // Add triggers to the new database, after inserting all data, so that the wiser_history table will still be empty.
                 // We use wiser_history to later synchronise all changes to production, so it needs to be empty before the user starts to make changes in the new branch.
                 query = @"SELECT 
@@ -597,7 +593,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                             query = $"SET NAMES {subDataTable.Rows[0].Field<string>(3)} COLLATE {subDataTable.Rows[0].Field<string>(4)}; {query.Replace($" DEFINER=`{definerParts[0]}`@`{definerParts[1]}`", " DEFINER=CURRENT_USER")}";
                             command.CommandText = query;
                             await command.ExecuteNonQueryAsync();
-                        }
+                         }
                     }
                 }
             }
@@ -605,8 +601,6 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
             {
                 error = exception.ToString();
 
-                // Rollback transaction if started
-                await databaseConnection.RollbackTransactionAsync(false);
                 await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Failed to create the branch '{settings.DatabaseName}'. Error: {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
 
                 // Save the error in the queue and set the finished on datetime to now.
