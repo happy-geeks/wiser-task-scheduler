@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
+using System.Linq;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Enums;
@@ -25,7 +27,6 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
     private readonly ILogger<CleanupItemsService> logger;
 
     private string connectionString;
-    private string documentStoreConnectionString;
 
     public DocumentStoreReadService(IServiceProvider serviceProvider, ILogService logService, ILogger<CleanupItemsService> logger)
     {
@@ -38,7 +39,6 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
     public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
     {
         connectionString = configuration.ConnectionString;
-        documentStoreConnectionString = configuration.DocumentStoreConnectionString;
         return Task.CompletedTask;
     }
 
@@ -48,28 +48,37 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
         var documentStoreReadItem = (DocumentStoreReadModel)action;
 
         using var scope = serviceProvider.CreateScope();
-
         var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
         await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
-
-        var documentStoreConnection = scope.ServiceProvider.GetRequiredService<IDocumentStoreConnection>();
-        documentStoreConnection.ChangeConnectionString(documentStoreConnectionString);
-
-        var documentStorageService = scope.ServiceProvider.GetRequiredService<IDocumentStorageService>();
         var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
 
-        var entitySettings = await wiserItemsService.GetEntityTypeSettingsAsync(documentStoreReadItem.EntityName);
-        if (entitySettings.Id == 0)
-        {
-            entitySettings = null;
-        }
-
-        IReadOnlyCollection<(WiserItemModel model, string documentId)> items;
+        var prefix = await wiserItemsService.GetTablePrefixForEntityAsync(documentStoreReadItem.EntityName);
+        var items = new List<WiserItemModel>();
+        
         try
         {
-            items = await documentStorageService.GetItemsAsync("", new Dictionary<string, object>(), entitySettings);
+            var dataTable = await databaseConnection.GetAsync($"""
+                SELECT id
+                FROM {prefix}{WiserTableNames.WiserItem}
+                WHERE entity_type = ?entityType
+                AND (
+	                json_last_processed_date IS NULL
+	                OR json_last_processed_date < changed_on
+                )
+""");
 
-            if (items.Count == 0)
+            foreach (DataRow row in dataTable.Rows)
+            {
+                var item = await wiserItemsService.GetItemDetailsAsync(row.Field<ulong>("id"));
+                if (item == null)
+                {
+                    continue;
+                }
+
+                items.Add(item);
+            }
+
+            if (!items.Any())
             {
                 return new JObject()
                 {
@@ -120,7 +129,6 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
                 }
                 
                 await wiserItemsService.SaveAsync(item.model, username: documentStoreReadItem.UsernameForLogging, storeTypeOverride: StoreType.Table, userId: documentStoreReadItem.UserId);
-                await documentStorageService.DeleteItemAsync(item.documentId, entitySettings);
             }
         }
         catch (Exception e)
