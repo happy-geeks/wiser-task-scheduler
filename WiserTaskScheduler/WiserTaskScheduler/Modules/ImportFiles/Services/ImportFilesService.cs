@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml;
-using System.Xml.XPath;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
@@ -51,13 +50,13 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
             {
                 return await ImportFileAsync(importFile, ReplacementHelper.EmptyRows, resultSets, configurationServiceName, importFile.UseResultSet);
             }
-            
+
             var jArray = new JArray();
 
             if (String.IsNullOrWhiteSpace(importFile.UseResultSet))
             {
                 await logService.LogError(logger, LogScopes.StartAndStop, importFile.LogSettings, $"The import in configuration '{configurationServiceName}', time ID '{importFile.TimeId}', order '{importFile.Order}' is set to not be a single file but no result set has been provided. If the information is not dynamic set action to single file, otherwise provide a result set to use.", configurationServiceName, importFile.TimeId, importFile.Order);
-                
+
                 return new JObject
                 {
                     {"Results", jArray}
@@ -90,7 +89,7 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
         private async Task<JObject> ImportFileAsync(ImportFileModel importFile, List<int> rows, JObject resultSets, string configurationServiceName, string useResultSet)
         {
             var filePath = importFile.FilePath;
-            
+
             // Replace the file path if a result set is used.
             if (!String.IsNullOrWhiteSpace(useResultSet))
             {
@@ -107,7 +106,7 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
             {
                 await logService.LogError(logger, LogScopes.RunStartAndStop, importFile.LogSettings, $"Failed to import file or directory '{importFile.FilePath}'. Path does not exists.", configurationServiceName, importFile.TimeId, importFile.Order);
 
-                return new JObject()
+                return new JObject
                 {
                     {"Success", false}
                 };
@@ -119,7 +118,7 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
                 {
                     Directory.CreateDirectory(importFile.ProcessedFolder);
                 }
-                
+
                 if (!Directory.Exists(filePath)) // Single file to import
                 {
                     return await ImportSingleFileAsync(importFile, filePath, configurationServiceName);
@@ -129,7 +128,7 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
                 var jArray = new JArray();
                 foreach(var file in Directory.GetFiles(filePath, importFile.SearchPattern, SearchOption.TopDirectoryOnly))
                 {
-                   JObject result = await ImportSingleFileAsync(importFile, file, configurationServiceName);
+                   var result = await ImportSingleFileAsync(importFile, file, configurationServiceName);
                    if (result.ContainsKey("Success") && !(bool) result["Success"]) // Don't add failed imports to the result set.
                    {
                        continue;
@@ -144,7 +143,9 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
             }
             catch (Exception e)
             {
-                return new JObject()
+                await logService.LogError(logger, LogScopes.RunStartAndStop, importFile.LogSettings, $"Failed to import file or directory '{importFile.FilePath}'. Error: {e}.", configurationServiceName, importFile.TimeId, importFile.Order);
+
+                return new JObject
                 {
                     {"Success", false}
                 };
@@ -169,10 +170,10 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
                     default:
                         throw new NotImplementedException($"File type '{importFile.FileType}' is not yet implemented to be imported.");
                 }
-                
+
                 if (String.IsNullOrEmpty(importFile.ProcessedFolder))
                 {
-                    return importResult;    
+                    return importResult;
                 }
 
                 // Move file if successfully imported.
@@ -183,13 +184,13 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
             {
                 await logService.LogError(logger, LogScopes.RunStartAndStop, importFile.LogSettings, $"Failed to import file '{importFile.FilePath}'.\n{e}", configurationServiceName, importFile.TimeId, importFile.Order);
 
-                return new JObject()
+                return new JObject
                 {
                     {"Success", false}
                 };
             }
         }
-        
+
 
         /// <summary>
         /// Import a CSV file.
@@ -205,7 +206,7 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
 
             if (!importFile.HasFieldNames)
             {
-                var firstColumnLenght = -1;
+                var firstColumnLength = -1;
 
                 for (var i = 0; i < lines.Length; i++)
                 {
@@ -218,30 +219,30 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
                     var columns = new JArray(lines[i].Split(importFile.Separator));
 
                     // Use the first row to determine the number of columns to be expected in each row.
-                    if (firstColumnLenght == -1)
+                    if (firstColumnLength == -1)
                     {
-                        firstColumnLenght = columns.Count;
+                        firstColumnLength = columns.Count;
                     }
-                    else if(columns.Count != firstColumnLenght)
+                    else if(columns.Count != firstColumnLength)
                     {
                         await logService.LogWarning(logger, LogScopes.RunBody, importFile.LogSettings, $"Did not import line {i} due to missing columns in file {filePath}", configurationServiceName, importFile.TimeId, importFile.Order);
                         continue;
                     }
 
-                    var row = new JObject()
+                    var row = new JObject
                     {
                         {"Columns", columns }
                     };
                     jArray.Add(row);
                 }
 
-                return new JObject()
+                return new JObject
                 {
                     {"Success", true},
                     {"Results", jArray}
                 };
             }
-            
+
             var fieldNames = lines[0].Split(importFile.Separator);
 
             for (var i = 1; i < lines.Length; i++)
@@ -275,8 +276,8 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
             {
                 fieldArray.Add(fieldName);
             }
-            
-            return new JObject()
+
+            return new JObject
             {
                 {"Success", true},
                 {"Fields",  fieldArray},
@@ -297,23 +298,54 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
             var xmlDocument = new XmlDocument();
             xmlDocument.LoadXml(xml);
 
-            if (importFile.XmlMapping?.Any() == false) // No mapping supplied, return the whole document.
+            if (importFile?.XmlMapping == null || importFile.XmlMapping.Any() == false) // No mapping supplied, return the whole document.
             {
                 return JObject.Parse(JsonConvert.SerializeXmlNode(xmlDocument));
             }
 
             // Mapping supplied, return the mapped values.
-            var result = new JObject();
-            foreach (XmlMapModel xmlMap in importFile.XmlMapping)
+            var result = new JArray();
+            var expressionWithIndex = importFile.XmlMapping.FirstOrDefault(mapping => mapping.XPathExpression.Contains("[j]"));
+            if (expressionWithIndex != null)
             {
-                XmlNode xmlNode = xmlDocument.SelectSingleNode(xmlMap.XPathExpression);
-                result.Add(xmlMap.ResultSetName, xmlNode?.InnerText ?? "");
+                var indexedKey = expressionWithIndex.XPathExpression[..expressionWithIndex.XPathExpression.IndexOf("[j]", StringComparison.Ordinal)];
+                var nodes = xmlDocument.SelectNodes(indexedKey)?.Count ?? 0;
+                if (nodes == 0)
+                {
+                    return new JObject
+                    {
+                        {"Success", true},
+                        {"Results", result}
+                    };
+                }
+
+                // Add object for each node.
+                for (var i = 0; i < nodes; i++)
+                {
+                    result.Add(new JObject());
+                }
             }
-            
-            return new JObject()
+            else
+            {
+                // Add single object to result.
+                result.Add(new JObject());
+            }
+
+            for (var i = 0; i < result.Count; i++)
+            {
+                foreach (var xmlMap in importFile.XmlMapping)
+                {
+                    // Array indexers in XPath are 1-based, so add 1 to 'i' to select the correct item.
+                    var xPathExpression = xmlMap.XPathExpression.Replace("[j]", $"[{i + 1}]");
+                    var xmlNode = xmlDocument.SelectSingleNode(xPathExpression);
+                    ((JObject)result[i]).Add(xmlMap.ResultSetName, xmlNode?.InnerText ?? "");
+                }
+            }
+
+            return new JObject
             {
                 {"Success", true},
-                {"Results", new JArray(result)}
+                {"Results", result}
             };
         }
     }
