@@ -18,7 +18,7 @@ using GeeksCoreLibrary.Modules.DataSelector.Interfaces;
 using GeeksCoreLibrary.Modules.DataSelector.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using MySql.Data.MySqlClient;
+using MySqlConnector;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
@@ -704,7 +704,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                 {
                     environmentCommand.CommandText = $"SELECT * FROM `{WiserTableNames.WiserHistory}` ORDER BY id ASC";
                     using var environmentAdapter = new MySqlDataAdapter(environmentCommand);
-                    await environmentAdapter.FillAsync(dataTable);
+                    environmentAdapter.Fill(dataTable);
                 }
 
                 // Srt saveHistory and username parameters for all queries.
@@ -758,7 +758,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                     command.CommandText = $"SELECT DISTINCT table_name FROM `{WiserTableNames.WiserIdMappings}`";
                     var mappingDataTable = new DataTable();
                     using var adapter = new MySqlDataAdapter(command);
-                    await adapter.FillAsync(mappingDataTable);
+                    adapter.Fill(mappingDataTable);
                     foreach (DataRow dataRow in mappingDataTable.Rows)
                     {
                         var tableName = dataRow.Field<string>("table_name");
@@ -792,7 +792,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                     using var environmentAdapter = new MySqlDataAdapter(environmentCommand);
 
                     var idMappingDatatable = new DataTable();
-                    await environmentAdapter.FillAsync(idMappingDatatable);
+                    environmentAdapter.Fill(idMappingDatatable);
                     foreach (DataRow dataRow in idMappingDatatable.Rows)
                     {
                         var tableName = dataRow.Field<string>("table_name");
@@ -888,11 +888,11 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                                     branchCommand.CommandText = $"SELECT type, item_id, destination_item_id FROM `{tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink)}` WHERE id = ?linkId";
                                     var linkDataTable = new DataTable();
                                     using var branchAdapter = new MySqlDataAdapter(branchCommand);
-                                    await branchAdapter.FillAsync(linkDataTable);
+                                    branchAdapter.Fill(linkDataTable);
                                     if (linkDataTable.Rows.Count == 0)
                                     {
                                         branchCommand.CommandText = $"SELECT type, item_id, destination_item_id FROM `{tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink)}{WiserTableNames.ArchiveSuffix}` WHERE id = ?linkId";
-                                        await branchAdapter.FillAsync(linkDataTable);
+                                        branchAdapter.Fill(linkDataTable);
                                         if (linkDataTable.Rows.Count == 0)
                                         {
                                             // This should never happen, but just in case the ID somehow doesn't exist anymore, log a warning and continue on to the next item.
@@ -973,7 +973,7 @@ SELECT item_id, itemlink_id FROM `{tableName}{WiserTableNames.ArchiveSuffix}` WH
 LIMIT 1";
                                 var fileDataTable = new DataTable();
                                 using var adapter = new MySqlDataAdapter(branchCommand);
-                                await adapter.FillAsync(fileDataTable);
+                                adapter.Fill(fileDataTable);
                                 if (fileDataTable.Rows.Count == 0)
                                 {
                                     historyItemsSynchronised.Add(historyId);
@@ -1078,12 +1078,12 @@ LIMIT 1";
                                     AddParametersToCommand(sqlParameters, environmentCommand);
                                     environmentCommand.CommandText = $"SELECT entity_type FROM `{tablePrefix}{WiserTableNames.WiserItem}` WHERE id = ?itemId";
                                     using var environmentAdapter = new MySqlDataAdapter(environmentCommand);
-                                    await environmentAdapter.FillAsync(itemDataTable);
+                                    environmentAdapter.Fill(itemDataTable);
                                     if (itemDataTable.Rows.Count == 0)
                                     {
                                         // If item doesn't exist, check the archive table, it might have been deleted.
                                         environmentCommand.CommandText = $"SELECT entity_type FROM `{tablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix}` WHERE id = ?itemId";
-                                        await environmentAdapter.FillAsync(itemDataTable);
+                                        environmentAdapter.Fill(itemDataTable);
                                         if (itemDataTable.Rows.Count == 0)
                                         {
                                             await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find item with ID '{originalItemId}', so skipping it...", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
@@ -1271,7 +1271,7 @@ WHERE id = ?itemId";
                                     environmentCommand.CommandText = $"SELECT id FROM `{tableName}` WHERE item_id = ?originalItemId AND destination_item_id = ?originalDestinationItemId AND type = ?type";
                                     var getLinkIdDataTable = new DataTable();
                                     using var environmentAdapter = new MySqlDataAdapter(environmentCommand);
-                                    await environmentAdapter.FillAsync(getLinkIdDataTable);
+                                    environmentAdapter.Fill(getLinkIdDataTable);
                                     if (getLinkIdDataTable.Rows.Count == 0)
                                     {
                                         await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find link ID with itemId = {originalItemId}, destinationItemId = {originalDestinationItemId} and type = {linkType}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
@@ -2028,7 +2028,7 @@ SELECT entity_type FROM {sourceTablePrefix}{WiserTableNames.WiserItem}{WiserTabl
 LIMIT 1";
                 var sourceDataTable = new DataTable();
                 using var sourceAdapter = new MySqlDataAdapter(command);
-                await sourceAdapter.FillAsync(sourceDataTable);
+                sourceAdapter.Fill(sourceDataTable);
                 if (sourceDataTable.Rows.Count == 0 || !String.Equals(sourceDataTable.Rows[0].Field<string>("entity_type"), linkTypeSettings.SourceEntityType))
                 {
                     continue;
@@ -2041,7 +2041,7 @@ SELECT entity_type FROM {destinationTablePrefix}{WiserTableNames.WiserItem}{Wise
 LIMIT 1";
                 var destinationDataTable = new DataTable();
                 using var destinationAdapter = new MySqlDataAdapter(command);
-                await destinationAdapter.FillAsync(destinationDataTable);
+                destinationAdapter.Fill(destinationDataTable);
                 if (destinationDataTable.Rows.Count == 0 || !String.Equals(destinationDataTable.Rows[0].Field<string>("entity_type"), linkTypeSettings.DestinationEntityType))
                 {
                     continue;
