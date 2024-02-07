@@ -12,17 +12,6 @@ public class DocumentStoreReadModel : ActionModel
     /// Leave empty if not targeting a specific entity
     /// </summary>
     public string EntityName { get; set; }
-
-    /// <summary>
-    /// Gets or Sets the wiser userId that will be used when saving items to the tables
-    /// </summary>
-    [Required]
-    public ulong UserId { get; set; }
-
-    /// <summary>
-    /// Gets or sets the user name
-    /// </summary>
-    public string UsernameForLogging { get; set; } = "WTS (Document Store Read)";
     
     /// <summary>
     /// Gets or sets what published Environment the item needs to be set as

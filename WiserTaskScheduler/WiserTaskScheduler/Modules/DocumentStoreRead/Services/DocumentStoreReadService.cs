@@ -46,6 +46,21 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
     public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
     {
         var documentStoreReadItem = (DocumentStoreReadModel)action;
+        
+        var processedItems = 0;
+        var successfulItems = 0;
+        var failedItems = 0;
+
+        if (String.IsNullOrWhiteSpace(documentStoreReadItem.EntityName))
+        {
+            await logService.LogError(logger, LogScopes.RunStartAndStop, documentStoreReadItem.LogSettings, "Can't process items because no entity name has been provided.", configurationServiceName, documentStoreReadItem.TimeId, documentStoreReadItem.Order);
+            return new JObject()
+            {
+                { "ItemsProcessed", processedItems },
+                { "ItemsSuccessful", successfulItems },
+                { "ItemsFailed", failedItems }
+            };
+        }
 
         using var scope = serviceProvider.CreateScope();
         var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
@@ -53,116 +68,62 @@ public class DocumentStoreReadService : IDocumentStoreReadService, IScopedServic
         var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
 
         var prefix = await wiserItemsService.GetTablePrefixForEntityAsync(documentStoreReadItem.EntityName);
-        var items = new List<WiserItemModel>();
+        var entityTypeSettings = await wiserItemsService.GetEntityTypeSettingsAsync(documentStoreReadItem.EntityName);
         
-        try
-        {
-            var dataTable = await databaseConnection.GetAsync($"""
-                SELECT id
-                FROM {prefix}{WiserTableNames.WiserItem}
-                WHERE entity_type = ?entityType
-                AND (
-	                json_last_processed_date IS NULL
-	                OR json_last_processed_date < changed_on
-                )
+        var dataTable = await databaseConnection.GetAsync($"""
+            SELECT id
+            FROM {prefix}{WiserTableNames.WiserItem}
+            WHERE entity_type = ?entityType
+            AND json IS NOT NULL
+            AND (
+	            json_last_processed_date IS NULL
+	            OR json_last_processed_date < changed_on
+            )
 """);
 
-            foreach (DataRow row in dataTable.Rows)
+        foreach (DataRow row in dataTable.Rows)
+        {
+            try
             {
-                var item = await wiserItemsService.GetItemDetailsAsync(row.Field<ulong>("id"));
+                processedItems++;
+
+                var itemId = row.Field<ulong>("id");
+                var item = await wiserItemsService.GetItemDetailsAsync(itemId, entityType: documentStoreReadItem.EntityName, skipPermissionsCheck: true);
+
                 if (item == null)
                 {
+                    await logService.LogWarning(logger, LogScopes.RunBody, documentStoreReadItem.LogSettings, $"Failed to process wiser item with ID '{itemId}' because it could not be found.", configurationServiceName, documentStoreReadItem.TimeId, documentStoreReadItem.Order);
+                    failedItems++;
                     continue;
-                }
-
-                items.Add(item);
-            }
-
-            if (!items.Any())
-            {
-                return new JObject()
-                {
-                    { "Success", true },
-                    { "ItemsRead", 0 }
-                };
-            }
-        }
-        catch (Exception e)
-        {
-            string message;
-            if (String.IsNullOrEmpty(documentStoreReadItem.EntityName))
-            {
-                message = $"Failed to read wiser items from document store due to exception:\n{e}";
-            }
-            else
-            {
-                message = $"Failed to read wiser items of entity {documentStoreReadItem.EntityName} from document store due to exception:\n{e}";
-            }
-            
-            await logService.LogError(
-                logger, 
-                LogScopes.RunStartAndStop, 
-                documentStoreReadItem.LogSettings, 
-                message,
-                configurationServiceName,
-                documentStoreReadItem.TimeId,
-                documentStoreReadItem.Order);
-            return new JObject()
-            {
-                { "Success", false },
-                { "ItemsRead", 0 },
-            };
-        }
-        
-        try
-        {
-            foreach (var item in items)
-            {
-                if (!String.IsNullOrEmpty(documentStoreReadItem.EntityName) && item.model.EntityType != documentStoreReadItem.EntityName)
-                {
-                    continue;
-                }
-
-                if (documentStoreReadItem.PublishedEnvironmentToSet != null)
-                {
-                    item.model.PublishedEnvironment = (Environments)documentStoreReadItem.PublishedEnvironmentToSet;
                 }
                 
-                await wiserItemsService.SaveAsync(item.model, username: documentStoreReadItem.UsernameForLogging, storeTypeOverride: StoreType.Table, userId: documentStoreReadItem.UserId);
+                if (documentStoreReadItem.PublishedEnvironmentToSet != null)
+                {
+                    item.PublishedEnvironment = (Environments) documentStoreReadItem.PublishedEnvironmentToSet;
+                }
+
+                if (entityTypeSettings.StoreType == StoreType.Hybrid)
+                {
+                    // Set the json to null to mark the item as processed. Hybrid mode will then no longer load and update by JSON.
+                    item.Json = null;
+                }
+
+                item.JsonLastProcessedDate = DateTime.Now;
+                await wiserItemsService.SaveAsync(item, username: "WTS", storeTypeOverride: StoreType.Table, skipPermissionsCheck: true);
+                successfulItems++;
+            }
+            catch (Exception e)
+            {
+                failedItems++;
+                await logService.LogWarning(logger, LogScopes.RunBody, documentStoreReadItem.LogSettings, $"Failed to process wiser item due to exception:\n{e}", configurationServiceName, documentStoreReadItem.TimeId, documentStoreReadItem.Order);
             }
         }
-        catch (Exception e)
-        {
-            string message;
-            if (String.IsNullOrEmpty(documentStoreReadItem.EntityName))
-            {
-                message = $"Failed to store wiser items due to exception:\n{e}";
-            }
-            else
-            {
-                message = $"Failed to store wiser items of entity {documentStoreReadItem.EntityName} due to exception:\n{e}";
-            }
-            
-            await logService.LogError(
-                logger, 
-                LogScopes.RunStartAndStop, 
-                documentStoreReadItem.LogSettings, 
-                message, 
-                configurationServiceName, 
-                documentStoreReadItem.TimeId, 
-                documentStoreReadItem.Order);
-
-            return new JObject()
-            {
-                { "Success", false },
-                { "ItemsRead", 0 },
-            };
-        }
-
+        
         return new JObject()
         {
-            { "Success", true },
-            { "ItemsRead", items.Count },
+            { "ItemsProcessed", processedItems },
+            { "ItemsSuccessful", successfulItems },
+            { "ItemsFailed", failedItems }
         };
     }
 }
