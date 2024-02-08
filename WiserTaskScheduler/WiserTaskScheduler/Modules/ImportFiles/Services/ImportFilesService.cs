@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml;
@@ -177,7 +178,15 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Services
                 }
 
                 // Move file if successfully imported.
-                File.Move(filePath, Path.Combine(importFile.ProcessedFolder, Path.GetFileName(filePath)));
+                var destinationFileName = new StringBuilder(Path.GetFileNameWithoutExtension(filePath));
+                if (importFile.AddSuffixToFileNameAfterProcessing)
+                {
+                    destinationFileName.Append($"_{DateTime.Now:yyyyMMddHHmmss}");
+                }
+
+                destinationFileName.Append(Path.GetExtension(filePath));
+
+                File.Move(filePath, Path.Combine(importFile.ProcessedFolder, destinationFileName.ToString()));
                 return importResult;
             }
             catch (Exception e)

@@ -27,7 +27,14 @@ namespace WiserTaskScheduler.Modules.ImportFiles.Models
         /// Get or sets the folder to move the file to after it has been processed. If empty, the file will not be moved.
         /// </summary>
         public string ProcessedFolder { get; set; }
-        
+
+        /// <summary>
+        /// Gets or sets whether a suffix should be added to the file name when moving it to the processed folder.
+        /// The suffix will be the current date and time in the format <c>YYYYMMDDHHMMSS</c>.
+        /// This only applies if <see cref="ProcessedFolder"/> is set.
+        /// </summary>
+        public bool AddSuffixToFileNameAfterProcessing { get; set; }
+
         /// <summary>
         /// Gets or sets the separator to split a line on.
         /// The value "\t" can be used for tab-separated files.
