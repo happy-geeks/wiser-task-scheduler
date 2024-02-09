@@ -593,7 +593,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                             query = $"SET NAMES {subDataTable.Rows[0].Field<string>(3)} COLLATE {subDataTable.Rows[0].Field<string>(4)}; {query.Replace($" DEFINER=`{definerParts[0]}`@`{definerParts[1]}`", " DEFINER=CURRENT_USER")}";
                             command.CommandText = query;
                             await command.ExecuteNonQueryAsync();
-                         }
+                        }
                     }
                 }
             }
