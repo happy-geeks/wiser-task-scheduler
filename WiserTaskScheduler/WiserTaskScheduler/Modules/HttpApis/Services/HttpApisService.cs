@@ -130,6 +130,7 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
         /// <returns></returns>
         private async Task<JObject> ExecuteRequest(HttpApiModel httpApi, JObject resultSets, string useResultSet, List<int> rows, string configurationServiceName, string overrideUrl = "", int forcedIndex = -1)
         {
+            var extraValuesToObfuscate = new List<string>();
             var url = String.IsNullOrWhiteSpace(overrideUrl) ? httpApi.Url : overrideUrl;
 
             // If a result set needs to be used apply it on the url.
@@ -144,7 +145,7 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                 url = ReplacementHelper.ReplaceText(url, rows, parameterKeys, usingResultSet, httpApi.HashSettings, htmlEncode: true);
             }
 
-            await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Url: {url}, method: {httpApi.Method}", configurationServiceName, httpApi.TimeId, httpApi.Order);
+            await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Url: {url}, method: {httpApi.Method}", configurationServiceName, httpApi.TimeId, httpApi.Order, extraValuesToObfuscate);
             var request = new HttpRequestMessage(new HttpMethod(httpApi.Method), url);
 
             foreach (var header in httpApi.Headers)
@@ -174,17 +175,35 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                 }
                 else
                 {
-                    await logService.LogWarning(logger, LogScopes.RunBody, httpApi.LogSettings, $"OAuth '{httpApi.OAuth}' not found for configuration '{configurationServiceName}' with time ID '{httpApi.TimeId}' and order '{httpApi.Order}'. Add the '{httpApi.OAuth}' to the OAuth configuration or remove usage.", configurationServiceName, httpApi.TimeId, httpApi.Order);
+                    await logService.LogWarning(logger, LogScopes.RunBody, httpApi.LogSettings, $"OAuth '{httpApi.OAuth}' not found for configuration '{configurationServiceName}' with time ID '{httpApi.TimeId}' and order '{httpApi.Order}'. Add the '{httpApi.OAuth}' to the OAuth configuration or remove usage.", configurationServiceName, httpApi.TimeId, httpApi.Order, extraValuesToObfuscate);
+                }
+            }
+
+            // If an authorization header has been added through custom headers or OAuth add it to the list of extra values to obfuscate.
+            if (request.Headers.Contains("Authorization"))
+            {
+                foreach (var value in request.Headers.GetValues("Authorization"))
+                {
+                    extraValuesToObfuscate.Add(value);
                 }
             }
             
-            await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Headers: {request.Headers}", configurationServiceName, httpApi.TimeId, httpApi.Order);
+            // If an x-api-key header has been added through custom headers add it to the list of extra values to obfuscate.
+            if (request.Headers.Contains("X-API-Key"))
+            {
+                foreach (var value in request.Headers.GetValues("X-API-Key"))
+                {
+                    extraValuesToObfuscate.Add(value);
+                }
+            }
+            
+            await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Headers: {request.Headers}", configurationServiceName, httpApi.TimeId, httpApi.Order, extraValuesToObfuscate);
 
             if (httpApi.Body != null)
             {
                 var body = bodyService.GenerateBody(httpApi.Body, rows, resultSets, httpApi.HashSettings, forcedIndex);
 
-                await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Body:\n{body}", configurationServiceName, httpApi.TimeId, httpApi.Order);
+                await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Body:\n{body}", configurationServiceName, httpApi.TimeId, httpApi.Order, extraValuesToObfuscate);
                 request.Content = new StringContent(body)
                 {
                     Headers = {ContentType = new MediaTypeHeaderValue(httpApi.Body.ContentType)}
@@ -215,7 +234,7 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                 retryOAuthUnauthorizedResponse = false;
                 await oAuthService.RequestWasUnauthorizedAsync(httpApi.OAuth);
 
-                await logService.LogWarning(logger, LogScopes.RunBody, httpApi.LogSettings, $"Request to {url} return \"Unauthorized\" on OAuth token. Retrying once with new OAuth token.", configurationServiceName, httpApi.TimeId, httpApi.Order);
+                await logService.LogWarning(logger, LogScopes.RunBody, httpApi.LogSettings, $"Request to {url} return \"Unauthorized\" on OAuth token. Retrying once with new OAuth token.", configurationServiceName, httpApi.TimeId, httpApi.Order, extraValuesToObfuscate);
                 return await ExecuteRequest(httpApi, resultSets, useResultSet, rows, overrideUrl);
             }
 
@@ -276,7 +295,7 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
             var usedResultSet = String.IsNullOrWhiteSpace(useResultSet) ? null : ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? useResultSetKeyParts[0] : useResultSet, ReplacementHelper.EmptyRows, resultSets);
             resultSet.Add("UsedResultSet", usedResultSet);
 
-            await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Status: {resultSet["StatusCode"]}, Result body:\n{responseBody}", configurationServiceName, httpApi.TimeId, httpApi.Order);
+            await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Status: {resultSet["StatusCode"]}, Result body:\n{responseBody}", configurationServiceName, httpApi.TimeId, httpApi.Order, extraValuesToObfuscate);
 
             return resultSet;
         }

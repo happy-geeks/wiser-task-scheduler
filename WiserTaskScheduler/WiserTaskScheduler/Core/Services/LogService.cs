@@ -32,44 +32,44 @@ namespace WiserTaskScheduler.Core.Services
         }
 
         /// <inheritdoc />
-        public async Task LogDebug<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0)
+        public async Task LogDebug<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0, List<string> extraValuesToObfuscate = null)
         {
-            await Log(logger, LogLevel.Debug, logScope, logSettings, message, configurationName, timeId, order);
+            await Log(logger, LogLevel.Debug, logScope, logSettings, message, configurationName, timeId, order, extraValuesToObfuscate);
         }
 
         /// <inheritdoc />
-        public async Task LogInformation<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0)
+        public async Task LogInformation<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0, List<string> extraValuesToObfuscate = null)
         {
-            await Log(logger, LogLevel.Information, logScope, logSettings, message, configurationName, timeId, order);
+            await Log(logger, LogLevel.Information, logScope, logSettings, message, configurationName, timeId, order, extraValuesToObfuscate);
         }
 
         /// <inheritdoc />
-        public async Task LogWarning<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0)
+        public async Task LogWarning<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0, List<string> extraValuesToObfuscate = null)
         {
-            await Log(logger, LogLevel.Warning, logScope, logSettings, message, configurationName, timeId, order);
+            await Log(logger, LogLevel.Warning, logScope, logSettings, message, configurationName, timeId, order, extraValuesToObfuscate);
         }
 
         /// <inheritdoc />
-        public async Task LogError<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0)
+        public async Task LogError<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0, List<string> extraValuesToObfuscate = null)
         {
-            await Log(logger, LogLevel.Error, logScope, logSettings, message, configurationName, timeId, order);
+            await Log(logger, LogLevel.Error, logScope, logSettings, message, configurationName, timeId, order, extraValuesToObfuscate);
         }
 
         /// <inheritdoc />
-        public async Task LogCritical<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0)
+        public async Task LogCritical<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0, List<string> extraValuesToObfuscate = null)
         {
-            await Log(logger, LogLevel.Critical, logScope, logSettings, message, configurationName, timeId, order);
+            await Log(logger, LogLevel.Critical, logScope, logSettings, message, configurationName, timeId, order, extraValuesToObfuscate);
         }
 
         /// <inheritdoc />
-        public async Task Log<T>(ILogger<T> logger, LogLevel logLevel, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0)
+        public async Task Log<T>(ILogger<T> logger, LogLevel logLevel, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0, List<string> extraValuesToObfuscate = null)
         {
             if (logLevel < logSettings.LogMinimumLevel)
             {
                 return;
             }
 
-            message = ObfuscateText(message);
+            message = ObfuscateText(message, extraValuesToObfuscate);
 
             switch (logScope)
             {
@@ -155,9 +155,23 @@ Message:
         /// Obfuscate the text based on the credentials in the settings.
         /// </summary>
         /// <param name="text">The text to obfuscate.</param>
+        /// <param name="extraValuesToObfuscate">A list of extra values to obfuscate while writing logs. Used to obfuscate dynamic content such as authorization headers.</param>
         /// <returns>Returns the given text with all credentials obfuscated.</returns>
-        private string ObfuscateText(string text)
+        private string ObfuscateText(string text, List<string> extraValuesToObfuscate)
         {
+            if (String.IsNullOrWhiteSpace(text) || (settings.Credentials == null && extraValuesToObfuscate == null))
+            {
+                return text;
+            }
+            
+            if (extraValuesToObfuscate != null)
+            {
+                foreach (var value in extraValuesToObfuscate)
+                {
+                    text = text.Replace(value, "*****");
+                }
+            }
+            
             if (settings.Credentials == null)
             {
                 return text;

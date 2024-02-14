@@ -1,4 +1,5 @@
-﻿using System.Threading.Tasks;
+﻿using System.Collections.Generic;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Models;
@@ -18,7 +19,8 @@ namespace WiserTaskScheduler.Core.Interfaces
         /// <param name="configurationName">The name of the configuration from which is being logged.</param>
         /// <param name="timeId">The time id in the configuration from which is being logged.</param>
         /// <param name="order">The order in the time id in the configuration which is being logged.</param>
-        Task LogDebug<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0);
+        /// <param name="extraValuesToObfuscate">A list of extra values to obfuscate while writing logs. Used to obfuscate dynamic content such as authorization headers.</param>
+        Task LogDebug<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0, List<string> extraValuesToObfuscate = null);
 
         /// <summary>
         /// Log information.
@@ -31,7 +33,8 @@ namespace WiserTaskScheduler.Core.Interfaces
         /// <param name="configurationName">The name of the configuration from which is being logged.</param>
         /// <param name="timeId">The time id in the configuration from which is being logged.</param>
         /// <param name="order">The order in the time id in the configuration which is being logged.</param>
-        Task LogInformation<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0);
+        /// <param name="extraValuesToObfuscate">A list of extra values to obfuscate while writing logs. Used to obfuscate dynamic content such as authorization headers.</param>
+        Task LogInformation<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0, List<string> extraValuesToObfuscate = null);
 
         /// <summary>
         /// Log a warning.
@@ -44,7 +47,8 @@ namespace WiserTaskScheduler.Core.Interfaces
         /// <param name="configurationName">The name of the configuration from which is being logged.</param>
         /// <param name="timeId">The time id in the configuration from which is being logged.</param>
         /// <param name="order">The order in the time id in the configuration which is being logged.</param>
-        Task LogWarning<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0);
+        /// <param name="extraValuesToObfuscate">A list of extra values to obfuscate while writing logs. Used to obfuscate dynamic content such as authorization headers.</param>
+        Task LogWarning<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0, List<string> extraValuesToObfuscate = null);
 
         /// <summary>
         /// Log an error.
@@ -57,7 +61,8 @@ namespace WiserTaskScheduler.Core.Interfaces
         /// <param name="configurationName">The name of the configuration from which is being logged.</param>
         /// <param name="timeId">The time id in the configuration from which is being logged.</param>
         /// <param name="order">The order in the time id in the configuration which is being logged.</param>
-        Task LogError<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0);
+        /// <param name="extraValuesToObfuscate">A list of extra values to obfuscate while writing logs. Used to obfuscate dynamic content such as authorization headers.</param>
+        Task LogError<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0, List<string> extraValuesToObfuscate = null);
 
         /// <summary>
         /// Log critical.
@@ -70,7 +75,8 @@ namespace WiserTaskScheduler.Core.Interfaces
         /// <param name="configurationName">The name of the configuration from which is being logged.</param>
         /// <param name="timeId">The time id in the configuration from which is being logged.</param>
         /// <param name="order">The order in the time id in the configuration which is being logged.</param>
-        Task LogCritical<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0);
+        /// <param name="extraValuesToObfuscate">A list of extra values to obfuscate while writing logs. Used to obfuscate dynamic content such as authorization headers.</param>
+        Task LogCritical<T>(ILogger<T> logger, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0, List<string> extraValuesToObfuscate = null);
 
         /// <summary>
         /// Log a message.
@@ -84,6 +90,7 @@ namespace WiserTaskScheduler.Core.Interfaces
         /// <param name="configurationName">The name of the configuration from which is being logged.</param>
         /// <param name="timeId">The time id in the configuration from which is being logged.</param>
         /// <param name="order">The order in the time id in the configuration which is being logged.</param>
-        Task Log<T>(ILogger<T> logger, LogLevel logLevel, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0);
+        /// <param name="extraValuesToObfuscate">A list of extra values to obfuscate while writing logs. Used to obfuscate dynamic content such as authorization headers.</param>
+        Task Log<T>(ILogger<T> logger, LogLevel logLevel, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0, List<string> extraValuesToObfuscate = null);
     }
 }
