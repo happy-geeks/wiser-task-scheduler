@@ -137,15 +137,15 @@ FROM {WiserTableNames.WtsServices}
             parameters.Add("extraRun", extraRun);
         }
 
-        if (!querySetParts.Any())
-        {
-            return true;
-        }
-
         if (templateId >= 0)
         {
             querySetParts.Add("template_id = ?templateId");
             parameters.Add("templateId", templateId);
+        }
+
+        if (!querySetParts.Any())
+        {
+            return true;
         }
 
         try
