@@ -5,7 +5,6 @@ using System.Text;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
-using GeeksCoreLibrary.Core.Services;
 using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json.Linq;
@@ -31,6 +30,10 @@ namespace WiserTaskScheduler.Modules.Body.Services
         /// <inheritdoc />
         public string GenerateBody(BodyModel bodyModel, List<int> rows, JObject resultSets, HashSettingsModel hashSettings, int forcedIndex = -1)
         {
+            // Ensure the rows list has at least 3 items.
+            if (rows.Count < 2) rows.Add(0);
+            if (rows.Count < 3) rows.Add(0);
+            
             var finalBody = new StringBuilder();
 
             // Create a scope to get the string replacements service. It's needed to evaluate logic snippets.
@@ -39,6 +42,26 @@ namespace WiserTaskScheduler.Modules.Body.Services
 
             foreach (var bodyPart in bodyModel.BodyParts)
             {
+                if (bodyPart.InnerBody != null)
+                {
+                    if (bodyPart.SingleItem)
+                    {
+                        finalBody.Append(GenerateBody(bodyPart.InnerBody, rows, resultSets, hashSettings, rows[0]));
+                    }
+                    else
+                    {
+                        var array = ResultSetHelper.GetCorrectObject<JArray>(bodyPart.UseResultSet, rows, resultSets);
+                        for (var i = 0; i < array.Count; i++)
+                        {
+                            rows[1] = i; // Used as '[j]' in the key if the result set is based on another result set.
+                            finalBody.Append(GenerateBody(bodyPart.InnerBody, rows, resultSets, hashSettings, rows[0]));
+                            rows[2]++; // Used as '[k]' in the key if the result set is based on another result set that was already based on another result set.
+                        }
+                    }
+
+                    continue;
+                }
+                
                 var body = bodyPart.Text;
                 
                 // If an item-id is set, get the template from the database.

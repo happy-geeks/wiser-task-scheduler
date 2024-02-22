@@ -85,9 +85,10 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
 
             var rows = ResultSetHelper.GetCorrectObject<JArray>(generateFile.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
 
+            var indexRows = new List<int> { 0 };
             for (var i = 0; i < rows.Count; i++)
             {
-                var indexRows = new List<int> { i };
+                indexRows[0] = i;
                 jArray.Add(await GenerateFile(generateFile, indexRows, resultSets, configurationServiceName, $"{generateFile.UseResultSet}[{i}]", i));
             }
 

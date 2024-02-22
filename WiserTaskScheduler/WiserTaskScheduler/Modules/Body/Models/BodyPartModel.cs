@@ -49,5 +49,10 @@ namespace WiserTaskScheduler.Modules.Body.Models
         /// Gets or sets whether the logic snippets (<c>[if]...[else]...[endif]</c>) should be evaluated. 
         /// </summary>
         public bool EvaluateLogicSnippets { get; set; }
+        
+        /// <summary>
+        /// Gets or sets an inner body to create complexer content.
+        /// </summary>
+        public BodyModel InnerBody { get; set; }
     }
 }
