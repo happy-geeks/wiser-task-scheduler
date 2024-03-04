@@ -349,6 +349,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 			    processed++;
 			    databaseConnection.ClearParameters();
 			    databaseConnection.AddParameter("processed_date", DateTime.Now);
+			    statusMessage = email.StatusMessage;
 		    }
 		    catch (SmtpException smtpException)
 		    {
