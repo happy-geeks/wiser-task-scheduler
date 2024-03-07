@@ -1110,6 +1110,7 @@ LIMIT 1";
                         var dataSelectorMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.DataSelector);
                         var fieldTemplatesMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.FieldTemplates);
                         var userRoleMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.UserRole);
+                        var styledOutputMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.StyledOutput);
 
                         // Update the item in the production environment.
                         switch (action)
@@ -1523,6 +1524,7 @@ WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
                             case "INSERT_LINK_SETTING":
                             case "INSERT_API_CONNECTION":
                             case "INSERT_ROLE":
+                            case "CREATE_STYLED_OUTPUT":
                             {
                                 // Check if the user requested this change to be synchronised.
                                 switch (tableName)
@@ -1548,6 +1550,8 @@ WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
                                     case WiserTableNames.WiserApiConnection when apiConnectionMergeSettings is not {Create: true}:
                                         continue;
                                     case WiserTableNames.WiserRoles when roleMergeSettings is not {Create: true}:
+                                        continue;
+                                    case WiserTableNames.WiserStyledOutput when styledOutputMergeSettings is not {Create: true}:
                                         continue;
                                 }
 
@@ -1603,6 +1607,7 @@ VALUES (?newId)";
                             case "UPDATE_LINK_SETTING":
                             case "UPDATE_API_CONNECTION":
                             case "UPDATE_ROLE":
+                            case "UPDATE_STYLED_OUTPUT":
                             {
                                 // Check if the user requested this change to be synchronised.
                                 switch (tableName)
@@ -1628,6 +1633,8 @@ VALUES (?newId)";
                                     case WiserTableNames.WiserApiConnection when apiConnectionMergeSettings is not {Update: true}:
                                         continue;
                                     case WiserTableNames.WiserRoles when roleMergeSettings is not {Update: true}:
+                                        continue;
+                                    case WiserTableNames.WiserStyledOutput when styledOutputMergeSettings is not {Update: true}:
                                         continue;
                                 }
 
@@ -1655,6 +1662,7 @@ WHERE id = ?id";
                             case "DELETE_LINK_SETTING":
                             case "DELETE_API_CONNECTION":
                             case "DELETE_ROLE":
+                            case "DELETE_STYLED_OUTPUT":
                             {
                                 // Check if the user requested this change to be synchronised.
                                 switch (tableName)
@@ -1680,6 +1688,8 @@ WHERE id = ?id";
                                     case WiserTableNames.WiserApiConnection when apiConnectionMergeSettings is not {Delete: true}:
                                         continue;
                                     case WiserTableNames.WiserRoles when roleMergeSettings is not {Delete: true}:
+                                        continue;
+                                    case WiserTableNames.WiserStyledOutput when styledOutputMergeSettings is not {Delete: true}:
                                         continue;
                                 }
 
