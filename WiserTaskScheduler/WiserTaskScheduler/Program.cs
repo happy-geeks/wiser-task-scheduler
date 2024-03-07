@@ -74,6 +74,7 @@ namespace WiserTaskScheduler
         {
             services.AddHostedService<MainWorker>();
             services.AddHostedService<CleanupWorker>();
+            services.AddHostedService<UpdateParentsWorker>();
         }
 
         private static void ConfigureWtsServices(IServiceCollection services, HostBuilderContext hostContext)

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using WiserTaskScheduler.Core.Models.Cleanup;
+using WiserTaskScheduler.Core.Models.ParentsUpdate;
 using WiserTaskScheduler.Modules.Slack.modules;
 using WiserTaskScheduler.Modules.Wiser.Models;
 
@@ -31,7 +32,12 @@ namespace WiserTaskScheduler.Core.Models
         /// Gets or sets the settings of the <see cref="CleanupService"/>.
         /// </summary>
         public CleanupServiceSettings CleanupService { get; set; } = new CleanupServiceSettings();
-
+        
+        /// <summary>
+        /// Gets or sets the settings of the <see cref="CleanupService"/>.
+        /// </summary>
+        public ParentsUpdateServiceSettings ParentsUpdateService { get; set; } = new ParentsUpdateServiceSettings();
+        
         /// <summary>
         /// Gets or sets the settings for the connection to Wiser 3.
         /// </summary>
