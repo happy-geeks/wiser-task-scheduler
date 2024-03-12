@@ -9,7 +9,7 @@ namespace WiserTaskScheduler.Core.Interfaces
     public interface IParentUpdateService
     {
         /// <summary>
-        /// Gets or sets the log settings that the Main service needs to use.
+        /// Gets or sets the log settings that the Parent Update service needs to use.
         /// </summary>
         LogSettings LogSettings { get; set; }
 

@@ -17,7 +17,7 @@ using WiserTaskScheduler.Core.Models.ParentsUpdate;
 namespace WiserTaskScheduler.Core.Services
 {
     /// <summary>
-    /// A service to manage all WTS configurations that are provided by Wiser.
+    /// A service to perform updates to parent items that are listed in the wiser_parent_updates table
     /// </summary>
     public class ParentUpdateService : IParentUpdateService, ISingletonService
     {
@@ -28,11 +28,13 @@ namespace WiserTaskScheduler.Core.Services
         private readonly ILogService logService;
         private readonly ILogger<ParentUpdateService> logger;
 
-        private readonly string parentsUpdateQuery = "UPDATE wiser_item `item`"
-                                                     + "INNER JOIN wiser_parent_updates `updates` ON `item`.id = `updates`.target_id AND `updates`.target_table = 'wiser_item'"
-                                                     + "SET `item`.changed_on = `updates`.changed_on, `item`.changed_by = `updates`.changed_by;";
+        private readonly string parentsUpdateQuery = """
+                                                     UPDATE wiser_item `item`
+                                                     INNER JOIN wiser_parent_updates `updates` ON `item`.id = `updates`.target_id AND `updates`.target_table = 'wiser_item'
+                                                     SET `item`.changed_on = `updates`.changed_on, `item`.changed_by = `updates`.changed_by;
+                                                     """;
 
-        private readonly string parentsCleanUpQuery = "TRUNCATE `wiser_parent_updates`;";
+        private readonly string parentsCleanUpQuery = $"TRUNCATE `{WiserTableNames.WiserParentUpdates}`;";
 
         /// <inheritdoc />
         public LogSettings LogSettings { get; set; }
@@ -51,14 +53,11 @@ namespace WiserTaskScheduler.Core.Services
             using var scope = serviceProvider.CreateScope();
             await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
             var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
-
             await ParentsUpdateMainAsync(databaseConnection, databaseHelpersService);
-
         }
 
         /// <summary>
-        /// The main parent update routine, checks is there are updates to be performed and performs them, then truncates the table.
-        /// 
+        /// The main parent update routine, checks if there are updates to be performed and performs them, then truncates WiserTableNames.WiserParentUpdates table.
         /// </summary>
         /// <param name="databaseConnection">The database connection to use.</param>
         /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>

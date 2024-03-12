@@ -34,7 +34,7 @@ namespace WiserTaskScheduler.Core.Models
         public CleanupServiceSettings CleanupService { get; set; } = new CleanupServiceSettings();
         
         /// <summary>
-        /// Gets or sets the settings of the <see cref="CleanupService"/>.
+        /// Gets or sets the settings of the <see cref="ParentsUpdateService"/>.
         /// </summary>
         public ParentsUpdateServiceSettings ParentsUpdateService { get; set; } = new ParentsUpdateServiceSettings();
         
