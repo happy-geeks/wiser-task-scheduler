@@ -105,10 +105,23 @@ public class UpdateService : IUpdateService
     private void UpdateWts(WtsModel wts, List<VersionModel> versionList)
     {
         logger.LogInformation($"Checking updates for WTS '{wts.ServiceName}'.");
+
+        UpdateStates updateState;
+        var version = new Version(0, 0, 0, 0);
         
-        var versionInfo = FileVersionInfo.GetVersionInfo(Path.Combine(wts.PathToFolder, WtsExeFile));
-        var version = new Version(versionInfo.FileVersion);
-        var updateState = CheckForUpdates(version, versionList);
+        var path = Path.Combine(wts.PathToFolder, WtsExeFile);
+        if (Path.Exists(path))
+        {
+            var versionInfo = FileVersionInfo.GetVersionInfo(Path.Combine(wts.PathToFolder, WtsExeFile));
+            version = new Version(versionInfo.FileVersion);
+            updateState = CheckForUpdates(version, versionList);
+        }
+        else
+        {
+            // If the WTS is not found on the location, it is considered to need to be updated.
+            updateState = UpdateStates.Update;
+            logger.LogWarning($"WTS '{wts.ServiceName}' not found at '{wts.PathToFolder}' so the latest version will be installed.");
+        }
 
         switch (updateState)
         {
