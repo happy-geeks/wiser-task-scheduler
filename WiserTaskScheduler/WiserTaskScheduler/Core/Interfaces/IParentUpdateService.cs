@@ -14,7 +14,7 @@ namespace WiserTaskScheduler.Core.Interfaces
         LogSettings LogSettings { get; set; }
 
         /// <summary>
-        /// checks the parent update table and apply updates where needed then clear it
+        /// checks the parent update table and applies updates where needed then clear it.
         /// </summary>
         /// <returns></returns>
         Task ParentsUpdateAsync();
