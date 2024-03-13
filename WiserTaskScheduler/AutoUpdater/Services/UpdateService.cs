@@ -46,7 +46,11 @@ public class UpdateService : IUpdateService
             var versionList = await GetVersionList();
             if (lastDownloadedVersion == null || lastDownloadedVersion != versionList[0].Version)
             {
-                await DownloadUpdate(versionList[0].Version);
+                // If the update failed to download, do not continue with the update.
+                if (!await DownloadUpdate(versionList[0].Version))
+                {
+                    return;
+                }
             }
 
             foreach (var wts in updateSettings.WtsInstancesToUpdate)
@@ -78,7 +82,8 @@ public class UpdateService : IUpdateService
     /// Download the update files to the disk.
     /// </summary>
     /// <param name="version">The version being downloaded.</param>
-    private async Task DownloadUpdate(Version version)
+    /// <returns>Returns true if the update has been downloaded.</returns>
+    private async Task<bool> DownloadUpdate(Version version)
     {
         logger.LogInformation("Download the latest update from the server.");
         
@@ -92,9 +97,16 @@ public class UpdateService : IUpdateService
         using var request = new HttpRequestMessage(HttpMethod.Get, $"{downloadUrl}version{version.ToString()}.zip");
         using var client = new HttpClient(new HttpClientHandler() {AllowAutoRedirect = true});
         using var response = await client.SendAsync(request);
+        
+        if (!response.IsSuccessStatusCode)
+        {
+            logger.LogError($"Failed to download the update for version {version}.");
+            return false;
+        }
+        
         await File.WriteAllBytesAsync(filePath, await response.Content.ReadAsByteArrayAsync());
-
         lastDownloadedVersion = version;
+        return true;
     }
     
     /// <summary>
