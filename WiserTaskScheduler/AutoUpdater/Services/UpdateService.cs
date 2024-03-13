@@ -224,10 +224,11 @@ public class UpdateService : IUpdateService
                     return;
                 }
             }
+            
+            logger.LogInformation($"WTS '{wts.ServiceName}' has been successfully updated to version {versionToUpdateTo}.");
 
             if (wts.SendEmailOnUpdateComplete)
             {
-                logger.LogInformation($"WTS '{wts.ServiceName}' has been successfully updated to version {versionToUpdateTo}.");
                 EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Update installed", $"The service for WTS '{wts.ServiceName}' has been successfully updated to version {versionToUpdateTo}.", wts.ServiceName);
             }
         }
