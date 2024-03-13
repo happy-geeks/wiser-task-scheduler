@@ -350,7 +350,7 @@ public class UpdateService : IUpdateService
         var communication = new SingleCommunicationModel()
         {
             Receivers =  receivers,
-            Subject = subject,
+            Subject = $"{subject} ({Environment.MachineName})",
             Content = body
         };
 
