@@ -43,4 +43,11 @@ public class WtsModel
         get => XmlConvert.ToString(UpdateTime);
         set => UpdateTime = String.IsNullOrWhiteSpace(value) ? TimeSpan.Zero : value.StartsWith("P") ? XmlConvert.ToTimeSpan(value) : TimeSpan.Parse(value);
     }
+    
+    /// <summary>
+    /// Gets or sets the days the WTS is allowed to be updated.
+    /// By default all workdays are allowed.
+    /// Note that updates are checked at midnight.
+    /// </summary>
+    public int[] UpdateDays { get; set; }
 }

@@ -120,6 +120,11 @@ public class UpdateService : IUpdateService
 
         UpdateStates updateState;
         var version = new Version(0, 0, 0, 0);
+        if (!ValidUpdateDay(wts))
+        {
+            logger.LogInformation($"WTS '{wts.ServiceName}' is not allowed to be updated and will check again tomorrow.");
+            return;
+        }
         
         var path = Path.Combine(wts.PathToFolder, WtsExeFile);
         if (Path.Exists(path))
@@ -159,6 +164,17 @@ public class UpdateService : IUpdateService
             default:
                 throw new ArgumentOutOfRangeException(nameof(updateState), updateState.ToString());
         }
+    }
+    
+    /// <summary>
+    /// Check if the WTS is allowed to be updated today.
+    /// </summary>
+    /// <param name="wts">The information of the WTS that is being processed.</param>
+    /// <returns>Returns true if it is a valid day to update, false if not.</returns>
+    private bool ValidUpdateDay(WtsModel wts)
+    {
+        var allowedDays = wts.UpdateDays ?? new[] {1, 2, 3, 4, 5};
+        return allowedDays.Contains((int) DateTime.Now.DayOfWeek);
     }
 
     /// <summary>
