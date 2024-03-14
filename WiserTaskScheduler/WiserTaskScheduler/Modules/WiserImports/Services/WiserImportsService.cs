@@ -176,7 +176,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
             }
             if (String.IsNullOrWhiteSpace(content))
             {
-                subject = DefaultContent;
+                content = DefaultContent;
             }
 
             await taskAlertsService.NotifyUserByEmailAsync(importRow.UserId, importRow.Username, wiserImport, configurationServiceName, subject, content, replaceData, template?.GetDetailValue("sender_email"), template?.GetDetailValue("sender_name"));
