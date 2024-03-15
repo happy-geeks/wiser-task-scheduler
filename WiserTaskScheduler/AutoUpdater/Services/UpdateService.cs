@@ -118,13 +118,14 @@ public class UpdateService : IUpdateService
     {
         logger.LogInformation($"Checking updates for WTS '{wts.ServiceName}'.");
 
-        UpdateStates updateState;
-        var version = new Version(0, 0, 0, 0);
         if (!ValidUpdateDay(wts))
         {
             logger.LogInformation($"WTS '{wts.ServiceName}' is not allowed to be updated and will check again tomorrow.");
             return;
         }
+        
+        UpdateStates updateState;
+        var version = new Version(0, 0, 0, 0);
         
         var path = Path.Combine(wts.PathToFolder, WtsExeFile);
         if (Path.Exists(path))
