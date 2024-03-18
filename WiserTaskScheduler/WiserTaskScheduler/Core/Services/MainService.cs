@@ -139,11 +139,23 @@ namespace WiserTaskScheduler.Core.Services
         {
             var serializer = new XmlSerializer(typeof(OAuthConfigurationModel));
             using var reader = new StringReader(oAuthConfiguration);
-            var configuration = (OAuthConfigurationModel)serializer.Deserialize(reader);
+            OAuthConfigurationModel configuration = null;
 
-            configuration.LogSettings ??= LogSettings;
+            try
+            {
+                configuration = (OAuthConfigurationModel)serializer.Deserialize(reader);
+            }
+            catch (InvalidOperationException e)
+            {
+                await logService.LogError(logger, LogScopes.StartAndStop, LogSettings, $"Could not parse OAuth configuration due to exception {e}", "OAuth");
+                await errorNotificationService.NotifyOfErrorByEmailAsync(wtsSettings.ServiceFailedNotificationEmails, $"OAuth configuration of '{wtsSettings.Name}' could not be parsed.", $"Wiser Task Scheduler '{wtsSettings.Name}' could not parse OAuth configuration. Please check the logs for more details.", LogSettings, LogScopes.StartAndStop, "OAuth");
+            }
 
-            await oAuthService.SetConfigurationAsync(configuration);
+            if (configuration != null)
+            {
+                configuration.LogSettings ??= LogSettings;
+                await oAuthService.SetConfigurationAsync(configuration);
+            }
         }
 
         private async Task StopRemovedConfigurationsAsync(List<ConfigurationModel> configurations)
@@ -249,7 +261,17 @@ namespace WiserTaskScheduler.Core.Services
                         continue;
                     }
 
-                    var configuration = await DeserializeConfigurationAsync(wiserConfiguration.EditorValue, wiserConfiguration.Name);
+                    ConfigurationModel configuration = null;
+
+                    try
+                    {
+                        configuration = await DeserializeConfigurationAsync(wiserConfiguration.EditorValue, wiserConfiguration.Name);
+                    }
+                    catch (InvalidOperationException e)
+                    {
+                        await logService.LogError(logger, LogScopes.StartAndStop, LogSettings, $"Could not parse configuration {wiserConfiguration.Name} due to exception {e}", wiserConfiguration.Name);
+                        await errorNotificationService.NotifyOfErrorByEmailAsync(wtsSettings.ServiceFailedNotificationEmails, $"Configuration '{wiserConfiguration.Name}' of '{wtsSettings.Name}' could not be parsed.", $"Wiser Task Scheduler '{wtsSettings.Name}' could not parse configuration '{wiserConfiguration.Name}'. Please check the logs for more details.", LogSettings, LogScopes.StartAndStop, wiserConfiguration.Name);
+                    }
 
                     if (configuration != null)
                     {
@@ -263,7 +285,17 @@ namespace WiserTaskScheduler.Core.Services
             {
                 var fileContent = await File.ReadAllTextAsync(wtsSettings.MainService.LocalConfiguration);
                 fileContent = ReplaceCredentials(fileContent);
-                var configuration = await DeserializeConfigurationAsync(fileContent, $"Local file {wtsSettings.MainService.LocalConfiguration}");
+                ConfigurationModel configuration = null;
+
+                try
+                {
+                    configuration = await DeserializeConfigurationAsync(fileContent, $"Local file {wtsSettings.MainService.LocalConfiguration}");
+                }
+                catch (InvalidOperationException e)
+                {
+                    await logService.LogError(logger, LogScopes.StartAndStop, LogSettings, $"Could not parse configuration {wtsSettings.MainService.LocalConfiguration} due to exception {e}", wtsSettings.MainService.LocalConfiguration);
+                    await errorNotificationService.NotifyOfErrorByEmailAsync(wtsSettings.ServiceFailedNotificationEmails, $"Configuration '{wtsSettings.MainService.LocalConfiguration}' of '{wtsSettings.Name}' could not be parsed.", $"Wiser Task Scheduler '{wtsSettings.Name}' could not parse configuration '{wtsSettings.MainService.LocalConfiguration}'. Please check the logs for more details.", LogSettings, LogScopes.StartAndStop, wtsSettings.MainService.LocalConfiguration);
+                }
 
                 if (configuration != null)
                 {
