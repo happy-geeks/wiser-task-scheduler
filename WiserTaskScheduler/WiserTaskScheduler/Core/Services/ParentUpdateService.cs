@@ -25,7 +25,7 @@ namespace WiserTaskScheduler.Core.Services
         private readonly ILogService logService;
         private readonly ILogger<ParentUpdateService> logger;
 
-        private readonly string listTablesQuery = "SELECT DISTINCT `target_table` FROM `wiser_parent_updates`;";
+        private readonly string listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{WiserTableNames.WiserParentUpdates}`;";
         
         private readonly string parentsCleanUpQuery = $"TRUNCATE `{WiserTableNames.WiserParentUpdates}`;";
 
@@ -64,7 +64,7 @@ namespace WiserTaskScheduler.Core.Services
                 {
                     var tableName = dataRow.Field<string>("target_table");
 
-                    var query = $"UPDATE {tableName} item INNER JOIN wiser_parent_updates `updates` ON `item`.id = `updates`.target_id AND `updates`.target_table = '{tableName}' SET `item`.changed_on = `updates`.changed_on, `item`.changed_by = `updates`.changed_by;";
+                    var query = $"UPDATE {tableName} item INNER JOIN {WiserTableNames.WiserParentUpdates} `updates` ON `item`.id = `updates`.target_id AND `updates`.target_table = '{tableName}' SET `item`.changed_on = `updates`.changed_on, `item`.changed_by = `updates`.changed_by;";
 
                     await databaseConnection.ExecuteAsync(query);
                 }
