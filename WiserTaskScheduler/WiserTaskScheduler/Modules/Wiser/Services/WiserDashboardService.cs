@@ -225,7 +225,7 @@ FROM {WiserTableNames.WtsServices}
             using var scope = serviceProvider.CreateScope();
             await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
-            databaseConnection.AddParameter("runStartTime", runStartTime);
+            databaseConnection.AddParameter("runStartTime", runStartTime.ToString("yyyy-MM-dd HH:mm:ss")); // Format to remove milliseconds.
             databaseConnection.AddParameter("configuration", configuration);
             databaseConnection.AddParameter("timeId", timeId);
         
