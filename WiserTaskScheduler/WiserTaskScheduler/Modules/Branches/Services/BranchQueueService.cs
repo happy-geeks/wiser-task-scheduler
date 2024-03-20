@@ -719,7 +719,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                 await using (var environmentCommand = branchConnection.CreateCommand())
                 {
                     //environmentCommand.CommandText = $"SELECT * FROM `{WiserTableNames.WiserHistory}` ORDER BY id ASC";
-                    environmentCommand.CommandText = $"SELECT * FROM `{WiserTableNames.WiserHistory}` ORDER BY id ASC LIMIT 1000";
+                    environmentCommand.CommandText = $"SELECT * FROM `{WiserTableNames.WiserHistory}` ORDER BY id ASC";
                     using var environmentAdapter = new MySqlDataAdapter(environmentCommand);
                     environmentAdapter.Fill(dataTable);
                 }
