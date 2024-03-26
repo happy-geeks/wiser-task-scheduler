@@ -22,8 +22,6 @@ namespace WiserTaskScheduler.Core.Models.ParentsUpdate
         /// </summary>
         public string[] AdditionalDatabases { get; set; }
 
-        public int test { get; set; }
-
         /// <summary>
         /// Gets or sets the log level for the parent service
         /// </summary>

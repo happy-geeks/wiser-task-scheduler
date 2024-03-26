@@ -29,17 +29,10 @@ namespace WiserTaskScheduler.Core.Services
         private readonly IBranchesService branchesService;
         
         private bool updatedParentUpdatesTable = false;
-        private bool updatedtagetdatabaseList = false;
-
-        private class DatabaseStrings(string databaseName, string listQuery, string cleanupQuery)
-        {
-            public string DatabaseName = databaseName;
-            public string ListTableQuery = listQuery;
-            public string CleanUpQuery = cleanupQuery;
-        }
+        private bool updatedTargetDatabaseList = false;
             
-        // database strings used to target other dbs in the same cluster
-        private readonly List<DatabaseStrings> targetDatabases = [];
+        // Database strings used to target other dbs in the same cluster.
+        private readonly List<ParentUpdateDatabaseStrings> targetDatabases = [];
 
         /// <inheritdoc />
         public LogSettings LogSettings { get; set; }
@@ -72,10 +65,10 @@ namespace WiserTaskScheduler.Core.Services
                 
             }
 
-            if (!updatedtagetdatabaseList)
+            if (!updatedTargetDatabaseList)
             {
-                updateTargetedDatabses(databaseConnection);
-                updatedtagetdatabaseList = true;
+                UpdateTargetedDatabases(databaseConnection);
+                updatedTargetDatabaseList = true;
             }
 
             foreach (var database in targetDatabases)
@@ -89,7 +82,8 @@ namespace WiserTaskScheduler.Core.Services
         /// </summary>
         /// <param name="databaseConnection">The database connection to use.</param>
         /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
-        private async Task ParentsUpdateMainAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, DatabaseStrings targetDatabase)
+        /// <param name="targetDatabase">The database we are applying the parent updates on.</param>
+        private async Task ParentsUpdateMainAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, ParentUpdateDatabaseStrings targetDatabase)
         {
 
             if (await databaseHelpersService.DatabaseExistsAsync(targetDatabase.DatabaseName))
@@ -115,23 +109,23 @@ namespace WiserTaskScheduler.Core.Services
         // <summary>
         /// Helper function to rebuild the targeted database list
         /// </summary>
-        private void updateTargetedDatabses(IDatabaseConnection databaseConnection)
+        private void UpdateTargetedDatabases(IDatabaseConnection databaseConnection)
         {
             targetDatabases.Clear();
             
-            // add main db
-            string listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{WiserTableNames.WiserParentUpdates}`;";
-            string parentsCleanUpQuery = $"TRUNCATE `{WiserTableNames.WiserParentUpdates}`;";
+            // Add main database.
+            var listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{WiserTableNames.WiserParentUpdates}`;";
+            var parentsCleanUpQuery = $"TRUNCATE `{WiserTableNames.WiserParentUpdates}`;";
             
-            targetDatabases.Add(new DatabaseStrings(databaseConnection.ConnectedDatabase, listTablesQuery, parentsCleanUpQuery));
+            targetDatabases.Add(new ParentUpdateDatabaseStrings(databaseConnection.ConnectedDatabase, listTablesQuery, parentsCleanUpQuery));
             
-            // add additional databases
+            // Add additional databases.
             foreach (var additionalDatabase in parentsUpdateServiceSettings.AdditionalDatabases)
             {
                 listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}`;";
                 parentsCleanUpQuery = $"TRUNCATE `{additionalDatabase}``{WiserTableNames.WiserParentUpdates}`;";
                 
-                targetDatabases.Add(new DatabaseStrings(additionalDatabase,listTablesQuery,parentsCleanUpQuery));    
+                targetDatabases.Add(new ParentUpdateDatabaseStrings(additionalDatabase, listTablesQuery, parentsCleanUpQuery));    
             }
         }   
     }
