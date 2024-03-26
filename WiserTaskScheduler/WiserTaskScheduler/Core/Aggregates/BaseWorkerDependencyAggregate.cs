@@ -19,6 +19,9 @@ namespace WiserTaskScheduler.Core.Aggregates
         
         /// <inheritdoc />
         public ISlackChatService SlackChatService { get; }
+        
+        /// <inheritdoc />
+        public IParentUpdateService ParentUpdateService { get; }
 
         /// <inheritdoc />
         public ILogger<BaseWorker> Logger { get; }
@@ -45,10 +48,11 @@ namespace WiserTaskScheduler.Core.Aggregates
         /// <param name="wiserDashboardService"></param>
         /// <param name="errorNotificationService"></param>
         /// <param name="wtsSettings"></param>
-        public BaseWorkerDependencyAggregate(ILogService logService, ISlackChatService slackChatService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService, IWiserDashboardService wiserDashboardService, IErrorNotificationService errorNotificationService, IOptions<WtsSettings> wtsSettings)
+        public BaseWorkerDependencyAggregate(ILogService logService, ISlackChatService slackChatService, IParentUpdateService parentUpdateService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService, IWiserDashboardService wiserDashboardService, IErrorNotificationService errorNotificationService, IOptions<WtsSettings> wtsSettings)
         {
             LogService = logService;
             SlackChatService = slackChatService;
+            ParentUpdateService = parentUpdateService;
             Logger = logger;
             RunSchemesService = runSchemesService;
             WiserDashboardService = wiserDashboardService;
