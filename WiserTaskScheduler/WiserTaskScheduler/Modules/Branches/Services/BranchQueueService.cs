@@ -464,7 +464,7 @@ UNION ALL
                         // We need to get all columns of the wiser_itemdetail table like this, instead of using SELECT *,
                         // because they can have virtual columns and you can't manually insert values into those.
                         var table = WiserTableDefinitions.TablesToUpdate.Single(x => x.Name == WiserTableNames.WiserItemDetail);
-                        var itemDetailColumns = table.Columns.Select(x => $"`{x.Name}`").ToList();
+                        var itemDetailColumns = table.Columns.Where(x => !x.IsVirtual).Select(x => $"`{x.Name}`").ToList();
                         await databaseConnection.ExecuteAsync($@"INSERT INTO `{branchDatabase}`.`{tableName}` ({String.Join(", ", itemDetailColumns)})
 SELECT {String.Join(", ", itemDetailColumns.Select(x => $"detail.{x}"))} FROM `{originalDatabase}`.`{tableName}` AS detail
 JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = detail.item_id");
