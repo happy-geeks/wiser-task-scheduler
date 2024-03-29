@@ -62,7 +62,6 @@ namespace WiserTaskScheduler.Core.Services
                     }
                 );
                 updatedParentUpdatesTable = true;
-                
             }
 
             if (!updatedTargetDatabaseList)
@@ -85,7 +84,6 @@ namespace WiserTaskScheduler.Core.Services
         /// <param name="targetDatabase">The database we are applying the parent updates on.</param>
         private async Task ParentsUpdateMainAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, ParentUpdateDatabaseStrings targetDatabase)
         {
-
             if (await databaseHelpersService.DatabaseExistsAsync(targetDatabase.DatabaseName))
             {
                 if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserParentUpdates))
@@ -96,12 +94,28 @@ namespace WiserTaskScheduler.Core.Services
                     {
                         var tableName = dataRow.Field<string>("target_table");
 
-                        var query = $"UPDATE {targetDatabase.DatabaseName}.{tableName} item INNER JOIN {WiserTableNames.WiserParentUpdates} `updates` ON `item`.id = `updates`.target_id AND `updates`.target_table = {targetDatabase.DatabaseName}.'{tableName}' SET `item`.changed_on = `updates`.changed_on, `item`.changed_by = `updates`.changed_by;";
+                        var query = $"UPDATE {targetDatabase.DatabaseName}.{tableName} item INNER JOIN {targetDatabase.DatabaseName}.{WiserTableNames.WiserParentUpdates} `updates` ON `item`.id = `updates`.target_id AND `updates`.target_table = {targetDatabase.DatabaseName}.'{tableName}' SET `item`.changed_on = `updates`.changed_on, `item`.changed_by = `updates`.changed_by;";
 
-                        await databaseConnection.ExecuteAsync(query);
+                        try 
+                        {
+                            await databaseConnection.ExecuteAsync(query);
+                        }
+                        catch (Exception e)
+                        {
+                            logger.LogError($"Failed to run query ( {query} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
+                            throw;
+                        }
                     }
                     
-                    await databaseConnection.ExecuteAsync(targetDatabase.CleanUpQuery);
+                    try
+                    {
+                        await databaseConnection.ExecuteAsync(targetDatabase.CleanUpQuery);
+                    }
+                    catch (Exception e)
+                    {
+                        logger.LogError($"Failed to run query ( {targetDatabase.CleanUpQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
+                        throw;                  
+                    }
                 }
             }
         }
