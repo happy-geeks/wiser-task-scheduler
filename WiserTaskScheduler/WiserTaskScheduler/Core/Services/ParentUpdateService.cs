@@ -99,22 +99,20 @@ namespace WiserTaskScheduler.Core.Services
                         try 
                         {
                             await databaseConnection.ExecuteAsync(query);
+                            
+                            try
+                            {
+                                await databaseConnection.ExecuteAsync(targetDatabase.CleanUpQuery);
+                            }
+                            catch (Exception e)
+                            {
+                                logger.LogError($"Failed to run query ( {targetDatabase.CleanUpQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
+                            }
                         }
                         catch (Exception e)
                         {
                             logger.LogError($"Failed to run query ( {query} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
-                            throw;
                         }
-                    }
-                    
-                    try
-                    {
-                        await databaseConnection.ExecuteAsync(targetDatabase.CleanUpQuery);
-                    }
-                    catch (Exception e)
-                    {
-                        logger.LogError($"Failed to run query ( {targetDatabase.CleanUpQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
-                        throw;                  
                     }
                 }
             }
