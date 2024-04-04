@@ -86,35 +86,41 @@ namespace WiserTaskScheduler.Core.Services
         {
             if (await databaseHelpersService.DatabaseExistsAsync(targetDatabase.DatabaseName))
             {
-                if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserParentUpdates))
+                if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserParentUpdates,targetDatabase.DatabaseName))
                 {
                     var dataTable = await databaseConnection.GetAsync(targetDatabase.ListTableQuery);
 
+                    var exceptionOccurred = false;
+                    
                     foreach (DataRow dataRow in dataTable.Rows)
                     {
                         var tableName = dataRow.Field<string>("target_table");
 
-                        var query = $"UPDATE {targetDatabase.DatabaseName}.{tableName} item INNER JOIN {targetDatabase.DatabaseName}.{WiserTableNames.WiserParentUpdates} `updates` ON `item`.id = `updates`.target_id AND `updates`.target_table = {targetDatabase.DatabaseName}.'{tableName}' SET `item`.changed_on = `updates`.changed_on, `item`.changed_by = `updates`.changed_by;";
+                        var query = $"UPDATE {targetDatabase.DatabaseName}.{tableName} item INNER JOIN {targetDatabase.DatabaseName}.{WiserTableNames.WiserParentUpdates} `updates` ON `item`.id = `updates`.target_id AND `updates`.target_table = '{tableName}' SET `item`.changed_on = `updates`.changed_on, `item`.changed_by = `updates`.changed_by;";
 
                         try 
                         {
                             await databaseConnection.ExecuteAsync(query);
+                        }
+                        catch (Exception e)
+                        {
+                            exceptionOccurred = true;
+                            logger.LogError($"Failed to run query ( {query} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
+                        }
+                    }
                             
                             try
                             {
+                        if (!exceptionOccurred)
+                        {
                                 await databaseConnection.ExecuteAsync(targetDatabase.CleanUpQuery);
                             }
+                    }
                             catch (Exception e)
                             {
                                 logger.LogError($"Failed to run query ( {targetDatabase.CleanUpQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
                             }
                         }
-                        catch (Exception e)
-                        {
-                            logger.LogError($"Failed to run query ( {query} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
-                        }
-                    }
-                }
             }
         }
         
@@ -131,13 +137,16 @@ namespace WiserTaskScheduler.Core.Services
             
             targetDatabases.Add(new ParentUpdateDatabaseStrings(databaseConnection.ConnectedDatabase, listTablesQuery, parentsCleanUpQuery));
             
+            if (parentsUpdateServiceSettings.AdditionalDatabases != null)
+            {
             // Add additional databases.
             foreach (var additionalDatabase in parentsUpdateServiceSettings.AdditionalDatabases)
             {
                 listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}`;";
-                parentsCleanUpQuery = $"TRUNCATE `{additionalDatabase}``{WiserTableNames.WiserParentUpdates}`;";
+                    parentsCleanUpQuery = $"TRUNCATE `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}`;";
                 
                 targetDatabases.Add(new ParentUpdateDatabaseStrings(additionalDatabase, listTablesQuery, parentsCleanUpQuery));    
+                }
             }
         }   
     }
