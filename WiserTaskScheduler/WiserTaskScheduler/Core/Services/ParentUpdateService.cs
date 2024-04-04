@@ -131,13 +131,16 @@ namespace WiserTaskScheduler.Core.Services
             
             targetDatabases.Add(new ParentUpdateDatabaseStrings(databaseConnection.ConnectedDatabase, listTablesQuery, parentsCleanUpQuery));
             
-            // Add additional databases.
-            foreach (var additionalDatabase in parentsUpdateServiceSettings.AdditionalDatabases)
+            if (parentsUpdateServiceSettings.AdditionalDatabases != null)
             {
-                listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}`;";
-                parentsCleanUpQuery = $"TRUNCATE `{additionalDatabase}``{WiserTableNames.WiserParentUpdates}`;";
-                
-                targetDatabases.Add(new ParentUpdateDatabaseStrings(additionalDatabase, listTablesQuery, parentsCleanUpQuery));    
+                // Add additional databases.
+                foreach (var additionalDatabase in parentsUpdateServiceSettings.AdditionalDatabases)
+                {
+                    listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}`;";
+                    parentsCleanUpQuery = $"TRUNCATE `{additionalDatabase}``{WiserTableNames.WiserParentUpdates}`;";
+
+                    targetDatabases.Add(new ParentUpdateDatabaseStrings(additionalDatabase, listTablesQuery, parentsCleanUpQuery));
+                }
             }
         }   
     }
