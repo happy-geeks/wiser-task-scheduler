@@ -89,7 +89,6 @@ namespace WiserTaskScheduler.Core.Services
                 if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserParentUpdates,targetDatabase.DatabaseName))
                 {
                     var dataTable = await databaseConnection.GetAsync(targetDatabase.ListTableQuery);
-
                     var exceptionOccurred = false;
                     
                     foreach (DataRow dataRow in dataTable.Rows)
@@ -109,18 +108,18 @@ namespace WiserTaskScheduler.Core.Services
                         }
                     }
                             
-                            try
-                            {
+                    try
+                    {
                         if (!exceptionOccurred)
                         {
-                                await databaseConnection.ExecuteAsync(targetDatabase.CleanUpQuery);
-                            }
-                    }
-                            catch (Exception e)
-                            {
-                                logger.LogError($"Failed to run query ( {targetDatabase.CleanUpQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
-                            }
+                            await databaseConnection.ExecuteAsync(targetDatabase.CleanUpQuery);
                         }
+                    }
+                    catch (Exception e)
+                    {
+                        logger.LogError($"Failed to run query ( {targetDatabase.CleanUpQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
+                    }
+                }
             }
         }
         
@@ -139,13 +138,13 @@ namespace WiserTaskScheduler.Core.Services
             
             if (parentsUpdateServiceSettings.AdditionalDatabases != null)
             {
-            // Add additional databases.
-            foreach (var additionalDatabase in parentsUpdateServiceSettings.AdditionalDatabases)
-            {
-                listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}`;";
+                // Add additional databases.
+                foreach (var additionalDatabase in parentsUpdateServiceSettings.AdditionalDatabases)
+                {
+                    listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}`;";
                     parentsCleanUpQuery = $"TRUNCATE `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}`;";
-                
-                targetDatabases.Add(new ParentUpdateDatabaseStrings(additionalDatabase, listTablesQuery, parentsCleanUpQuery));    
+                    
+                    targetDatabases.Add(new ParentUpdateDatabaseStrings(additionalDatabase, listTablesQuery, parentsCleanUpQuery));    
                 }
             }
         }   
