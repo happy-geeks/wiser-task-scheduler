@@ -194,13 +194,18 @@ namespace WiserTaskScheduler.Core.Services
         }
 
         /// <inheritdoc />
-        public async Task ExecuteAsync()
+        public async Task ExecuteAsync(string messageName = null, JObject message = null)
         {
             var resultSets = new JObject();
             var currentOrder = 0;
             var stopwatch = new Stopwatch();
             tablesToOptimize.Clear();
 
+            if (messageName is not null)
+            {
+                resultSets.Add(messageName, message);
+            }
+            
             try
             {
                 foreach (var action in actions)

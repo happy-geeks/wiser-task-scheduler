@@ -147,6 +147,8 @@ namespace WiserTaskScheduler.Modules.RunSchemes.Models
             set => Hour = String.IsNullOrWhiteSpace(value) ? TimeSpan.Zero : value.StartsWith("P") ? XmlConvert.ToTimeSpan(value) : TimeSpan.Parse(value);
         }
 
+        public string MessageQueueName { get; set; }
+
         /// <summary>
         /// Gets or sets the settings for the logger.
         /// </summary>

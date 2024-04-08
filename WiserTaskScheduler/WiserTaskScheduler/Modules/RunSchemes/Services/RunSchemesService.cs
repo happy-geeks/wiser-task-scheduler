@@ -10,13 +10,18 @@ namespace WiserTaskScheduler.Modules.RunSchemes.Services
     public class RunSchemesService : IRunSchemesService, IScopedService, ISingletonService
     {
         /// <inheritdoc />
-        public TimeSpan GetTimeTillNextRun(RunSchemeModel runScheme)
+        public TimeSpan? GetTimeTillNextRun(RunSchemeModel runScheme)
         {
+            var nextRunTime = GetDateTimeTillNextRun(runScheme);
+            if (!nextRunTime.HasValue)
+            {
+                return null;
+            }
             return GetDateTimeTillNextRun(runScheme) - DateTime.Now;
         }
 
         /// <inheritdoc />
-        public DateTime GetDateTimeTillNextRun(RunSchemeModel runScheme)
+        public DateTime? GetDateTimeTillNextRun(RunSchemeModel runScheme)
         {
             switch (runScheme.Type)
             {
@@ -28,6 +33,8 @@ namespace WiserTaskScheduler.Modules.RunSchemes.Services
                     return CalculateNextWeeklyDateTime(runScheme);
                 case RunSchemeTypes.Monthly:
                     return CalculateNextMonthlyDateTime(runScheme);
+                case RunSchemeTypes.MessageBroker:
+                    return null;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(runScheme.Type), runScheme.Type.ToString());
             }

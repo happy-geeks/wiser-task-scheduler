@@ -1,6 +1,7 @@
 ﻿using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
 
@@ -32,7 +33,7 @@ namespace WiserTaskScheduler.Core.Workers
         }
 
         /// <inheritdoc />
-        protected override async Task ExecuteActionAsync()
+        protected override async Task ExecuteActionAsync(string messageName = null, JObject message = null)
         {
             await cleanupService.CleanupAsync();
         }

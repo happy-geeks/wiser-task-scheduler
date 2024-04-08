@@ -1,3 +1,4 @@
+using GeeksCoreLibrary.Modules.MessageBroker.Services;
 using WiserTaskScheduler.Core.Workers;
 using WiserTaskScheduler.Modules.RunSchemes.Interfaces;
 using WiserTaskScheduler.Modules.Wiser.Interfaces;
@@ -40,5 +41,8 @@ namespace WiserTaskScheduler.Core.Interfaces
         /// Gets or sets the <see cref="WtsSettings"/>.
         /// </summary>
         WtsSettings WtsSettings { get; }
+
+        /// <inheritdoc />
+        IMessageService MessageService { get; }
     }
 }

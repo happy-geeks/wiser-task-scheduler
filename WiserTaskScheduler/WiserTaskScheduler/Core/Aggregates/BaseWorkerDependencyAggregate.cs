@@ -3,6 +3,7 @@ using WiserTaskScheduler.Core.Workers;
 using WiserTaskScheduler.Modules.RunSchemes.Interfaces;
 using WiserTaskScheduler.Modules.Wiser.Interfaces;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Modules.MessageBroker.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WiserTaskScheduler.Core.Models;
@@ -35,6 +36,9 @@ namespace WiserTaskScheduler.Core.Aggregates
         /// <inheritdoc />
         public WtsSettings WtsSettings { get; }
 
+        /// <inheritdoc />
+        public IMessageService MessageService { get; }
+
         /// <summary>
         /// Creates a new instance of <see cref="BaseWorkerDependencyAggregate"/>.
         /// </summary>
@@ -45,7 +49,7 @@ namespace WiserTaskScheduler.Core.Aggregates
         /// <param name="wiserDashboardService"></param>
         /// <param name="errorNotificationService"></param>
         /// <param name="wtsSettings"></param>
-        public BaseWorkerDependencyAggregate(ILogService logService, ISlackChatService slackChatService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService, IWiserDashboardService wiserDashboardService, IErrorNotificationService errorNotificationService, IOptions<WtsSettings> wtsSettings)
+        public BaseWorkerDependencyAggregate(ILogService logService, ISlackChatService slackChatService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService, IWiserDashboardService wiserDashboardService, IErrorNotificationService errorNotificationService, IOptions<WtsSettings> wtsSettings, IMessageService messageService)
         {
             LogService = logService;
             SlackChatService = slackChatService;
@@ -53,6 +57,7 @@ namespace WiserTaskScheduler.Core.Aggregates
             RunSchemesService = runSchemesService;
             WiserDashboardService = wiserDashboardService;
             ErrorNotificationService = errorNotificationService;
+            MessageService = messageService;
             WtsSettings = wtsSettings.Value;
         }
     }

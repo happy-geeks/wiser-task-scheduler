@@ -1,5 +1,6 @@
 ﻿using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Modules.RunSchemes.Models;
@@ -48,9 +49,9 @@ namespace WiserTaskScheduler.Core.Workers
         }
 
         /// <inheritdoc />
-        protected override async Task ExecuteActionAsync()
+        protected override async Task ExecuteActionAsync(string messageName = null, JObject message = null)
         {
-            await configurationsService.ExecuteAsync();
+            await configurationsService.ExecuteAsync(messageName, message);
         }
     }
 }

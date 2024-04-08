@@ -20,6 +20,8 @@
         /// <summary>
         /// Runs once a month.
         /// </summary>
-        Monthly
+        Monthly,
+        
+        MessageBroker
     }
 }

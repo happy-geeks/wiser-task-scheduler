@@ -3,11 +3,14 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using GeeksCoreLibrary.Modules.MessageBroker.Services;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
+using WiserTaskScheduler.Modules.RunSchemes.Enums;
 using WiserTaskScheduler.Modules.RunSchemes.Interfaces;
 using WiserTaskScheduler.Modules.RunSchemes.Models;
 using WiserTaskScheduler.Modules.Wiser.Interfaces;
@@ -41,6 +44,7 @@ namespace WiserTaskScheduler.Core.Workers
         private readonly IWiserDashboardService wiserDashboardService;
         private readonly IErrorNotificationService errorNotificationService;
         private readonly WtsSettings wtsSettings;
+        private readonly IMessageService messageService;
 
         private bool defaultServiceIsCreated;
         private string serviceFailedNotificationEmails;
@@ -57,6 +61,7 @@ namespace WiserTaskScheduler.Core.Workers
             wiserDashboardService = baseWorkerDependencyAggregate.WiserDashboardService;
             errorNotificationService = baseWorkerDependencyAggregate.ErrorNotificationService;
             wtsSettings = baseWorkerDependencyAggregate.WtsSettings;
+            messageService = baseWorkerDependencyAggregate.MessageService;
         }
 
         /// <summary>
@@ -99,6 +104,18 @@ namespace WiserTaskScheduler.Core.Workers
                         await wiserDashboardService.UpdateServiceAsync(Name, 0, state: "active", templateId: 0);
                         defaultServiceIsCreated = true;
                     }
+                }
+
+                if (RunScheme.Type == RunSchemeTypes.MessageBroker)
+                {
+                    await messageService.ReceiveAsync<JObject>(RunScheme.MessageQueueName,
+                                                               async (message, _) =>
+                                                               {
+                                                                   await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{ConfigurationName ?? Name} started, first run after receiving message on: {RunScheme.MessageQueueName}", ConfigurationName ?? Name, RunScheme.TimeId);
+                                                                   await ExecuteActionAsync("message", message);
+                                                               }, cancellationToken: stoppingToken);
+                    await Task.Delay(-1, stoppingToken);
+                    return;
                 }
                 
                 await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{ConfigurationName ?? Name} started, first run on: {runSchemesService.GetDateTimeTillNextRun(RunScheme)}", ConfigurationName ?? Name, RunScheme.TimeId);
@@ -228,14 +245,17 @@ namespace WiserTaskScheduler.Core.Workers
             {
                 timeSplit = false;
                 var timeTillNextRun = runSchemesService.GetTimeTillNextRun(RunScheme);
+                
+                if (timeTillNextRun == null)
+                    return;
 
-                if (timeTillNextRun.TotalMilliseconds > Int32.MaxValue)
+                if (timeTillNextRun?.TotalMilliseconds > Int32.MaxValue)
                 {
                     timeTillNextRun = new TimeSpan(0, 0, 0, 0, Int32.MaxValue);
                     timeSplit = true;
                 }
 
-                await Task.Delay(timeTillNextRun, stoppingToken);
+                await Task.Delay(timeTillNextRun.Value, stoppingToken);
 
             } while (timeSplit);
         }
@@ -244,6 +264,6 @@ namespace WiserTaskScheduler.Core.Workers
         /// Execute the action of the derived worker.
         /// </summary>
         /// <returns></returns>
-        protected abstract Task ExecuteActionAsync();
+        protected abstract Task ExecuteActionAsync(string messageName = null, JObject message = null);
     }
 }

@@ -1,4 +1,5 @@
 ﻿using System.Threading.Tasks;
+using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Models;
 
 namespace WiserTaskScheduler.Core.Interfaces
@@ -41,6 +42,6 @@ namespace WiserTaskScheduler.Core.Interfaces
         /// Execute all actions that have been extracted from the configuration from the time id.
         /// </summary>
         /// <returns></returns>
-        Task ExecuteAsync();
+        Task ExecuteAsync(string messageName = null, JObject message = null);
     }
 }
