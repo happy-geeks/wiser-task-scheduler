@@ -9,6 +9,7 @@ using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Core.Models.ParentsUpdate;
@@ -86,7 +87,7 @@ namespace WiserTaskScheduler.Core.Services
         {
             if (await databaseHelpersService.DatabaseExistsAsync(targetDatabase.DatabaseName))
             {
-                if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserParentUpdates,targetDatabase.DatabaseName))
+                if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserParentUpdates, targetDatabase.DatabaseName))
                 {
                     var dataTable = await databaseConnection.GetAsync(targetDatabase.ListTableQuery);
                     var exceptionOccurred = false;
@@ -104,7 +105,7 @@ namespace WiserTaskScheduler.Core.Services
                         catch (Exception e)
                         {
                             exceptionOccurred = true;
-                            logger.LogError($"Failed to run query ( {query} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
+                            await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to run query ( {query} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}", "ParentUpdateService");
                         }
                     }
                             
@@ -117,7 +118,7 @@ namespace WiserTaskScheduler.Core.Services
                     }
                     catch (Exception e)
                     {
-                        logger.LogError($"Failed to run query ( {targetDatabase.CleanUpQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
+                        await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to run query ( {targetDatabase.CleanUpQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}", "ParentUpdateService");
                     }
                 }
             }
