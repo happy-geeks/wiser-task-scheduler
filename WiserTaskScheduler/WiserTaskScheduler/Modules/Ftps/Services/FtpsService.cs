@@ -264,7 +264,8 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
             case FtpActionTypes.Rename:
                 try
                 {
-                    await ftpHandler.MoveFileAsync(fromPath, toPath);
+                    var success = await ftpHandler.MoveFileAsync(fromPath, toPath);
+                    result.Add("Success", success);
                 }
                 catch (Exception e)
                 {
