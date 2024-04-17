@@ -49,6 +49,7 @@ namespace WiserTaskScheduler.Core.Services
             await CleanupFilesAsync();
             await CleanupDatabaseLogsAsync(databaseConnection, databaseHelpersService);
             await CleanupDatabaseRenderTimesAsync(databaseConnection, databaseHelpersService);
+            await CleanupTemporaryWiserFilesAsync(databaseConnection, databaseHelpersService);
         }
 
         /// <summary>
@@ -141,6 +142,23 @@ namespace WiserTaskScheduler.Core.Services
             if (cleanupServiceSettings.OptimizeRenderTimesTableAfterCleanup && optimizeRenderLogTables.Any())
             {
                 await databaseHelpersService.OptimizeTablesAsync(optimizeRenderLogTables.ToArray());
+            }
+        }
+        
+        /// <summary>
+        /// Cleanup files in the wiser_itemfile table with property_name 'TEMPORARY_FILE_FROM_WISER' older than 24h.
+        /// </summary>
+        /// <param name="databaseConnection">The database connection to use.</param>
+        /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
+        private async Task CleanupTemporaryWiserFilesAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
+        {
+            databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStore));
+            var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserItemFile} WHERE property_name = 'TEMPORARY_FILE_FROM_WISER' AND added_on < NOW() - INTERVAL 24 HOUR", cleanUp: true);
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserItemFile}'.", LogName);
+
+            if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
+            {
+                await databaseHelpersService.OptimizeTablesAsync(WiserTableNames.WiserItemFile);
             }
         }
     }
