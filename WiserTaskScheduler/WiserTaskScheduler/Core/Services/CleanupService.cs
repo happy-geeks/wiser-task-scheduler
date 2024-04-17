@@ -152,7 +152,9 @@ namespace WiserTaskScheduler.Core.Services
         /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
         private async Task CleanupTemporaryWiserFilesAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
         {
-            var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserItemFile} WHERE property_name = 'TEMPORARY_FILE_FROM_WISER' AND added_on < ? NOW() - INTERVAL 24 HOUR", cleanUp: true);
+            databaseConnection.AddParameter("propertyName", cleanupServiceSettings.ProperyNameTemporaryWiserFiles);
+            databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStoreTemporaryWiserFiles));
+            var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserItemFile} WHERE property_name = ?propertyName AND added_on < ?cleanupDate", cleanUp: true);
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserItemFile}'.", LogName);
 
             if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
