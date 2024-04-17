@@ -143,5 +143,22 @@ namespace WiserTaskScheduler.Core.Services
                 await databaseHelpersService.OptimizeTablesAsync(optimizeRenderLogTables.ToArray());
             }
         }
+        
+        /// <summary>
+        /// Cleanup wts services in the database older than the set number of days in the WTS services.
+        /// </summary>
+        /// <param name="databaseConnection">The database connection to use.</param>
+        /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
+        private async Task CleanupWtsServicesAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
+        {
+            databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStoreWtsServices));
+            var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WtsServices} WHERE last_run < ?cleanupDate", cleanUp: true);
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WtsServices}'.", LogName);
+
+            if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
+            {
+                await databaseHelpersService.OptimizeTablesAsync(WiserTableNames.WtsServices);
+            }
+        }
     }
 }

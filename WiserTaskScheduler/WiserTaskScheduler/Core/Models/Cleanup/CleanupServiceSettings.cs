@@ -38,5 +38,10 @@ namespace WiserTaskScheduler.Core.Models.Cleanup
         {
             Type = RunSchemeTypes.Daily
         };
+        
+        /// <summary>
+        /// Gets or sets the number of days wts services need to be kept.
+        /// </summary>
+        public int NumberOfDaysToStoreWtsServices { get; set; } = 7;
     }
 }
