@@ -5,6 +5,7 @@ using System.ServiceProcess;
 using AutoUpdater.Enums;
 using AutoUpdater.Interfaces;
 using AutoUpdater.Models;
+using AutoUpdater.Slack.modules;
 using GeeksCoreLibrary.Modules.Communication.Interfaces;
 using GeeksCoreLibrary.Modules.Communication.Models;
 using Microsoft.Extensions.Options;
@@ -25,12 +26,14 @@ public class UpdateService : IUpdateService
     private readonly IServiceProvider serviceProvider;
 
     private Version lastDownloadedVersion;
+    private readonly SlackSettings slackSettings;
     
     public UpdateService(IOptions<UpdateSettings> updateSettings, ILogger<UpdateService> logger, IServiceProvider serviceProvider)
     {
         this.updateSettings = updateSettings.Value;
         this.logger = logger;
         this.serviceProvider = serviceProvider;
+        slackSettings = updateSettings.Value.SlackSettings;
         
         Directory.CreateDirectory(Path.Combine(WtsTempPath, "update"));
         Directory.CreateDirectory(Path.Combine(WtsTempPath, "backups"));
