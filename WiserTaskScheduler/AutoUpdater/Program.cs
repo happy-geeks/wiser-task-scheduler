@@ -6,6 +6,7 @@ using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
 using Microsoft.AspNetCore.Http;
 using Serilog;
+using SlackNet.AspNetCore;
 
 IHost host = Host.CreateDefaultBuilder(args)
     .UseWindowsService((options) =>
@@ -41,6 +42,14 @@ IHost host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddScoped<IHttpContextAccessor, HttpContextAccessor>();
         services.AddGclServices(hostContext.Configuration, false, false, false);
+        
+        // If there is a bot token provided for Slack add the service. 
+        var slackBotToken = hostContext.Configuration.GetSection("Wts").GetSection("SlackSettings").GetValue<string>("BotToken");
+        if (!String.IsNullOrWhiteSpace(slackBotToken))
+        {
+            services.AddSingleton(new SlackEndpointConfiguration());
+            services.AddSlackNet(c => c.UseApiToken(slackBotToken));
+        }
     })
     .Build();
 

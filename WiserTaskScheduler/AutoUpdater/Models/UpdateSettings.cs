@@ -1,4 +1,5 @@
-﻿using GeeksCoreLibrary.Modules.Communication.Models;
+﻿using AutoUpdater.Slack.modules;
+using GeeksCoreLibrary.Modules.Communication.Models;
 
 namespace AutoUpdater.Models;
 
@@ -18,4 +19,9 @@ public class UpdateSettings
     /// The information of the multiple WTS instances to update.
     /// </summary>
     public List<WtsModel> WtsInstancesToUpdate { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the <see cref="SlackSettings"/> used by the <see cref="UpdateService"/>.
+    /// </summary>
+    public SlackSettings SlackSettings { get; set; }
 }
