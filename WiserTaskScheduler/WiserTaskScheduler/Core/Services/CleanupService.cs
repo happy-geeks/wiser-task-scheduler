@@ -104,6 +104,7 @@ namespace WiserTaskScheduler.Core.Services
         /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
         private async Task CleanupDatabaseLogsAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
         {
+            databaseConnection.SetCommandTimeout(cleanupServiceSettings.Timeout);
             databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStore));
             var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WtsLogs} WHERE added_on < ?cleanupDate", cleanUp: true);
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WtsLogs}'.", LogName);
@@ -121,6 +122,7 @@ namespace WiserTaskScheduler.Core.Services
         /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
         private async Task CleanupDatabaseRenderTimesAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
         {
+            databaseConnection.SetCommandTimeout(cleanupServiceSettings.Timeout);
             databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStoreRenderTimes));
             var optimizeRenderLogTables = new List<string>();
 

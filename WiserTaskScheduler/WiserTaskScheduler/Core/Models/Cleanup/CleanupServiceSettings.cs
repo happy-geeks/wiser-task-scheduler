@@ -38,5 +38,11 @@ namespace WiserTaskScheduler.Core.Models.Cleanup
         {
             Type = RunSchemeTypes.Daily
         };
+        
+        /// <summary>
+        /// Gets or sets the timeout value of the request
+        /// value is in seconds
+        /// </summary>
+        public int Timeout { get; set; } = 300;
     }
 }
