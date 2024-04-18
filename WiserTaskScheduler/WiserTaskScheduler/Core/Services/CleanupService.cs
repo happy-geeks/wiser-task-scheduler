@@ -152,11 +152,16 @@ namespace WiserTaskScheduler.Core.Services
         /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
         private async Task CleanupTemporaryWiserFilesAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
         {
-            databaseConnection.AddParameter("propertyName", cleanupServiceSettings.ProperyNameTemporaryWiserFiles);
-            databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStoreTemporaryWiserFiles));
-            var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserItemFile} WHERE property_name = ?propertyName AND added_on < ?cleanupDate", cleanUp: true);
-            await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserItemFile}'.", LogName);
+            // todo prefix tables (add method in GCL?)
 
+            if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserItemFile))
+            {
+                databaseConnection.AddParameter("propertyName", cleanupServiceSettings.ProperyNameTemporaryWiserFiles);
+                databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStoreTemporaryWiserFiles));
+                var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserItemFile} WHERE property_name = ?propertyName AND added_on < ?cleanupDate", cleanUp: true);
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserItemFile}'.", LogName);
+            }
+            
             if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
             {
                 await databaseHelpersService.OptimizeTablesAsync(WiserTableNames.WiserItemFile);
