@@ -10,7 +10,7 @@ The Wiser Task scheduler (WTS in short) is a .net core service which can be used
 2. Copy all build files to the desired folder on the server
 3. Setup the Appsettings.json file (see documentation)
 4. Open the command prompt (CMD) or PowerShell with administrator rights
-5. Run this command: `sc.exe create "<Service name>" binpath="<Service exe location>";`<br>- change `<Service name>` with a name you prefer ('WTS Auto Updater' for example)<br>- change `<Service exe location>` to the location of the .exe file (for example: 'c:\WTSAutoUpdater\autoupdater.exe')
+5. Run this command: `sc.exe create "<Service name>" binpath="<Service exe location>"`<br>- change `<Service name>` with a name you prefer ('WTS Auto Updater' for example)<br>- change `<Service exe location>` to the location of the .exe file (for example: 'c:\WTSAutoUpdater\autoupdater.exe')
 6. Open the services panel in Windows (you can run 'msc' via the Start menu)
 7. Find the newly created service and open its properties
 8. Change the startup type to 'automatic (delayed start)'
@@ -25,7 +25,7 @@ The auto updater is a tool embedded into the WTS project to automatically update
 2. Copy all build files to the desired folder on the server
 3. Setup the Appsettings.json file (see documentation)
 4. Open the command prompt (CMD) or PowerShell with administrator rights
-5. Run this command: `sc.exe create "<Service name>" binpath="<Service exe location>";`<br>- change `<Service name>` with a name you prefer ('WiserTaskScheduler' for example)<br>- change `<Service exe location>` to the location of the .exe file (for example: 'c:\wts\WiserTaskScheduler.exe')
+5. Run this command: `sc.exe create "<Service name>" binpath="<Service exe location>"`<br>- change `<Service name>` with a name you prefer ('WiserTaskScheduler' for example)<br>- change `<Service exe location>` to the location of the .exe file (for example: 'c:\wts\WiserTaskScheduler.exe')
 6. Open the services panel in Windows (you can run 'msc' via the Start menu)
 7. Find the newly created service and open its properties
 8. Change the startup type to 'automatic (delayed start)'
