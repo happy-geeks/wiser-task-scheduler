@@ -133,7 +133,7 @@ namespace WiserTaskScheduler.Core.Services
             
             // Add main database.
             var listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{WiserTableNames.WiserParentUpdates}`;";
-            var parentsCleanUpQuery = $"TRUNCATE `{WiserTableNames.WiserParentUpdates}`;";
+            var parentsCleanUpQuery = $"DELETE FROM `{WiserTableNames.WiserParentUpdates}` WHERE `id` IS NOT NULL;";
             
             targetDatabases.Add(new ParentUpdateDatabaseStrings(databaseConnection.ConnectedDatabase, listTablesQuery, parentsCleanUpQuery));
             
@@ -143,7 +143,7 @@ namespace WiserTaskScheduler.Core.Services
                 foreach (var additionalDatabase in parentsUpdateServiceSettings.AdditionalDatabases)
                 {
                     listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}`;";
-                    parentsCleanUpQuery = $"TRUNCATE `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}`;";
+                    parentsCleanUpQuery = $"DELETE FROM `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}` WHERE `id` IS NOT NULL;";
                     
                     targetDatabases.Add(new ParentUpdateDatabaseStrings(additionalDatabase, listTablesQuery, parentsCleanUpQuery));    
                 }
