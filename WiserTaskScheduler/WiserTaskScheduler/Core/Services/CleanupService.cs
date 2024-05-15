@@ -118,8 +118,6 @@ namespace WiserTaskScheduler.Core.Services
             catch (Exception e)
             {
                 await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during cleanup: {e}", LogName);
-                Console.WriteLine(e);
-                throw;
             }
         }
 
