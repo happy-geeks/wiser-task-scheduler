@@ -23,6 +23,12 @@ namespace WiserTaskScheduler.Core.Models.ParentsUpdate
         public string[] AdditionalDatabases { get; set; }
 
         /// <summary>
+        /// Gets or sets the setting for performing a optimize table command every X times
+        /// set to 0 for never performing optimize default is 100
+        /// </summary>
+        public int PerformOptimizeEveryXtimes { get; set; } = 100;
+
+        /// <summary>
         /// Gets or sets the log level for the parent service
         /// </summary>
         public LogSettings LogSettings { get; set; } = new LogSettings()

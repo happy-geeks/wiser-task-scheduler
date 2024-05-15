@@ -3,7 +3,7 @@
 namespace WiserTaskScheduler.Core.Models.ParentsUpdate
 {
     [XmlType("ParentUpdateDatabaseStrings")]
-    public class ParentUpdateDatabaseStrings(string databaseName, string listQuery, string cleanupQuery)
+    public class ParentUpdateDatabaseStrings(string databaseName, string listQuery, string cleanupQuery, string optimizeQuery)
     {
         /// <summary>
         /// Gets or sets the database name.
@@ -20,5 +20,10 @@ namespace WiserTaskScheduler.Core.Models.ParentsUpdate
         /// Gets or sets cleanup query used to clear the table of updates after its done.
         /// </summary>
         public string CleanUpQuery { get; set; } = cleanupQuery;
+        
+        /// <summary>
+        /// Gets or sets optimize query used to optimize the table 
+        /// </summary>
+        public string OptimizeQuery { get; set; } = optimizeQuery;
     }
 }
