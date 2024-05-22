@@ -42,7 +42,7 @@ namespace WiserTaskScheduler.Core.Workers
 
             this.mainService.LogSettings = RunScheme.LogSettings;
 
-            slackChatService.SendChannelMessageAsync("*Wiser Task Scheduler has started*");
+            slackChatService.SendChannelMessageAsync($"*Wiser Task Scheduler has started ({Environment.MachineName})*");
         }
 
         /// <inheritdoc />
@@ -55,7 +55,7 @@ namespace WiserTaskScheduler.Core.Workers
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
             await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "Main worker needs to stop, stopping all configuration workers.", Name, RunScheme.TimeId);
-            await slackChatService.SendChannelMessageAsync("*Wiser Task Scheduler was shut down*");
+            await slackChatService.SendChannelMessageAsync($"*Wiser Task Scheduler was shut down ({Environment.MachineName})*");
             await mainService.StopAllConfigurationsAsync();
             await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "All configuration workers have stopped, stopping main worker.", Name, RunScheme.TimeId);
             await base.StopAsync(cancellationToken);

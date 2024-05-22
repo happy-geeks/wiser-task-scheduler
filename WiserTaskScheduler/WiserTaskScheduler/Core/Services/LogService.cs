@@ -117,7 +117,8 @@ namespace WiserTaskScheduler.Core.Services
                         {
                             var linebreakIndex = message.IndexOf(Environment.NewLine, StringComparison.InvariantCulture);
                             var title = linebreakIndex >= 0 ? message.Substring(0, linebreakIndex) : message;
-                            var slackMessage = $@"Log level: {logLevel}
+                            var slackMessage = $@"Server: {Environment.MachineName}
+Log level: {logLevel}
 Configuration : '{configurationName}'
 Time ID: '{timeId}'
 Order: '{order}'
