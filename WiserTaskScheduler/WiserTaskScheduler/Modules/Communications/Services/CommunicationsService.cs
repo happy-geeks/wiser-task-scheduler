@@ -383,16 +383,12 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    catch (Exception e)
 		    {
 			    failed++;
+			    sendErrorNotification = true;
+			    
 			    databaseConnection.ClearParameters();
 			    statusCode = "General exception";
 			    statusMessage = $"Attempt #{email.AttemptCount}:{Environment.NewLine}{e}";
 			    await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, $"Failed to send email for communication ID {email.Id} due to general error:\n{e}", configurationServiceName, communication.TimeId, communication.Order);
-
-			    if (!e.Message.Contains("Mail API error", StringComparison.OrdinalIgnoreCase))
-			    {
-				    // If another error has occured it will most likely not work other times.
-				    email.AttemptCount = communication.MaxNumberOfCommunicationAttempts;
-			    }
 		    }
 		    
 		    databaseConnection.AddParameter("attempt_count", email.AttemptCount);
@@ -402,7 +398,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 
 		    if (sendErrorNotification)
 		    {
-			    await SendErrorNotification(communication, databaseConnection, email.AttemptCount, email.Subject, String.Join(';', email.Receivers.Select(x => x.Address)), statusMessage, CommunicationTypes.Email);
+			    await SendErrorNotification(communication, databaseConnection, email, statusMessage);
 		    }
 	    }
         
@@ -705,10 +701,10 @@ WHERE
 	           || (singleCommunication.AttemptCount >= 5 && totalMinutesSinceLastAttempt < 1440);
     }
 
-    private async Task SendErrorNotification(CommunicationModel communication, IDatabaseConnection databaseConnection, int attemptCount, string subject, string receivers, string statusMessage, CommunicationTypes type)
+    private async Task SendErrorNotification(CommunicationModel communication, IDatabaseConnection databaseConnection, SingleCommunicationModel singleCommunicationModel, string statusMessage)
     {
 	    // Check if an error email needs to be send.
-	    if (attemptCount < communication.MaxNumberOfCommunicationAttempts || String.IsNullOrWhiteSpace(communication.EmailAddressForErrorNotifications) || subject == EmailSubjectForCommunicationError || lastErrorSent.Date >= DateTime.Today)
+	    if (singleCommunicationModel.AttemptCount < communication.MaxNumberOfCommunicationAttempts || String.IsNullOrWhiteSpace(communication.EmailAddressForErrorNotifications) || singleCommunicationModel.Subject == EmailSubjectForCommunicationError || lastErrorSent.Date >= DateTime.Today)
 	    {
 		    return;
 	    }
@@ -722,9 +718,10 @@ WHERE
 			    
 	    databaseConnection.ClearParameters();
 	    databaseConnection.AddParameter("receiver", communication.EmailAddressForErrorNotifications);
-	    databaseConnection.AddParameter("sender", communication.EmailAddressForErrorNotifications);
+	    databaseConnection.AddParameter("sender", singleCommunicationModel.Sender);
+	    databaseConnection.AddParameter("sender_name", singleCommunicationModel.SenderName);
 	    databaseConnection.AddParameter("subject", EmailSubjectForCommunicationError);
-	    databaseConnection.AddParameter("content", $"<p>Failed to send {type} to '{receivers}'.</p><p>Error log:</p><pre>{statusMessage}</pre>");
+	    databaseConnection.AddParameter("content", $"<p>Failed to send {singleCommunicationModel.Type} to '{String.Join(';', singleCommunicationModel.Receivers.Select(x => x.Address))}'.</p><p>Error log:</p><pre>{statusMessage}</pre>");
 	    databaseConnection.AddParameter("communicationtype", "email");
 	    databaseConnection.AddParameter("send_date", DateTime.Now);
 	    databaseConnection.AddParameter("is_internal_error_mail", true);
