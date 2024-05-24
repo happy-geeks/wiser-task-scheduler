@@ -14,6 +14,8 @@ namespace WiserTaskScheduler.Modules.Branches.Models
         /// Gets or sets the connection string that should be used for branch databases.
         /// This should only be used when branches have to be created in a different database server from the main branch.
         /// In this connection string, the database name can be left empty. It will be filled in by the system, based on the name of the branch.
+        /// If the server is the same as the main database server, this should be left empty.
+        /// If the servers are different, then the WTS will have to use a much slower method to copy data to the branch database.
         /// </summary>
         public string BranchDatabaseConnectionString { get; set; }
 
@@ -49,9 +51,10 @@ namespace WiserTaskScheduler.Modules.Branches.Models
 
         /// <summary>
         /// Gets or sets whether to use the <see cref="MySqlBulkCopy"/> class when creating branches.
+        /// This is only applicable if the server of the branch database is different from the main database server.
         /// This is NOT used by default, because it requires the setting "local_infile" to be enabled in the MySQL server.
         /// Enabling local_infile can pose security risks if untrusted users have access to your MySQL server, as it allows them to load data from local files on the client machine. Ensure that you understand these risks and mitigate them appropriately.
-        /// However, creating branches with this setting enabled can be much faster than the default method.
+        /// However, creating branches with this setting enabled will be much faster than the default method.
         /// </summary>
         public bool UseMySqlBulkCopyWhenCreatingBranches { get; set; }
 

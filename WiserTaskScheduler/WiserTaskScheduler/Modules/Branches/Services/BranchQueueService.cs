@@ -192,20 +192,25 @@ ORDER BY start_on ASC, id ASC");
                     ConvertZeroDateTime = true
                 };
 
+                // If the branch database is on the same server as the production database, we can use a quicker and more efficient way of copying data.
+                var branchIsOnSameServerAsProduction = String.Equals(productionConnectionStringBuilder.Server, branchConnectionStringBuilder.Server, StringComparison.OrdinalIgnoreCase);
+
                 // Change connection string to one with a specific user for deleting a database.
                 if (!String.IsNullOrWhiteSpace(branchQueue.UsernameForManagingBranches) && !String.IsNullOrWhiteSpace(branchQueue.PasswordForManagingBranches))
                 {
                     productionConnectionStringBuilder.UserID = branchQueue.UsernameForManagingBranches;
                     productionConnectionStringBuilder.Password = branchQueue.PasswordForManagingBranches;
-                    branchConnectionStringBuilder.UserID = branchQueue.UsernameForManagingBranches;
-                    branchConnectionStringBuilder.Password = branchQueue.PasswordForManagingBranches;
+
+                    if (branchIsOnSameServerAsProduction)
+                    {
+                        // If the branch is on the same server as the production database, we can use the same user for both.
+                        branchConnectionStringBuilder.UserID = branchQueue.UsernameForManagingBranches;
+                        branchConnectionStringBuilder.Password = branchQueue.PasswordForManagingBranches;
+                    }
                 }
 
                 await databaseConnection.ChangeConnectionStringsAsync(productionConnectionStringBuilder.ConnectionString, productionConnectionStringBuilder.ConnectionString);
                 await branchDatabaseConnection.ChangeConnectionStringsAsync(branchConnectionStringBuilder.ConnectionString, branchConnectionStringBuilder.ConnectionString);
-
-                // If the branch database is on the same server as the production database, we can use a quicker and more efficient way of copying data.
-                var branchIsOnSameServerAsProduction = String.Equals(productionConnectionStringBuilder.Server, branchConnectionStringBuilder.Server, StringComparison.OrdinalIgnoreCase);
 
                 // Make sure that the database doesn't exist yet.
                 if (await branchDatabaseHelpersService.DatabaseExistsAsync(branchDatabase))
@@ -301,7 +306,6 @@ FROM (
                 {
                     var tableName = dataRow.Field<string>("TABLE_NAME");
                     var bulkCopy = new MySqlBulkCopy((MySqlConnection) branchDatabaseConnection.GetConnectionForWriting()) {DestinationTableName = tableName, ConflictOption = MySqlBulkLoaderConflictOption.Ignore};
-                    MySqlBulkCopyResult bulkCopyResult;
 
                     // For Wiser tables, we don't want to copy customer data, so copy everything except data of certain entity types.
                     if (tableName!.EndsWith(WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase))
@@ -492,40 +496,32 @@ FROM (
                             }
                             else
                             {
-                                // Get the data from the production database.
-                                var items = await databaseConnection.GetAsync(queryBuilder.ToString());
-                                var prefix = tableName.Replace(WiserTableNames.WiserItem, "");
-                                var ids = items.Rows.Cast<DataRow>().Select(x => x.Field<ulong>("id")).ToList();
-                                if (!copiedItemIds.TryAdd(prefix, ids))
+                                var counter = 0;
+                                var totalRowsInserted = 0;
+                                while (true)
                                 {
-                                    copiedItemIds[prefix].AddRange(ids);
-                                }
-
-                                // Insert the data into the new branch database.
-                                if (branchQueue.UseMySqlBulkCopyWhenCreatingBranches)
-                                {
-                                    bulkCopy.ColumnMappings.AddRange(MySqlHelpers.GetMySqlColumnMappingForBulkCopy(items));
-                                    bulkCopyResult = await bulkCopy.WriteToServerAsync(items);
-                                    if (bulkCopyResult.Warnings.Any())
+                                    // Get the data from the production database.
+                                    var items = await databaseConnection.GetAsync($"{queryBuilder} ORDER BY id ASC LIMIT {counter}, 1000");
+                                    if (items.Rows.Count == 0)
                                     {
-                                        var warnings = bulkCopyResult.Warnings.Select(warning => warning.Message);
-                                        errors.Add(warnings);
-                                        await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                        if (totalRowsInserted > 0)
+                                        {
+                                            entityTypesDone.Add(entity.EntityType);
+                                        }
+                                        break;
                                     }
 
-                                    if (bulkCopyResult.RowsInserted > 0)
+                                    var prefix = tableName.Replace(WiserTableNames.WiserItem, "");
+                                    var ids = items.Rows.Cast<DataRow>().Select(x => x.Field<ulong>("id")).ToList();
+                                    if (!copiedItemIds.TryAdd(prefix, ids))
                                     {
-                                        entityTypesDone.Add(entity.EntityType);
+                                        copiedItemIds[prefix].AddRange(ids);
                                     }
-                                }
-                                else
-                                {
-                                    var rowsInserted = await branchDatabaseConnection.BulkInsertAsync(items, tableName, true, true);
 
-                                    if (rowsInserted > 0)
-                                    {
-                                        entityTypesDone.Add(entity.EntityType);
-                                    }
+                                    // Insert the data into the new branch database.
+                                    totalRowsInserted += await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
+
+                                    counter++;
                                 }
                             }
                         }
@@ -563,28 +559,15 @@ FROM (
                             }
 
                             // Get the data from the production database.
+                            // TODO: Insert into batches.
                             var items = await databaseConnection.GetAsync($"""
-                                                                                   SELECT {String.Join(", ", itemDetailColumns.Select(x => $"detail.{x}"))} 
+                                                                                   SELECT {String.Join(", ", itemDetailColumns.Select(x => $"detail.{x}"))}
                                                                                    FROM `{originalDatabase}`.`{tableName}` AS detail
                                                                                    WHERE detail.item_id IN ({String.Join(", ", itemIds)})
                                                                                    """);
 
                             // Insert the data into the new branch database.
-                            if (branchQueue.UseMySqlBulkCopyWhenCreatingBranches)
-                            {
-                                bulkCopy.ColumnMappings.AddRange(MySqlHelpers.GetMySqlColumnMappingForBulkCopy(items));
-                                bulkCopyResult = await bulkCopy.WriteToServerAsync(items);
-                                if (bulkCopyResult.Warnings.Any())
-                                {
-                                    var warnings = bulkCopyResult.Warnings.Select(warning => warning.Message);
-                                    errors.Add(warnings);
-                                    await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                                }
-                            }
-                            else
-                            {
-                                await branchDatabaseConnection.BulkInsertAsync(items, tableName, true, true);
-                            }
+                            await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
                         }
 
                         continue;
@@ -617,28 +600,15 @@ FROM (
                                 }
 
                                 // Get the data from the production database.
+                                // TODO: Insert into batches.
                                 var items = await databaseConnection.GetAsync($"""
-                                                                                       SELECT file.* 
+                                                                                       SELECT file.*
                                                                                        FROM `{originalDatabase}`.`{tableName}` AS file
                                                                                        WHERE file.item_id IN ({String.Join(", ", itemIds)})
                                                                                        """);
 
                                 // Insert the data into the new branch database.
-                                if (branchQueue.UseMySqlBulkCopyWhenCreatingBranches)
-                                {
-                                    bulkCopy.ColumnMappings.AddRange(MySqlHelpers.GetMySqlColumnMappingForBulkCopy(items));
-                                    bulkCopyResult = await bulkCopy.WriteToServerAsync(items);
-                                    if (bulkCopyResult.Warnings.Any())
-                                    {
-                                        var warnings = bulkCopyResult.Warnings.Select(warning => warning.Message);
-                                        errors.Add(warnings);
-                                        await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                                    }
-                                }
-                                else
-                                {
-                                    await branchDatabaseConnection.BulkInsertAsync(items, tableName, true, true);
-                                }
+                                await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
                             }
 
                             // Copy all files that are on the links that are copied to the new branch from the given (prefixed) table.
@@ -679,28 +649,15 @@ FROM (
                                             }
 
                                             // Get the data from the production database.
+                                            // TODO: Insert into batches.
                                             var items = await databaseConnection.GetAsync($"""
-                                                                                                   SELECT file.* 
+                                                                                                   SELECT file.*
                                                                                                    FROM `{originalDatabase}`.`{tableName}` AS file
                                                                                                    WHERE file.itemlink_id IN ({String.Join(", ", linkIds)})
                                                                                                    """);
 
                                             // Insert the data into the new branch database.
-                                            if (branchQueue.UseMySqlBulkCopyWhenCreatingBranches)
-                                            {
-                                                bulkCopy.ColumnMappings.AddRange(MySqlHelpers.GetMySqlColumnMappingForBulkCopy(items));
-                                                bulkCopyResult = await bulkCopy.WriteToServerAsync(items);
-                                                if (bulkCopyResult.Warnings.Any())
-                                                {
-                                                    var warnings = bulkCopyResult.Warnings.Select(warning => warning.Message);
-                                                    errors.Add(warnings);
-                                                    await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                                                }
-                                            }
-                                            else
-                                            {
-                                                await branchDatabaseConnection.BulkInsertAsync(items, tableName, true, true);
-                                            }
+                                            await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
                                         }
                                     }
                                 }
@@ -726,28 +683,15 @@ FROM (
                                 }
 
                                 // Get the data from the production database.
+                                // TODO: Insert into batches.
                                 var items = await databaseConnection.GetAsync($"""
-                                                                               SELECT file.* 
+                                                                               SELECT file.*
                                                                                FROM `{originalDatabase}`.`{tableName}` AS file
                                                                                WHERE file.itemlink_id IN ({String.Join(", ", linkIds)})
                                                                                """);
 
                                 // Insert the data into the new branch database.
-                                if (branchQueue.UseMySqlBulkCopyWhenCreatingBranches)
-                                {
-                                    bulkCopy.ColumnMappings.AddRange(MySqlHelpers.GetMySqlColumnMappingForBulkCopy(items));
-                                    bulkCopyResult = await bulkCopy.WriteToServerAsync(items);
-                                    if (bulkCopyResult.Warnings.Any())
-                                    {
-                                        var warnings = bulkCopyResult.Warnings.Select(warning => warning.Message);
-                                        errors.Add(warnings);
-                                        await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                                    }
-                                }
-                                else
-                                {
-                                    await branchDatabaseConnection.BulkInsertAsync(items, tableName, true, true);
-                                }
+                                await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
                             }
                         }
 
@@ -800,29 +744,16 @@ AND EXTRA NOT LIKE '%GENERATED'";
                     {
                         // Get the data from the production database.
                         query = $"SELECT {String.Join(", ", columns)} FROM `{originalDatabase}`.`{tableName}`";
-                        var tableData = await databaseConnection.GetAsync(query);
+                        // TODO: Insert into batches.
+                        var items = await databaseConnection.GetAsync(query);
 
                         // Insert the data into the new branch database.
-                        if (branchQueue.UseMySqlBulkCopyWhenCreatingBranches)
-                        {
-                            bulkCopy.ColumnMappings.AddRange(MySqlHelpers.GetMySqlColumnMappingForBulkCopy(tableData));
-                            bulkCopyResult = await bulkCopy.WriteToServerAsync(tableData);
-                            if (bulkCopyResult.Warnings.Any())
-                            {
-                                var warnings = bulkCopyResult.Warnings.Select(warning => warning.Message);
-                                errors.Add(warnings);
-                                await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                            }
-                        }
-                        else
-                        {
-                            await branchDatabaseConnection.BulkInsertAsync(tableData, tableName, true, true);
-                        }
+                        await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
 
                         if (tableName.EndsWith(WiserTableNames.WiserItemLink))
                         {
                             var prefix = tableName.Replace(WiserTableNames.WiserItem, "");
-                            var ids = tableData.Rows.Cast<DataRow>().Select(x => x.Field<ulong>("id")).ToList();
+                            var ids = items.Rows.Cast<DataRow>().Select(x => x.Field<ulong>("id")).ToList();
                             if (!copiedItemLinks.TryAdd(prefix, ids))
                             {
                                 copiedItemLinks[prefix].AddRange(ids);
@@ -908,6 +839,39 @@ AND EXTRA NOT LIKE '%GENERATED'";
             result.Add("ErrorMessage", errors.FirstOrDefault() ?? "");
             result.Add("Success", !errors.Any());
             return result;
+        }
+
+        /// <summary>
+        /// Handles the two different ways that we have to bulk insert data into a table of a branch, depending on the settings of the branch queue.
+        /// </summary>
+        /// <param name="branchQueue">The branch queue settings model.</param>
+        /// <param name="configurationServiceName">The name of the current WTS configuration.</param>
+        /// <param name="bulkCopy">The <see cref="MySqlBulkCopy"/> class that should be created outside of this function.</param>
+        /// <param name="items">The <see cref="DataTable"/> with the data that should be inserted.</param>
+        /// <param name="errors">The <see cref="JArray"/> that should be used to add any errors too.</param>
+        /// <param name="tableName">The name of the table to insert the data into.</param>
+        /// <param name="branchDatabase">The name of the database of the branch.</param>
+        /// <param name="branchDatabaseConnection">The <see cref="IDatabaseConnection"/> with the connection to the branch database.</param>
+        /// <returns>The amount of inserted rows.</returns>
+        private async Task<int> BulkInsertDataTableAsync(BranchQueueModel branchQueue, string configurationServiceName, MySqlBulkCopy bulkCopy, DataTable items, JArray errors, string tableName, string branchDatabase, IDatabaseConnection branchDatabaseConnection)
+        {
+            if (!branchQueue.UseMySqlBulkCopyWhenCreatingBranches)
+            {
+                return await branchDatabaseConnection.BulkInsertAsync(items, tableName, true, true);
+            }
+
+            bulkCopy.ColumnMappings.AddRange(MySqlHelpers.GetMySqlColumnMappingForBulkCopy(items));
+            var bulkCopyResult = await bulkCopy.WriteToServerAsync(items);
+            if (!bulkCopyResult.Warnings.Any())
+            {
+                return bulkCopyResult.RowsInserted;
+            }
+
+            var warnings = bulkCopyResult.Warnings.Select(warning => warning.Message);
+            errors.Add(warnings);
+            await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+
+            return bulkCopyResult.RowsInserted;
         }
 
         /// <summary>
