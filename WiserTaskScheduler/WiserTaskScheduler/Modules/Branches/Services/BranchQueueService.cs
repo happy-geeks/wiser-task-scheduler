@@ -60,18 +60,13 @@ namespace WiserTaskScheduler.Modules.Branches.Services
         /// <inheritdoc />
         public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
         {
-            connectionString = configuration.ConnectionString;
-            if (connectionString.Contains("IgnoreCommandTransaction", StringComparison.OrdinalIgnoreCase))
+            var connectionStringBuilder = new MySqlConnectionStringBuilder(configuration.ConnectionString)
             {
-                return Task.CompletedTask;
-            }
-
-            if (!connectionString.EndsWith(";", StringComparison.OrdinalIgnoreCase))
-            {
-                connectionString += ";";
-            }
-
-            connectionString += "IgnoreCommandTransaction=true";
+                IgnoreCommandTransaction = true,
+                AllowLoadLocalInfile = true,
+                ConvertZeroDateTime = true
+            };
+            connectionString = connectionStringBuilder.ConnectionString;
             return Task.CompletedTask;
         }
 
@@ -141,8 +136,12 @@ ORDER BY start_on ASC, id ASC");
         /// <exception cref="ArgumentOutOfRangeException">Then we get unknown options in enums.</exception>
         private async Task<JObject> HandleCreateBranchActionAsync(DataRow dataRowWithSettings, BranchQueueModel branchQueue, string configurationServiceName, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService, IServiceScope scope, ITaskAlertsService taskAlertsService)
         {
-            var error = "";
-            var result = new JObject();
+            var errors = new JArray();
+            var result = new JObject
+            {
+                {"SuccessfulChanges", 0},
+                {"Errors", errors}
+            };
 
             // Set the start date to the current datetime.
             var startDate = DateTime.Now;
@@ -160,49 +159,74 @@ ORDER BY start_on ASC, id ASC");
             {
                 await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to create a branch, but it either had invalid settings, or the database name was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
 
-                error = "Trying to create a branch, but it either had invalid settings, or the database name was empty.";
-                result.Add("ErrorMessage", error);
+                errors.Add("Trying to create a branch, but it either had invalid settings, or the database name was empty.");
+                result.Add("ErrorMessage", errors[0]);
                 result.Add("Success", false);
-                await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, String.IsNullOrWhiteSpace(error) ? new JArray() : new JArray(error), stopwatch, startDate, branchQueue.CreatedBranchTemplateId, CreateBranchSubject, CreateBranchTemplate);
+                await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, errors, stopwatch, startDate, branchQueue.CreatedBranchTemplateId, CreateBranchSubject, CreateBranchTemplate);
                 return result;
             }
 
-            // Make sure that the database doesn't exist yet.
+            // Create a new scope for dependency injection and get a new instance of the database connection, to use for connecting to the branch database.
+            // This is because we need to keep two separate connections open at the same time, one for production database and one for the branch database.
             var branchDatabase = settings.DatabaseName;
-            if (await databaseHelpersService.DatabaseExistsAsync(branchDatabase))
-            {
-                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to create a branch, but a database with name '{branchDatabase}' already exists. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-
-                error = $"Trying to create a branch, but a database with name '{branchDatabase}' already exists.";
-                result.Add("ErrorMessage", error);
-                result.Add("Success", false);
-                await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, String.IsNullOrWhiteSpace(error) ? new JArray() : new JArray(error), stopwatch, startDate, branchQueue.CreatedBranchTemplateId, CreateBranchSubject, CreateBranchTemplate);
-                return result;
-            }
+            using var branchScope = serviceProvider.CreateScope();
+            var branchDatabaseConnection = branchScope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+            var branchDatabaseHelpersService = branchScope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+            branchDatabaseConnection.SetCommandTimeout(900);
 
             try
             {
                 await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WiserBranchesQueue});
 
                 // Some variables we'll need a lot, for easier access.
-                var connectionStringBuilder = new MySqlConnectionStringBuilder(connectionString)
+                var productionConnectionStringBuilder = new MySqlConnectionStringBuilder(connectionString)
                 {
-                    IgnoreCommandTransaction = true
+                    IgnoreCommandTransaction = true,
+                    AllowLoadLocalInfile = true,
+                    ConvertZeroDateTime = true
+                };
+                var branchConnectionStringBuilder = new MySqlConnectionStringBuilder(String.IsNullOrWhiteSpace(branchQueue.BranchDatabaseConnectionString) ? connectionString : branchQueue.BranchDatabaseConnectionString)
+                {
+                    IgnoreCommandTransaction = true,
+                    AllowLoadLocalInfile = true,
+                    ConvertZeroDateTime = true
                 };
 
                 // Change connection string to one with a specific user for deleting a database.
                 if (!String.IsNullOrWhiteSpace(branchQueue.UsernameForManagingBranches) && !String.IsNullOrWhiteSpace(branchQueue.PasswordForManagingBranches))
                 {
-                    connectionStringBuilder.UserID = branchQueue.UsernameForManagingBranches;
-                    connectionStringBuilder.Password = branchQueue.PasswordForManagingBranches;
-                    await databaseConnection.ChangeConnectionStringsAsync(connectionStringBuilder.ConnectionString, connectionStringBuilder.ConnectionString);
+                    productionConnectionStringBuilder.UserID = branchQueue.UsernameForManagingBranches;
+                    productionConnectionStringBuilder.Password = branchQueue.PasswordForManagingBranches;
+                    branchConnectionStringBuilder.UserID = branchQueue.UsernameForManagingBranches;
+                    branchConnectionStringBuilder.Password = branchQueue.PasswordForManagingBranches;
+                }
+
+                await databaseConnection.ChangeConnectionStringsAsync(productionConnectionStringBuilder.ConnectionString, productionConnectionStringBuilder.ConnectionString);
+                await branchDatabaseConnection.ChangeConnectionStringsAsync(branchConnectionStringBuilder.ConnectionString, branchConnectionStringBuilder.ConnectionString);
+
+                // If the branch database is on the same server as the production database, we can use a quicker and more efficient way of copying data.
+                var branchIsOnSameServerAsProduction = String.Equals(productionConnectionStringBuilder.Server, branchConnectionStringBuilder.Server, StringComparison.OrdinalIgnoreCase);
+
+                // Make sure that the database doesn't exist yet.
+                if (await branchDatabaseHelpersService.DatabaseExistsAsync(branchDatabase))
+                {
+                    await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to create a branch, but a database with name '{branchDatabase}' already exists. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+
+                    errors.Add($"Trying to create a branch, but a database with name '{branchDatabase}' already exists.");
+                    result.Add("ErrorMessage", errors[0]);
+                    result.Add("Success", false);
+                    await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, errors, stopwatch, startDate, branchQueue.CreatedBranchTemplateId, CreateBranchSubject, CreateBranchTemplate);
+                    return result;
                 }
 
                 // Create the database in the same server/cluster. We already check if the database exists before this, so we can safely do this here.
-                await databaseHelpersService.CreateDatabaseAsync(branchDatabase);
+                await branchDatabaseHelpersService.CreateDatabaseAsync(branchDatabase);
 
-                var originalDatabase = connectionStringBuilder.Database;
-                connectionStringBuilder.Database = branchDatabase;
+                var originalDatabase = databaseConnection.ConnectedDatabase;
+                branchConnectionStringBuilder.Database = branchDatabase;
+
+                // Update connection string again after creating and selecting the new database schema.
+                await branchDatabaseConnection.ChangeConnectionStringsAsync(branchConnectionStringBuilder.ConnectionString, branchConnectionStringBuilder.ConnectionString);
 
                 // Get all tables that don't start with an underscore (wiser tables never start with an underscore and we often use that for temporary or backup tables).
                 // Handle the wiser_itemfile tables as last to ensure all other tables are copied first.
@@ -231,7 +255,6 @@ FROM (
 ) AS x";
 
                 databaseConnection.AddParameter("currentSchema", originalDatabase);
-                databaseConnection.AddParameter("newSchema", branchDatabase);
                 var dataTable = await databaseConnection.GetAsync(query);
 
                 // We don't want to copy the contents of log tables and certain other tables to the new branch.
@@ -250,38 +273,35 @@ FROM (
                     "jcl_email"
                 };
 
-                // Create the tables in a new connection, because these cause implicit commits.
-                await using (var mysqlConnection = new MySqlConnection(connectionStringBuilder.ConnectionString))
+                foreach (DataRow dataRow in dataTable.Rows)
                 {
-                    await mysqlConnection.OpenAsync();
-                    await using (var command = mysqlConnection.CreateCommand())
+                    var tableName = dataRow.Field<string>("TABLE_NAME");
+
+                    // Check if the structure of the table is excluded from the creation of the branch.
+                    if (branchQueue.CopyTableRules != null && branchQueue.CopyTableRules.Any(t => t.CopyType == CopyTypes.Nothing && (
+                            (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
+                            || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName[1..], StringComparison.OrdinalIgnoreCase))
+                            || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName[..^1], StringComparison.OrdinalIgnoreCase))
+                            || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase))))
                     {
-                        foreach (DataRow dataRow in dataTable.Rows)
-                        {
-                            var tableName = dataRow.Field<string>("TABLE_NAME");
-
-                            // Check if the structure of the table is excluded from the creation of the branch.
-                            if (branchQueue.CopyTableRules != null && branchQueue.CopyTableRules.Any(t => t.CopyType == CopyTypes.Nothing && (
-                                                                                                         (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
-                                                                                                         || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName[1..], StringComparison.OrdinalIgnoreCase))
-                                                                                                         || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName[..^1], StringComparison.OrdinalIgnoreCase))
-                                                                                                         || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase))))
-                            {
-                                continue;
-                            }
-
-                            command.CommandText = $"CREATE TABLE `{branchDatabase.ToMySqlSafeValue(false)}`.`{tableName.ToMySqlSafeValue(false)}` LIKE `{originalDatabase.ToMySqlSafeValue(false)}`.`{tableName.ToMySqlSafeValue(false)}`";
-                            await command.ExecuteNonQueryAsync();
-                        }
+                        continue;
                     }
+
+                    var createTableResult = await databaseConnection.GetAsync($"SHOW CREATE TABLE `{tableName.ToMySqlSafeValue(false)}`");
+                    await branchDatabaseConnection.ExecuteAsync(createTableResult.Rows[0].Field<string>("Create table"));
                 }
 
                 var allLinkTypes = await wiserItemsService.GetAllLinkTypeSettingsAsync();
 
                 // Fill the tables with data.
+                var copiedItemIds = new Dictionary<string, List<ulong>>();
+                var copiedItemLinks = new Dictionary<string, List<ulong>>();
+                var entityTypesDone = new List<string>();
                 foreach (DataRow dataRow in dataTable.Rows)
                 {
                     var tableName = dataRow.Field<string>("TABLE_NAME");
+                    var bulkCopy = new MySqlBulkCopy((MySqlConnection) branchDatabaseConnection.GetConnectionForWriting()) {DestinationTableName = tableName, ConflictOption = MySqlBulkLoaderConflictOption.Ignore};
+                    MySqlBulkCopyResult bulkCopyResult;
 
                     // For Wiser tables, we don't want to copy customer data, so copy everything except data of certain entity types.
                     if (tableName!.EndsWith(WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase))
@@ -291,6 +311,12 @@ FROM (
                             if (String.IsNullOrWhiteSpace(entity.EntityType))
                             {
                                 await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to copy items of entity type to new branch, but it either had invalid settings, or the entity name was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                continue;
+                            }
+
+                            // If we've already done items of this type, skip it.
+                            if (entityTypesDone.Contains(entity.EntityType))
+                            {
                                 continue;
                             }
 
@@ -397,35 +423,45 @@ FROM (
                             // Build a query to get all items of the current entity type and all items that are linked to those items.
                             var columnsClause = String.Join(", ", WiserTableDefinitions.TablesToUpdate.Single(t => t.Name == WiserTableNames.WiserItem).Columns.Select(c => $"{{0}}`{c.Name}`"));
                             var whereClause = whereClauseBuilder.ToString();
-                            var queryBuilder = new StringBuilder($@"INSERT IGNORE INTO `{branchDatabase}`.`{tableName}`
-({String.Format(columnsClause, "")})
-(
-    SELECT {String.Format(columnsClause, "item.")}
-    FROM `{originalDatabase}`.`{tableName}` AS item
-    {whereClause}
-    {orderBy}
-)
-UNION ALL
-(
-    SELECT {String.Format(columnsClause, "linkedItem.")}
-    FROM `{originalDatabase}`.`{tableName}` AS item
-    JOIN `{originalDatabase}`.`{tableName}` AS linkedItem ON linkedItem.parent_item_id = item.id
-    {whereClause}
-    {orderBy}
-)
-");
+                            var queryBuilder = new StringBuilder();
+                            if (branchIsOnSameServerAsProduction)
+                            {
+                                queryBuilder.Append($"""
+                                                      INSERT IGNORE INTO `{branchDatabase}`.`{tableName}`
+                                                      ({String.Format(columnsClause, "")})
+                                                      """);
+                            }
+
+                            queryBuilder.Append($"""
+                                                 (
+                                                     SELECT {String.Format(columnsClause, "item.")}
+                                                     FROM `{originalDatabase}`.`{tableName}` AS item
+                                                     {whereClause}
+                                                     {orderBy}
+                                                 )
+                                                 UNION
+                                                 (
+                                                     SELECT {String.Format(columnsClause, "linkedItem.")}
+                                                     FROM `{originalDatabase}`.`{tableName}` AS item
+                                                     JOIN `{originalDatabase}`.`{tableName}` AS linkedItem ON linkedItem.parent_item_id = item.id
+                                                     {whereClause}
+                                                     {orderBy}
+                                                 )
+                                                 """);
                             var linkTypes = allLinkTypes.Where(t => String.Equals(t.DestinationEntityType, entity.EntityType, StringComparison.OrdinalIgnoreCase)).ToList();
                             if (!linkTypes.Any())
                             {
-                                queryBuilder.AppendLine($@"UNION ALL
-(
-    SELECT {String.Format(columnsClause, "linkedItem.")}
-    FROM `{originalDatabase}`.`{tableName}` AS item
-    JOIN `{originalDatabase}`.`{WiserTableNames.WiserItemLink}` AS link ON link.destination_item_id = item.id
-    JOIN `{originalDatabase}`.`{tableName}` AS linkedItem ON linkedItem.id = link.item_id
-    {whereClause}
-    {orderBy}
-)");
+                                queryBuilder.AppendLine($"""
+                                                         UNION
+                                                         (
+                                                             SELECT {String.Format(columnsClause, "linkedItem.")}
+                                                             FROM `{originalDatabase}`.`{tableName}` AS item
+                                                             JOIN `{originalDatabase}`.`{WiserTableNames.WiserItemLink}` AS link ON link.destination_item_id = item.id
+                                                             JOIN `{originalDatabase}`.`{tableName}` AS linkedItem ON linkedItem.id = link.item_id
+                                                             {whereClause}
+                                                             {orderBy}
+                                                         )
+                                                         """);
                             }
                             else
                             {
@@ -436,19 +472,62 @@ UNION ALL
                                     var itemTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkType.SourceEntityType);
                                     databaseConnection.AddParameter($"linkType{i}", linkType.Type);
                                     databaseConnection.AddParameter($"sourceEntityType{i}", linkType.SourceEntityType);
-                                    queryBuilder.AppendLine($@"UNION ALL
-(
-    SELECT {String.Format(columnsClause, "linkedItem.")}
-    FROM `{originalDatabase}`.`{tableName}` AS item
-    JOIN `{originalDatabase}`.`{linkTablePrefix}{WiserTableNames.WiserItemLink}` AS link ON link.destination_item_id = item.id AND link.type = ?linkType{i}
-    JOIN `{originalDatabase}`.`{itemTablePrefix}{WiserTableNames.WiserItem}` AS linkedItem ON linkedItem.id = link.item_id AND linkedItem.entity_type = ?sourceEntityType{i}
-    {whereClause}
-    {orderBy}
-)");
+                                    queryBuilder.AppendLine($"""
+                                                             UNION
+                                                             (
+                                                                 SELECT {String.Format(columnsClause, "linkedItem.")}
+                                                                 FROM `{originalDatabase}`.`{tableName}` AS item
+                                                                 JOIN `{originalDatabase}`.`{linkTablePrefix}{WiserTableNames.WiserItemLink}` AS link ON link.destination_item_id = item.id AND link.type = ?linkType{i}
+                                                                 JOIN `{originalDatabase}`.`{itemTablePrefix}{WiserTableNames.WiserItem}` AS linkedItem ON linkedItem.id = link.item_id AND linkedItem.entity_type = ?sourceEntityType{i}
+                                                                 {whereClause}
+                                                                 {orderBy}
+                                                             )
+                                                             """);
                                 }
                             }
 
-                            await databaseConnection.ExecuteAsync(queryBuilder.ToString());
+                            if (branchIsOnSameServerAsProduction)
+                            {
+                                await databaseConnection.ExecuteAsync(queryBuilder.ToString());
+                            }
+                            else
+                            {
+                                // Get the data from the production database.
+                                var items = await databaseConnection.GetAsync(queryBuilder.ToString());
+                                var prefix = tableName.Replace(WiserTableNames.WiserItem, "");
+                                var ids = items.Rows.Cast<DataRow>().Select(x => x.Field<ulong>("id")).ToList();
+                                if (!copiedItemIds.TryAdd(prefix, ids))
+                                {
+                                    copiedItemIds[prefix].AddRange(ids);
+                                }
+
+                                // Insert the data into the new branch database.
+                                if (branchQueue.UseMySqlBulkCopyWhenCreatingBranches)
+                                {
+                                    bulkCopy.ColumnMappings.AddRange(MySqlHelpers.GetMySqlColumnMappingForBulkCopy(items));
+                                    bulkCopyResult = await bulkCopy.WriteToServerAsync(items);
+                                    if (bulkCopyResult.Warnings.Any())
+                                    {
+                                        var warnings = bulkCopyResult.Warnings.Select(warning => warning.Message);
+                                        errors.Add(warnings);
+                                        await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                    }
+
+                                    if (bulkCopyResult.RowsInserted > 0)
+                                    {
+                                        entityTypesDone.Add(entity.EntityType);
+                                    }
+                                }
+                                else
+                                {
+                                    var rowsInserted = await branchDatabaseConnection.BulkInsertAsync(items, tableName, true, true);
+
+                                    if (rowsInserted > 0)
+                                    {
+                                        entityTypesDone.Add(entity.EntityType);
+                                    }
+                                }
+                            }
                         }
 
                         continue;
@@ -457,7 +536,7 @@ UNION ALL
                     if (tableName!.EndsWith(WiserTableNames.WiserItemDetail, StringComparison.OrdinalIgnoreCase))
                     {
                         // We order tables by table name, this means wiser_item always comes before wiser_itemdetail.
-                        // So we can be sure that we already copied the items to the new branch and we can use the IDs of those items to copy the details of those items.
+                        // So we can be sure that we already copied the items to the new branch, and we can use the IDs of those items to copy the details of those items.
                         // This way, we don't need to create the entire WHERE statement again based on the entity settings, like we did above for wiser_item.
                         var prefix = tableName.Replace(WiserTableNames.WiserItemDetail, "");
 
@@ -465,9 +544,49 @@ UNION ALL
                         // because they can have virtual columns and you can't manually insert values into those.
                         var table = WiserTableDefinitions.TablesToUpdate.Single(x => x.Name == WiserTableNames.WiserItemDetail);
                         var itemDetailColumns = table.Columns.Where(x => !x.IsVirtual).Select(x => $"`{x.Name}`").ToList();
-                        await databaseConnection.ExecuteAsync($@"INSERT INTO `{branchDatabase}`.`{tableName}` ({String.Join(", ", itemDetailColumns)})
-SELECT {String.Join(", ", itemDetailColumns.Select(x => $"detail.{x}"))} FROM `{originalDatabase}`.`{tableName}` AS detail
-JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = detail.item_id");
+
+                        if (branchIsOnSameServerAsProduction)
+                        {
+                            await databaseConnection.ExecuteAsync($"""
+                                                                   INSERT INTO `{branchDatabase}`.`{tableName}` ({String.Join(", ", itemDetailColumns)})
+                                                                   SELECT {String.Join(", ", itemDetailColumns.Select(x => $"detail.{x}"))}
+                                                                   FROM `{originalDatabase}`.`{tableName}` AS detail
+                                                                   JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = detail.item_id
+                                                                   """);
+                        }
+                        else
+                        {
+                            if (!copiedItemIds.TryGetValue(prefix, out var itemIds) || !itemIds.Any())
+                            {
+                                // There were no items copied from the wiser_item table, so we can't copy the details of those items.
+                                continue;
+                            }
+
+                            // Get the data from the production database.
+                            var items = await databaseConnection.GetAsync($"""
+                                                                                   SELECT {String.Join(", ", itemDetailColumns.Select(x => $"detail.{x}"))} 
+                                                                                   FROM `{originalDatabase}`.`{tableName}` AS detail
+                                                                                   WHERE detail.item_id IN ({String.Join(", ", itemIds)})
+                                                                                   """);
+
+                            // Insert the data into the new branch database.
+                            if (branchQueue.UseMySqlBulkCopyWhenCreatingBranches)
+                            {
+                                bulkCopy.ColumnMappings.AddRange(MySqlHelpers.GetMySqlColumnMappingForBulkCopy(items));
+                                bulkCopyResult = await bulkCopy.WriteToServerAsync(items);
+                                if (bulkCopyResult.Warnings.Any())
+                                {
+                                    var warnings = bulkCopyResult.Warnings.Select(warning => warning.Message);
+                                    errors.Add(warnings);
+                                    await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                }
+                            }
+                            else
+                            {
+                                await branchDatabaseConnection.BulkInsertAsync(items, tableName, true, true);
+                            }
+                        }
+
                         continue;
                     }
 
@@ -480,10 +599,47 @@ JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id
 
                         if (await databaseHelpersService.TableExistsAsync($"{prefix}{WiserTableNames.WiserItem}"))
                         {
-                            databaseConnection.SetCommandTimeout(900);
-                            await databaseConnection.ExecuteAsync($@"INSERT INTO `{branchDatabase}`.`{tableName}` 
-SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
-JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = file.item_id");
+                            if (branchIsOnSameServerAsProduction)
+                            {
+                                await databaseConnection.ExecuteAsync($"""
+                                                                       INSERT INTO `{branchDatabase}`.`{tableName}` 
+                                                                       SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
+                                                                       JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = file.item_id
+                                                                       """);
+
+                            }
+                            else
+                            {
+                                if (!copiedItemIds.TryGetValue(prefix, out var itemIds) || !itemIds.Any())
+                                {
+                                    // There were no items copied from the wiser_item table, so we can't copy the files of those items.
+                                    continue;
+                                }
+
+                                // Get the data from the production database.
+                                var items = await databaseConnection.GetAsync($"""
+                                                                                       SELECT file.* 
+                                                                                       FROM `{originalDatabase}`.`{tableName}` AS file
+                                                                                       WHERE file.item_id IN ({String.Join(", ", itemIds)})
+                                                                                       """);
+
+                                // Insert the data into the new branch database.
+                                if (branchQueue.UseMySqlBulkCopyWhenCreatingBranches)
+                                {
+                                    bulkCopy.ColumnMappings.AddRange(MySqlHelpers.GetMySqlColumnMappingForBulkCopy(items));
+                                    bulkCopyResult = await bulkCopy.WriteToServerAsync(items);
+                                    if (bulkCopyResult.Warnings.Any())
+                                    {
+                                        var warnings = bulkCopyResult.Warnings.Select(warning => warning.Message);
+                                        errors.Add(warnings);
+                                        await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                    }
+                                }
+                                else
+                                {
+                                    await branchDatabaseConnection.BulkInsertAsync(items, tableName, true, true);
+                                }
+                            }
 
                             // Copy all files that are on the links that are copied to the new branch from the given (prefixed) table.
                             var entityTypesInTable = await databaseConnection.GetAsync($"SELECT DISTINCT entity_type FROM {prefix}{WiserTableNames.WiserItem} WHERE entity_type <> ''");
@@ -503,11 +659,49 @@ JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id
                                             continue;
                                         }
 
-                                        await databaseConnection.ExecuteAsync($@"INSERT IGNORE INTO `{branchDatabase}`.`{tableName}`
-SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
-JOIN `{branchDatabase}`.`{linkPrefix}{WiserTableNames.WiserItemLink}` AS link ON link.id = file.itemlink_id");
-
                                         processedLinkTypes.Add(linkPrefix);
+
+                                        if (branchIsOnSameServerAsProduction)
+                                        {
+                                            await databaseConnection.ExecuteAsync($"""
+                                                                                    INSERT IGNORE INTO `{branchDatabase}`.`{tableName}`
+                                                                                    SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
+                                                                                    JOIN `{branchDatabase}`.`{linkPrefix}{WiserTableNames.WiserItemLink}` AS link ON link.id = file.itemlink_id
+                                                                                    """);
+
+                                        }
+                                        else
+                                        {
+                                            if (!copiedItemLinks.TryGetValue(linkPrefix, out var linkIds) || !linkIds.Any())
+                                            {
+                                                // There were no items copied from the wiser_itemlink table, so we can't copy the files of those items.
+                                                continue;
+                                            }
+
+                                            // Get the data from the production database.
+                                            var items = await databaseConnection.GetAsync($"""
+                                                                                                   SELECT file.* 
+                                                                                                   FROM `{originalDatabase}`.`{tableName}` AS file
+                                                                                                   WHERE file.itemlink_id IN ({String.Join(", ", linkIds)})
+                                                                                                   """);
+
+                                            // Insert the data into the new branch database.
+                                            if (branchQueue.UseMySqlBulkCopyWhenCreatingBranches)
+                                            {
+                                                bulkCopy.ColumnMappings.AddRange(MySqlHelpers.GetMySqlColumnMappingForBulkCopy(items));
+                                                bulkCopyResult = await bulkCopy.WriteToServerAsync(items);
+                                                if (bulkCopyResult.Warnings.Any())
+                                                {
+                                                    var warnings = bulkCopyResult.Warnings.Select(warning => warning.Message);
+                                                    errors.Add(warnings);
+                                                    await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                                }
+                                            }
+                                            else
+                                            {
+                                                await branchDatabaseConnection.BulkInsertAsync(items, tableName, true, true);
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -515,9 +709,46 @@ JOIN `{branchDatabase}`.`{linkPrefix}{WiserTableNames.WiserItemLink}` AS link ON
                         else if (await databaseHelpersService.TableExistsAsync($"{prefix}{WiserTableNames.WiserItemLink}"))
                         {
                             // Copy all files that are on the links that are copied to the new branch from the given (prefixed) table.
-                            await databaseConnection.ExecuteAsync($@"INSERT IGNORE INTO `{branchDatabase}`.`{tableName}`
-SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
-JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItemLink}` AS link ON link.id = file.itemlink_id");
+                            if (branchIsOnSameServerAsProduction)
+                            {
+                                await databaseConnection.ExecuteAsync($"""
+                                                                       INSERT IGNORE INTO `{branchDatabase}`.`{tableName}`
+                                                                       SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
+                                                                       JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItemLink}` AS link ON link.id = file.itemlink_id
+                                                                       """);
+                            }
+                            else
+                            {
+                                if (!copiedItemLinks.TryGetValue(prefix, out var linkIds) || !linkIds.Any())
+                                {
+                                    // There were no items copied from the wiser_itemlink table, so we can't copy the files of those items.
+                                    continue;
+                                }
+
+                                // Get the data from the production database.
+                                var items = await databaseConnection.GetAsync($"""
+                                                                               SELECT file.* 
+                                                                               FROM `{originalDatabase}`.`{tableName}` AS file
+                                                                               WHERE file.itemlink_id IN ({String.Join(", ", linkIds)})
+                                                                               """);
+
+                                // Insert the data into the new branch database.
+                                if (branchQueue.UseMySqlBulkCopyWhenCreatingBranches)
+                                {
+                                    bulkCopy.ColumnMappings.AddRange(MySqlHelpers.GetMySqlColumnMappingForBulkCopy(items));
+                                    bulkCopyResult = await bulkCopy.WriteToServerAsync(items);
+                                    if (bulkCopyResult.Warnings.Any())
+                                    {
+                                        var warnings = bulkCopyResult.Warnings.Select(warning => warning.Message);
+                                        errors.Add(warnings);
+                                        await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                    }
+                                }
+                                else
+                                {
+                                    await branchDatabaseConnection.BulkInsertAsync(items, tableName, true, true);
+                                }
+                            }
                         }
 
                         continue;
@@ -557,93 +788,125 @@ AND EXTRA NOT LIKE '%GENERATED'";
                     var columns = columnsDataTable.Rows.Cast<DataRow>().Select(row => $"`{row.Field<string>("COLUMN_NAME")}`").ToList();
 
                     // For all other tables, always copy everything to the new branch.
-                    query = $@"INSERT INTO `{branchDatabase}`.`{tableName}` ({String.Join(", ", columns)})
-SELECT {String.Join(", ", columns)} FROM `{originalDatabase}`.`{tableName}`";
-                    await databaseConnection.ExecuteAsync(query);
+                    if (branchIsOnSameServerAsProduction)
+                    {
+                        query = $"""
+                                 INSERT INTO `{branchDatabase}`.`{tableName}` ({String.Join(", ", columns)})
+                                 SELECT {String.Join(", ", columns)} FROM `{originalDatabase}`.`{tableName}`
+                                 """;
+                        await databaseConnection.ExecuteAsync(query);
+                    }
+                    else
+                    {
+                        // Get the data from the production database.
+                        query = $"SELECT {String.Join(", ", columns)} FROM `{originalDatabase}`.`{tableName}`";
+                        var tableData = await databaseConnection.GetAsync(query);
+
+                        // Insert the data into the new branch database.
+                        if (branchQueue.UseMySqlBulkCopyWhenCreatingBranches)
+                        {
+                            bulkCopy.ColumnMappings.AddRange(MySqlHelpers.GetMySqlColumnMappingForBulkCopy(tableData));
+                            bulkCopyResult = await bulkCopy.WriteToServerAsync(tableData);
+                            if (bulkCopyResult.Warnings.Any())
+                            {
+                                var warnings = bulkCopyResult.Warnings.Select(warning => warning.Message);
+                                errors.Add(warnings);
+                                await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                            }
+                        }
+                        else
+                        {
+                            await branchDatabaseConnection.BulkInsertAsync(tableData, tableName, true, true);
+                        }
+
+                        if (tableName.EndsWith(WiserTableNames.WiserItemLink))
+                        {
+                            var prefix = tableName.Replace(WiserTableNames.WiserItem, "");
+                            var ids = tableData.Rows.Cast<DataRow>().Select(x => x.Field<ulong>("id")).ToList();
+                            if (!copiedItemLinks.TryAdd(prefix, ids))
+                            {
+                                copiedItemLinks[prefix].AddRange(ids);
+                            }
+                        }
+                    }
                 }
 
                 // Add triggers to the new database, after inserting all data, so that the wiser_history table will still be empty.
                 // We use wiser_history to later synchronise all changes to production, so it needs to be empty before the user starts to make changes in the new branch.
-                query = @"SELECT 
-    TRIGGER_NAME,
-    EVENT_MANIPULATION,
-    EVENT_OBJECT_TABLE,
-	ACTION_STATEMENT,
-	ACTION_ORIENTATION,
-	ACTION_TIMING
-FROM information_schema.TRIGGERS
-WHERE TRIGGER_SCHEMA = ?currentSchema
-AND EVENT_OBJECT_TABLE NOT LIKE '\_%'";
+                query = """
+                        SELECT 
+                            TRIGGER_NAME,
+                            EVENT_MANIPULATION,
+                            EVENT_OBJECT_TABLE,
+                        	ACTION_STATEMENT,
+                        	ACTION_ORIENTATION,
+                        	ACTION_TIMING
+                        FROM information_schema.TRIGGERS
+                        WHERE TRIGGER_SCHEMA = ?currentSchema
+                        AND EVENT_OBJECT_TABLE NOT LIKE '\_%'
+                        """;
                 dataTable = await databaseConnection.GetAsync(query);
 
-                await using (var mysqlConnection = new MySqlConnection(connectionStringBuilder.ConnectionString))
+                foreach (DataRow dataRow in dataTable.Rows)
                 {
-                    await mysqlConnection.OpenAsync();
-                    await using (var command = mysqlConnection.CreateCommand())
-                    {
-                        foreach (DataRow dataRow in dataTable.Rows)
-                        {
-                            query = $"CREATE TRIGGER `{dataRow.Field<string>("TRIGGER_NAME")}` {dataRow.Field<string>("ACTION_TIMING")} {dataRow.Field<string>("EVENT_MANIPULATION")} ON `{branchDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("EVENT_OBJECT_TABLE")}` FOR EACH {dataRow.Field<string>("ACTION_ORIENTATION")} {dataRow.Field<string>("ACTION_STATEMENT")}";
-                            command.CommandText = query;
-                            await command.ExecuteNonQueryAsync();
-                        }
+                    query = $"CREATE TRIGGER `{dataRow.Field<string>("TRIGGER_NAME")}` {dataRow.Field<string>("ACTION_TIMING")} {dataRow.Field<string>("EVENT_MANIPULATION")} ON `{branchDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("EVENT_OBJECT_TABLE")}` FOR EACH {dataRow.Field<string>("ACTION_ORIENTATION")} {dataRow.Field<string>("ACTION_STATEMENT")}";
+                    await branchDatabaseConnection.ExecuteAsync(query);
+                }
 
-                        // Add stored procedures/functions to the new database.
-                        query = @"SELECT
-    ROUTINE_NAME,
-    ROUTINE_TYPE,
-    DEFINER
-FROM INFORMATION_SCHEMA.ROUTINES 
-WHERE ROUTINE_SCHEMA = ?currentSchema
-AND ROUTINE_NAME NOT LIKE '\_%'";
-                        dataTable = await databaseConnection.GetAsync(query);
-                        foreach (DataRow dataRow in dataTable.Rows)
-                        {
-                            var definer = dataRow.Field<string>("DEFINER");
-                            var definerParts = definer.Split('@');
-                            query = $"SHOW CREATE {dataRow.Field<string>("ROUTINE_TYPE")} `{originalDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("ROUTINE_NAME")}`";
-                            var subDataTable = await databaseConnection.GetAsync(query);
-                            query = subDataTable.Rows[0].Field<string>(2);
+                // Add stored procedures/functions to the new database.
+                query = """
+                        SELECT
+                            ROUTINE_NAME,
+                            ROUTINE_TYPE,
+                            DEFINER
+                        FROM INFORMATION_SCHEMA.ROUTINES 
+                        WHERE ROUTINE_SCHEMA = ?currentSchema
+                        AND ROUTINE_NAME NOT LIKE '\_%'
+                        """;
+                dataTable = await databaseConnection.GetAsync(query);
+                foreach (DataRow dataRow in dataTable.Rows)
+                {
+                    var definer = dataRow.Field<string>("DEFINER");
+                    var definerParts = definer.Split('@');
+                    query = $"SHOW CREATE {dataRow.Field<string>("ROUTINE_TYPE")} `{originalDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("ROUTINE_NAME")}`";
+                    var subDataTable = await databaseConnection.GetAsync(query);
+                    query = subDataTable.Rows[0].Field<string>(2);
 
-                            // Set the names and collation from the original and replace the definer with the current user, so that the stored procedure can be created by the current user.
-                            query = $"SET NAMES {subDataTable.Rows[0].Field<string>(3)} COLLATE {subDataTable.Rows[0].Field<string>(4)}; {query.Replace($" DEFINER=`{definerParts[0]}`@`{definerParts[1]}`", " DEFINER=CURRENT_USER")}";
-                            command.CommandText = query;
-                            await command.ExecuteNonQueryAsync();
-                        }
-                    }
+                    // Set the names and collation from the original and replace the definer with the current user, so that the stored procedure can be created by the current user.
+                    query = $"SET NAMES {subDataTable.Rows[0].Field<string>(3)} COLLATE {subDataTable.Rows[0].Field<string>(4)}; {query.Replace($" DEFINER=`{definerParts[0]}`@`{definerParts[1]}`", " DEFINER=CURRENT_USER")}";
+                    await branchDatabaseConnection.ExecuteAsync(query);
                 }
             }
             catch (Exception exception)
             {
-                error = exception.ToString();
+                errors.Add(exception.ToString());
 
                 await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Failed to create the branch '{settings.DatabaseName}'. Error: {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
 
                 // Save the error in the queue and set the finished on datetime to now.
-                await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, String.IsNullOrWhiteSpace(error) ? new JArray() : new JArray(error), stopwatch, startDate, branchQueue.CreatedBranchTemplateId, CreateBranchSubject, CreateBranchTemplate);
+                await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, errors, stopwatch, startDate, branchQueue.CreatedBranchTemplateId, CreateBranchSubject, CreateBranchTemplate);
 
                 // Drop the new database it something went wrong, so that we can start over again later.
                 // We can safely do this, because this method will return an error if the database already exists,
                 // so we can be sure that this database was created here and we can drop it again it something went wrong.
                 try
                 {
-                    if (await databaseHelpersService.DatabaseExistsAsync(branchDatabase))
+                    if (await branchDatabaseHelpersService.DatabaseExistsAsync(branchDatabase))
                     {
-                        await databaseHelpersService.DropDatabaseAsync(branchDatabase);
+                        await branchDatabaseHelpersService.DropDatabaseAsync(branchDatabase);
                     }
                 }
                 catch (Exception innerException)
                 {
+                    errors.Add(innerException.ToString());
                     await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Failed to drop new branch database '{settings.DatabaseName}', after getting an error while trying to fill it with data. Error: {innerException}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                 }
-
-                error = exception.ToString();
             }
 
             // Set the finish time to the current datetime, so that we can see how long it took.
-            await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, String.IsNullOrWhiteSpace(error) ? new JArray() : new JArray(error), stopwatch, startDate, branchQueue.CreatedBranchTemplateId, CreateBranchSubject, CreateBranchTemplate);
-            result.Add("ErrorMessage", error);
-            result.Add("Success", String.IsNullOrWhiteSpace(error));
+            await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, errors, stopwatch, startDate, branchQueue.CreatedBranchTemplateId, CreateBranchSubject, CreateBranchTemplate);
+            result.Add("ErrorMessage", errors.FirstOrDefault() ?? "");
+            result.Add("Success", !errors.Any());
             return result;
         }
 
@@ -696,7 +959,8 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
             // Store database names in variables for later use and create connection string for the branch database.
             var connectionStringBuilder = new MySqlConnectionStringBuilder(connectionString)
             {
-                IgnoreCommandTransaction = true
+                IgnoreCommandTransaction = true,
+                ConvertZeroDateTime = true
             };
             var originalDatabase = connectionStringBuilder.Database;
             var branchDatabase = settings.DatabaseName;
@@ -1082,7 +1346,7 @@ AND ROUTINE_NAME NOT LIKE '\_%'";
                                 await using var branchCommand = branchConnection.CreateCommand();
                                 AddParametersToCommand(sqlParameters, branchCommand);
                                 branchCommand.CommandText = $@"SELECT item_id, itemlink_id FROM `{tableName}` WHERE id = ?fileId
-UNION ALL
+UNION
 SELECT item_id, itemlink_id FROM `{tableName}{WiserTableNames.ArchiveSuffix}` WHERE id = ?fileId
 LIMIT 1";
                                 var fileDataTable = new DataTable();
@@ -2333,7 +2597,7 @@ WHERE `id` = ?id";
 
                 // Check if the source item exists in this table.
                 command.CommandText = $@"SELECT entity_type FROM {sourceTablePrefix}{WiserTableNames.WiserItem} WHERE id = ?sourceId
-UNION ALL
+UNION
 SELECT entity_type FROM {sourceTablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} WHERE id = ?sourceId
 LIMIT 1";
                 var sourceDataTable = new DataTable();
@@ -2346,7 +2610,7 @@ LIMIT 1";
 
                 // Check if the destination item exists in this table.
                 command.CommandText = $@"SELECT entity_type FROM {destinationTablePrefix}{WiserTableNames.WiserItem} WHERE id = ?sourceId
-UNION ALL
+UNION
 SELECT entity_type FROM {destinationTablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} WHERE id = ?sourceId
 LIMIT 1";
                 var destinationDataTable = new DataTable();

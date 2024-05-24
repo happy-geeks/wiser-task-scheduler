@@ -1,4 +1,5 @@
 ﻿using System.Xml.Serialization;
+using MySqlConnector;
 using WiserTaskScheduler.Core.Models;
 
 namespace WiserTaskScheduler.Modules.Branches.Models
@@ -9,6 +10,13 @@ namespace WiserTaskScheduler.Modules.Branches.Models
     [XmlType("BranchQueue")]
     public class BranchQueueModel : ActionModel
     {
+        /// <summary>
+        /// Gets or sets the connection string that should be used for branch databases.
+        /// This should only be used when branches have to be created in a different database server from the main branch.
+        /// In this connection string, the database name can be left empty. It will be filled in by the system, based on the name of the branch.
+        /// </summary>
+        public string BranchDatabaseConnectionString { get; set; }
+
         /// <summary>
         /// Gets or sets the username of the user that should be used for creating and deleting branches.
         /// Normal users should not have permissions to create or drop a database, only this user should.
@@ -38,7 +46,15 @@ namespace WiserTaskScheduler.Modules.Branches.Models
         /// This is for sending notifications about the status of the deletion of a branch.
         /// </summary>
         public ulong DeletedBranchTemplateId { get; set; }
-        
+
+        /// <summary>
+        /// Gets or sets whether to use the <see cref="MySqlBulkCopy"/> class when creating branches.
+        /// This is NOT used by default, because it requires the setting "local_infile" to be enabled in the MySQL server.
+        /// Enabling local_infile can pose security risks if untrusted users have access to your MySQL server, as it allows them to load data from local files on the client machine. Ensure that you understand these risks and mitigate them appropriately.
+        /// However, creating branches with this setting enabled can be much faster than the default method.
+        /// </summary>
+        public bool UseMySqlBulkCopyWhenCreatingBranches { get; set; }
+
         /// <summary>
         /// Gets or sets the specific rules for copying tables.
         /// </summary>
