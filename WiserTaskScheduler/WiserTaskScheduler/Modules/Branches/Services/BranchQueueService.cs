@@ -18,6 +18,7 @@ using GeeksCoreLibrary.Modules.DataSelector.Interfaces;
 using GeeksCoreLibrary.Modules.DataSelector.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using MySqlConnector;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -41,20 +42,24 @@ namespace WiserTaskScheduler.Modules.Branches.Services
         private const string DeleteBranchSubject = "Branch with the name '{name}' [if({errorCount}=0)]has been deleted successfully[else]could not be deleted[endif] on {date:DateTime(dddd\\, dd MMMM yyyy,en-US)}";
         private const string DeleteBranchTemplate = "<p>The branch deletion started on {startDate:DateTime(HH\\:mm\\:ss)} and finished on {endDate:DateTime(HH\\:mm\\:ss)}. The deletion took a total of {hours} hour(s), {minutes} minute(s) and {seconds} second(s).</p>[if({errorCount}!0)] <br /><br />The following errors occurred during the deletion of the branch: {errors:Raw}[endif]";
 
+        private const int BatchSize = 1000;
+
         private readonly ILogService logService;
         private readonly ILogger<BranchQueueService> logger;
         private readonly IServiceProvider serviceProvider;
+        private readonly GclSettings gclSettings;
 
         private string connectionString;
 
         /// <summary>
         /// Creates a new instance of <see cref="BranchQueueService"/>.
         /// </summary>
-        public BranchQueueService(ILogService logService, ILogger<BranchQueueService> logger, IServiceProvider serviceProvider)
+        public BranchQueueService(ILogService logService, ILogger<BranchQueueService> logger, IServiceProvider serviceProvider, IOptions<GclSettings> gclSettings)
         {
             this.logService = logService;
             this.logger = logger;
             this.serviceProvider = serviceProvider;
+            this.gclSettings = gclSettings.Value;
         }
 
         /// <inheritdoc />
@@ -178,19 +183,39 @@ ORDER BY start_on ASC, id ASC");
             {
                 await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WiserBranchesQueue});
 
-                // Some variables we'll need a lot, for easier access.
+                // Build the connection strings.
                 var productionConnectionStringBuilder = new MySqlConnectionStringBuilder(connectionString)
                 {
                     IgnoreCommandTransaction = true,
                     AllowLoadLocalInfile = true,
                     ConvertZeroDateTime = true
                 };
-                var branchConnectionStringBuilder = new MySqlConnectionStringBuilder(String.IsNullOrWhiteSpace(branchQueue.BranchDatabaseConnectionString) ? connectionString : branchQueue.BranchDatabaseConnectionString)
+
+                var branchConnectionStringBuilder = new MySqlConnectionStringBuilder(connectionString)
                 {
                     IgnoreCommandTransaction = true,
                     AllowLoadLocalInfile = true,
                     ConvertZeroDateTime = true
                 };
+
+                branchConnectionStringBuilder.Database = "";
+
+                if (!String.IsNullOrWhiteSpace(settings.DatabaseHost))
+                {
+                    branchConnectionStringBuilder.Server = settings.DatabaseHost.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
+                }
+                if (settings.DatabasePort is > 0)
+                {
+                    branchConnectionStringBuilder.Port = (uint)settings.DatabasePort.Value;
+                }
+                if (!String.IsNullOrWhiteSpace(settings.DatabaseUsername))
+                {
+                    branchConnectionStringBuilder.UserID = settings.DatabaseUsername.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
+                }
+                if (!String.IsNullOrWhiteSpace(settings.DatabasePassword))
+                {
+                    branchConnectionStringBuilder.Password = settings.DatabasePassword.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
+                }
 
                 // If the branch database is on the same server as the production database, we can use a quicker and more efficient way of copying data.
                 var branchIsOnSameServerAsProduction = String.Equals(productionConnectionStringBuilder.Server, branchConnectionStringBuilder.Server, StringComparison.OrdinalIgnoreCase);
@@ -501,7 +526,7 @@ FROM (
                                 while (true)
                                 {
                                     // Get the data from the production database.
-                                    var items = await databaseConnection.GetAsync($"{queryBuilder} ORDER BY id ASC LIMIT {counter}, 1000");
+                                    var items = await databaseConnection.GetAsync($"{queryBuilder} ORDER BY id ASC LIMIT {counter * BatchSize}, {BatchSize}");
                                     if (items.Rows.Count == 0)
                                     {
                                         if (totalRowsInserted > 0)
@@ -558,16 +583,26 @@ FROM (
                                 continue;
                             }
 
-                            // Get the data from the production database.
-                            // TODO: Insert into batches.
-                            var items = await databaseConnection.GetAsync($"""
-                                                                                   SELECT {String.Join(", ", itemDetailColumns.Select(x => $"detail.{x}"))}
-                                                                                   FROM `{originalDatabase}`.`{tableName}` AS detail
-                                                                                   WHERE detail.item_id IN ({String.Join(", ", itemIds)})
-                                                                                   """);
+                            var counter = 0;
+                            while (true)
+                            {
+                                // Get the data from the production database.
+                                var items = await databaseConnection.GetAsync($"""
+                                                                                       SELECT {String.Join(", ", itemDetailColumns.Select(x => $"detail.{x}"))}
+                                                                                       FROM `{originalDatabase}`.`{tableName}` AS detail
+                                                                                       WHERE detail.item_id IN ({String.Join(", ", itemIds)})
+                                                                                       ORDER BY detail.id ASC 
+                                                                                       LIMIT {counter * BatchSize}, {BatchSize}
+                                                                                       """);
+                                if (items.Rows.Count == 0)
+                                {
+                                    break;
+                                }
 
-                            // Insert the data into the new branch database.
-                            await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
+                                // Insert the data into the new branch database.
+                                await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
+                                counter++;
+                            }
                         }
 
                         continue;
@@ -599,16 +634,26 @@ FROM (
                                     continue;
                                 }
 
-                                // Get the data from the production database.
-                                // TODO: Insert into batches.
-                                var items = await databaseConnection.GetAsync($"""
-                                                                                       SELECT file.*
-                                                                                       FROM `{originalDatabase}`.`{tableName}` AS file
-                                                                                       WHERE file.item_id IN ({String.Join(", ", itemIds)})
-                                                                                       """);
+                                var counter = 0;
+                                while (true)
+                                {
+                                    // Get the data from the production database.
+                                    var items = await databaseConnection.GetAsync($"""
+                                                                                           SELECT file.*
+                                                                                           FROM `{originalDatabase}`.`{tableName}` AS file
+                                                                                           WHERE file.item_id IN ({String.Join(", ", itemIds)})
+                                                                                           ORDER BY file.id ASC
+                                                                                           LIMIT {counter * BatchSize}, {BatchSize}
+                                                                                           """);
+                                    if (items.Rows.Count == 0)
+                                    {
+                                        break;
+                                    }
 
-                                // Insert the data into the new branch database.
-                                await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
+                                    // Insert the data into the new branch database.
+                                    await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
+                                    counter++;
+                                }
                             }
 
                             // Copy all files that are on the links that are copied to the new branch from the given (prefixed) table.
@@ -648,16 +693,26 @@ FROM (
                                                 continue;
                                             }
 
-                                            // Get the data from the production database.
-                                            // TODO: Insert into batches.
-                                            var items = await databaseConnection.GetAsync($"""
-                                                                                                   SELECT file.*
-                                                                                                   FROM `{originalDatabase}`.`{tableName}` AS file
-                                                                                                   WHERE file.itemlink_id IN ({String.Join(", ", linkIds)})
-                                                                                                   """);
+                                            var counter = 0;
+                                            while (true)
+                                            {
+                                                // Get the data from the production database.
+                                                var items = await databaseConnection.GetAsync($"""
+                                                                                                       SELECT file.*
+                                                                                                       FROM `{originalDatabase}`.`{tableName}` AS file
+                                                                                                       WHERE file.itemlink_id IN ({String.Join(", ", linkIds)})
+                                                                                                       ORDER BY file.id ASC 
+                                                                                                       LIMIT {counter * BatchSize}, {BatchSize}
+                                                                                                       """);
+                                                if (items.Rows.Count == 0)
+                                                {
+                                                    break;
+                                                }
 
-                                            // Insert the data into the new branch database.
-                                            await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
+                                                // Insert the data into the new branch database.
+                                                await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
+                                                counter++;
+                                            }
                                         }
                                     }
                                 }
@@ -682,16 +737,26 @@ FROM (
                                     continue;
                                 }
 
-                                // Get the data from the production database.
-                                // TODO: Insert into batches.
-                                var items = await databaseConnection.GetAsync($"""
-                                                                               SELECT file.*
-                                                                               FROM `{originalDatabase}`.`{tableName}` AS file
-                                                                               WHERE file.itemlink_id IN ({String.Join(", ", linkIds)})
-                                                                               """);
+                                var counter = 0;
+                                while (true)
+                                {
+                                    // Get the data from the production database.
+                                    var items = await databaseConnection.GetAsync($"""
+                                                                                           SELECT file.*
+                                                                                           FROM `{originalDatabase}`.`{tableName}` AS file
+                                                                                           WHERE file.itemlink_id IN ({String.Join(", ", linkIds)})
+                                                                                           ORDER BY file.id ASC 
+                                                                                           LIMIT {counter * BatchSize}, {BatchSize}
+                                                                                           """);
+                                    if (items.Rows.Count == 0)
+                                    {
+                                        break;
+                                    }
 
-                                // Insert the data into the new branch database.
-                                await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
+                                    // Insert the data into the new branch database.
+                                    await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
+                                    counter++;
+                                }
                             }
                         }
 
@@ -742,22 +807,36 @@ AND EXTRA NOT LIKE '%GENERATED'";
                     }
                     else
                     {
-                        // Get the data from the production database.
-                        query = $"SELECT {String.Join(", ", columns)} FROM `{originalDatabase}`.`{tableName}`";
-                        // TODO: Insert into batches.
-                        var items = await databaseConnection.GetAsync(query);
-
-                        // Insert the data into the new branch database.
-                        await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
-
-                        if (tableName.EndsWith(WiserTableNames.WiserItemLink))
+                        var counter = 0;
+                        while (true)
                         {
-                            var prefix = tableName.Replace(WiserTableNames.WiserItem, "");
-                            var ids = items.Rows.Cast<DataRow>().Select(x => x.Field<ulong>("id")).ToList();
-                            if (!copiedItemLinks.TryAdd(prefix, ids))
+                            // Get the data from the production database.
+                            var sortColumn = "id ASC";
+                            if (!columns.Any(c => String.Equals(c, "`id`", StringComparison.OrdinalIgnoreCase)))
                             {
-                                copiedItemLinks[prefix].AddRange(ids);
+                                sortColumn = String.Join(", ", columns.Select(c => $"{c} ASC"));
                             }
+                            query = $"SELECT {String.Join(", ", columns)} FROM `{originalDatabase}`.`{tableName}` ORDER BY {sortColumn} LIMIT {counter * BatchSize}, {BatchSize}";
+                            var items = await databaseConnection.GetAsync(query);
+                            if (items.Rows.Count == 0)
+                            {
+                                break;
+                            }
+
+                            // Insert the data into the new branch database.
+                            await BulkInsertDataTableAsync(branchQueue, configurationServiceName, bulkCopy, items, errors, tableName, branchDatabase, branchDatabaseConnection);
+
+                            if (tableName.EndsWith(WiserTableNames.WiserItemLink))
+                            {
+                                var prefix = tableName.Replace(WiserTableNames.WiserItem, "");
+                                var ids = items.Rows.Cast<DataRow>().Select(x => Convert.ToUInt64(x["id"])).ToList();
+                                if (!copiedItemLinks.TryAdd(prefix, ids))
+                                {
+                                    copiedItemLinks[prefix].AddRange(ids);
+                                }
+                            }
+
+                            counter++;
                         }
                     }
                 }
@@ -802,6 +881,12 @@ AND EXTRA NOT LIKE '%GENERATED'";
                     query = $"SHOW CREATE {dataRow.Field<string>("ROUTINE_TYPE")} `{originalDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("ROUTINE_NAME")}`";
                     var subDataTable = await databaseConnection.GetAsync(query);
                     query = subDataTable.Rows[0].Field<string>(2);
+
+                    if (String.IsNullOrEmpty(query))
+                    {
+                        errors.Add($"Unable to create stored procedure '{dataRow.Field<string>("ROUTINE_NAME")}' in the new branch, because the user does not have permissions to view the routine definition.");
+                        continue;
+                    }
 
                     // Set the names and collation from the original and replace the definer with the current user, so that the stored procedure can be created by the current user.
                     query = $"SET NAMES {subDataTable.Rows[0].Field<string>(3)} COLLATE {subDataTable.Rows[0].Field<string>(4)}; {query.Replace($" DEFINER=`{definerParts[0]}`@`{definerParts[1]}`", " DEFINER=CURRENT_USER")}";
