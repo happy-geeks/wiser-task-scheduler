@@ -953,7 +953,6 @@ AND EXTRA NOT LIKE '%GENERATED'";
             }
 
             var warnings = bulkCopyResult.Warnings.Select(warning => warning.Message);
-            errors.Add(warnings);
             await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
 
             return bulkCopyResult.RowsInserted;
@@ -1015,6 +1014,23 @@ AND EXTRA NOT LIKE '%GENERATED'";
             var branchDatabase = settings.DatabaseName;
             connectionStringBuilder.Database = branchDatabase;
 
+            if (!String.IsNullOrWhiteSpace(settings.DatabaseHost))
+            {
+                connectionStringBuilder.Server = settings.DatabaseHost.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
+            }
+            if (settings.DatabasePort is > 0)
+            {
+                connectionStringBuilder.Port = (uint)settings.DatabasePort.Value;
+            }
+            if (!String.IsNullOrWhiteSpace(settings.DatabaseUsername))
+            {
+                connectionStringBuilder.UserID = settings.DatabaseUsername.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
+            }
+            if (!String.IsNullOrWhiteSpace(settings.DatabasePassword))
+            {
+                connectionStringBuilder.Password = settings.DatabasePassword.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
+            }
+
             // Create and open connections to both databases and start transactions.
             var productionConnection = new MySqlConnection(connectionString);
             var branchConnection = new MySqlConnection(connectionStringBuilder.ConnectionString);
@@ -1028,9 +1044,16 @@ AND EXTRA NOT LIKE '%GENERATED'";
 
             try
             {
+
+                // Create a new scope for dependency injection and get a new instance of the database connection, to use for connecting to the branch database.
+                using var branchScope = serviceProvider.CreateScope();
+                var branchDatabaseConnection = branchScope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+                await branchDatabaseConnection.ChangeConnectionStringsAsync(connectionStringBuilder.ConnectionString, connectionStringBuilder.ConnectionString);
+                var branchDatabaseHelpersService = branchScope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+
                 // Create the wiser_id_mappings table, in the selected branch, if it doesn't exist yet.
                 // We need it to map IDs of the selected environment to IDs of the production environment, because they are not always the same.
-                await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WiserIdMappings}, branchDatabase);
+                await branchDatabaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WiserIdMappings});
 
                 // Get all history since last synchronisation.
                 var dataTable = new DataTable();
