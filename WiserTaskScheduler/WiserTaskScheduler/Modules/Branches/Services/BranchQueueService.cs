@@ -876,21 +876,28 @@ AND EXTRA NOT LIKE '%GENERATED'";
                 dataTable = await databaseConnection.GetAsync(query);
                 foreach (DataRow dataRow in dataTable.Rows)
                 {
-                    var definer = dataRow.Field<string>("DEFINER");
-                    var definerParts = definer.Split('@');
-                    query = $"SHOW CREATE {dataRow.Field<string>("ROUTINE_TYPE")} `{originalDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("ROUTINE_NAME")}`";
-                    var subDataTable = await databaseConnection.GetAsync(query);
-                    query = subDataTable.Rows[0].Field<string>(2);
-
-                    if (String.IsNullOrEmpty(query))
+                    try
                     {
-                        errors.Add($"Unable to create stored procedure '{dataRow.Field<string>("ROUTINE_NAME")}' in the new branch, because the user does not have permissions to view the routine definition.");
-                        continue;
-                    }
+                        var definer = dataRow.Field<string>("DEFINER");
+                        var definerParts = definer.Split('@');
+                        query = $"SHOW CREATE {dataRow.Field<string>("ROUTINE_TYPE")} `{originalDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("ROUTINE_NAME")}`";
+                        var subDataTable = await databaseConnection.GetAsync(query);
+                        query = subDataTable.Rows[0].Field<string>(2);
 
-                    // Set the names and collation from the original and replace the definer with the current user, so that the stored procedure can be created by the current user.
-                    query = $"SET NAMES {subDataTable.Rows[0].Field<string>(3)} COLLATE {subDataTable.Rows[0].Field<string>(4)}; {query.Replace($" DEFINER=`{definerParts[0]}`@`{definerParts[1]}`", " DEFINER=CURRENT_USER")}";
-                    await branchDatabaseConnection.ExecuteAsync(query);
+                        if (String.IsNullOrEmpty(query))
+                        {
+                            errors.Add($"Unable to create stored procedure '{dataRow.Field<string>("ROUTINE_NAME")}' in the new branch, because the user does not have permissions to view the routine definition.");
+                            continue;
+                        }
+
+                        // Set the names and collation from the original and replace the definer with the current user, so that the stored procedure can be created by the current user.
+                        query = $"SET NAMES {subDataTable.Rows[0].Field<string>(3)} COLLATE {subDataTable.Rows[0].Field<string>(4)}; {query.Replace($" DEFINER=`{definerParts[0]}`@`{definerParts[1]}`", " DEFINER=CURRENT_USER")}";
+                        await branchDatabaseConnection.ExecuteAsync(query);
+                    }
+                    catch (Exception exception)
+                    {
+                        errors.Add($"Unable to create stored procedure '{dataRow.Field<string>("ROUTINE_NAME")}' in the new branch, because of the following error: {exception}");
+                    }
                 }
             }
             catch (Exception exception)
@@ -1276,6 +1283,25 @@ AND EXTRA NOT LIKE '%GENERATED'";
                                         originalItemId = itemId;
                                         destinationItemId = linkCacheData.DestinationItemId.Value;
                                         linkType = linkCacheData.Type;
+
+                                        switch (field)
+                                        {
+                                            case "destination_item_id":
+                                                oldDestinationItemId = Convert.ToUInt64(oldValue);
+                                                destinationItemId = Convert.ToUInt64(newValue);
+                                                oldItemId = itemId;
+                                                break;
+                                            case "item_id":
+                                                oldItemId = Convert.ToUInt64(oldValue);
+                                                itemId = Convert.ToUInt64(newValue);
+                                                originalItemId = itemId;
+                                                oldDestinationItemId = destinationItemId;
+                                                break;
+                                            default:
+                                                oldItemId = itemId;
+                                                oldDestinationItemId = destinationItemId;
+                                                break;
+                                        }
                                         break;
                                     }
                                 }
@@ -1332,6 +1358,10 @@ AND EXTRA NOT LIKE '%GENERATED'";
                                         oldItemId = Convert.ToUInt64(oldValue);
                                         itemId = Convert.ToUInt64(newValue);
                                         originalItemId = itemId;
+                                        oldDestinationItemId = destinationItemId;
+                                        break;
+                                    default:
+                                        oldItemId = itemId;
                                         oldDestinationItemId = destinationItemId;
                                         break;
                                 }
@@ -1507,7 +1537,7 @@ LIMIT 1";
                                 await using var branchCommand = branchConnection.CreateCommand();
                                 branchCommand.CommandText = "UNLOCK TABLES";
                                 await branchCommand.ExecuteNonQueryAsync();
-                                linkData = await GetEntityTypesOfLinkAsync(itemId, destinationItemId, linkType.Value, branchConnection, wiserItemsService);
+                                linkData = await GetEntityTypesOfLinkAsync(originalItemId, originalDestinationItemId, linkType.Value, branchConnection, wiserItemsService);
                                 if (linkData.HasValue)
                                 {
                                     entityType = linkData.Value.SourceType;
@@ -2306,7 +2336,7 @@ WHERE `id` = ?id";
                     }
                 }
 
-                await UpdateProgressInQueue(databaseConnection, queueId, totalItemsInHistory);
+                await UpdateProgressInQueue(databaseConnection, queueId, totalItemsInHistory, true);
 
                 try
                 {
@@ -2395,10 +2425,11 @@ WHERE `id` = ?id";
         /// <param name="databaseConnection">The database connection to the main branch that contains the wiser_branch_queue table.</param>
         /// <param name="queueId">The ID of the row in the wiser_branch_queue table to update.</param>
         /// <param name="itemsProcessed">The amount of items that we processed so far.</param>
-        private static async Task UpdateProgressInQueue(IDatabaseConnection databaseConnection, int queueId, int itemsProcessed)
+        /// <param name="forceUpdate">Whether to ignore the check on how many items are processed and just update it.</param>
+        private static async Task UpdateProgressInQueue(IDatabaseConnection databaseConnection, int queueId, int itemsProcessed, bool forceUpdate = false)
         {
             // Only update after every 100 records, so that we don't execute too many queries.
-            if (itemsProcessed % 100 != 0)
+            if (!forceUpdate && itemsProcessed % 100 != 0)
             {
                 return;
             }
@@ -2681,9 +2712,9 @@ LIMIT 1";
                 }
 
                 // Check if the destination item exists in this table.
-                command.CommandText = $@"SELECT entity_type FROM {destinationTablePrefix}{WiserTableNames.WiserItem} WHERE id = ?sourceId
+                command.CommandText = $@"SELECT entity_type FROM {destinationTablePrefix}{WiserTableNames.WiserItem} WHERE id = ?destinationId
 UNION
-SELECT entity_type FROM {destinationTablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} WHERE id = ?sourceId
+SELECT entity_type FROM {destinationTablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} WHERE id = ?destinationId
 LIMIT 1";
                 var destinationDataTable = new DataTable();
                 using var destinationAdapter = new MySqlDataAdapter(command);
