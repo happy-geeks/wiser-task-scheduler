@@ -27,6 +27,8 @@ using WiserTaskScheduler.Modules.Queries.Interfaces;
 using WiserTaskScheduler.Modules.Queries.Models;
 using WiserTaskScheduler.Modules.ServerMonitors.Interfaces;
 using WiserTaskScheduler.Modules.ServerMonitors.Models;
+using WiserTaskScheduler.Modules.Scripts.Interfaces;
+using WiserTaskScheduler.Modules.Scripts.Models;
 using WiserTaskScheduler.Modules.SlackMessages.Interfaces;
 using WiserTaskScheduler.Modules.SlackMessages.Models;
 using WiserTaskScheduler.Modules.WiserImports.Interfaces;
@@ -58,6 +60,7 @@ public class ActionsServiceFactory(IServiceProvider serviceProvider) : IActionsS
             GenerateCommunicationModel => serviceProvider.GetRequiredService<IGenerateCommunicationsService>() as IActionsService,
             DocumentStoreReadModel => serviceProvider.GetRequiredService<IDocumentStoreReadService>() as IActionsService,
             SlackMessageModel => serviceProvider.GetRequiredService<ISlackMessageService>() as IActionsService,
+            ScriptModel => serviceProvider.GetRequiredService<IScriptsService>() as IActionsService,
             _ => throw new ArgumentOutOfRangeException(nameof(action), action.ToString(), null)
         };
     }
