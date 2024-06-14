@@ -29,6 +29,8 @@ using WiserTaskScheduler.Modules.Ftps.Interfaces;
 using WiserTaskScheduler.Modules.Ftps.Models;
 using WiserTaskScheduler.Modules.GenerateCommunications.Interfaces;
 using WiserTaskScheduler.Modules.GenerateCommunications.Models;
+using WiserTaskScheduler.Modules.Scripts.Interfaces;
+using WiserTaskScheduler.Modules.Scripts.Models;
 using WiserTaskScheduler.Modules.SlackMessages.Interfaces;
 using WiserTaskScheduler.Modules.SlackMessages.Models;
 
@@ -83,6 +85,8 @@ namespace WiserTaskScheduler.Core.Factories
                     return serviceProvider.GetRequiredService<IDocumentStoreReadService>() as IActionsService;
                 case SlackMessageModel:
                     return serviceProvider.GetRequiredService<ISlackMessageService>() as IActionsService;
+                case ScriptModel:
+                    return serviceProvider.GetRequiredService<IScriptsService>() as IActionsService;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(action), action.ToString());
             }

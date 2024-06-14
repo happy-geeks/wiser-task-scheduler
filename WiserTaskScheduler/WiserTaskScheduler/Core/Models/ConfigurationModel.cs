@@ -15,6 +15,7 @@ using WiserTaskScheduler.Modules.ServerMonitors.Models;
 using WiserTaskScheduler.Modules.WiserImports.Models;
 using WiserTaskScheduler.Modules.Ftps.Models;
 using WiserTaskScheduler.Modules.GenerateCommunications.Models;
+using WiserTaskScheduler.Modules.Scripts.Models;
 using WiserTaskScheduler.Modules.SlackMessages.Models;
 
 namespace WiserTaskScheduler.Core.Models
@@ -231,6 +232,19 @@ namespace WiserTaskScheduler.Core.Models
         /// </summary>
         [XmlElement("DocumentStoreRead")]
         public DocumentStoreReadModel[] DocumentStoreReader { get; set; }
+
+        /// <summary>
+        /// Gets or sets the scripts that have been placed inside the group.
+        /// </summary>
+        [XmlArray("Scripts")]
+        [XmlArrayItem(typeof(ScriptModel))]
+        public ScriptModel[] ScriptsGroup { get; set; }
+
+        /// <summary>
+        /// Gets or sets the scripts that have been placed outside the group.
+        /// </summary>
+        [XmlElement("Script")]
+        public ScriptModel[] Scripts { get; set; }
 
         /// <summary>
         /// Gets or sets the SlackMessages that have been placed in the group.

@@ -2,5 +2,6 @@
 
 public enum Interpreters
 {
-    Lua
+    Unknown = 0,
+    JavaScript = 1
 }

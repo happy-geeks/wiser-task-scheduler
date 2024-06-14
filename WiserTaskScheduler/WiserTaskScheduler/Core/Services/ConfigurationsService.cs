@@ -133,6 +133,8 @@ namespace WiserTaskScheduler.Core.Services
                 configuration.DocumentStoreReader,
                 configuration.SlackMessageGroup,
                 configuration.SlackMessages
+                configuration.ScriptsGroup,
+                configuration.Scripts
             };
 
             var allActions = new List<ActionModel>();
