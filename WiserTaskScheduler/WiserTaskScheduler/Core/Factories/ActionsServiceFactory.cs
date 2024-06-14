@@ -29,6 +29,8 @@ using WiserTaskScheduler.Modules.Ftps.Interfaces;
 using WiserTaskScheduler.Modules.Ftps.Models;
 using WiserTaskScheduler.Modules.GenerateCommunications.Interfaces;
 using WiserTaskScheduler.Modules.GenerateCommunications.Models;
+using WiserTaskScheduler.Modules.Scripts.Interfaces;
+using WiserTaskScheduler.Modules.Scripts.Models;
 
 namespace WiserTaskScheduler.Core.Factories
 {
@@ -79,6 +81,8 @@ namespace WiserTaskScheduler.Core.Factories
                     return serviceProvider.GetRequiredService<IGenerateCommunicationsService>() as IActionsService;
                 case DocumentStoreReadModel:
                     return serviceProvider.GetRequiredService<IDocumentStoreReadService>() as IActionsService;
+                case ScriptModel:
+                    return serviceProvider.GetRequiredService<IScriptsService>() as IActionsService;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(action), action.ToString());
             }

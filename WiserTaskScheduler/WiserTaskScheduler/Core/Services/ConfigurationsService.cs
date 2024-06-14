@@ -129,7 +129,9 @@ namespace WiserTaskScheduler.Core.Services
                 configuration.GenerateCommunicationGroup,
                 configuration.GenerateCommunications,
                 configuration.DocumentStoreReadersGroup,
-                configuration.DocumentStoreReader
+                configuration.DocumentStoreReader,
+                configuration.ScriptsGroup,
+                configuration.Scripts
             };
 
             var allActions = new List<ActionModel>();
