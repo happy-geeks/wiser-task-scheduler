@@ -1051,7 +1051,6 @@ AND EXTRA NOT LIKE '%GENERATED'";
 
             try
             {
-
                 // Create a new scope for dependency injection and get a new instance of the database connection, to use for connecting to the branch database.
                 using var branchScope = serviceProvider.CreateScope();
                 var branchDatabaseConnection = branchScope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
@@ -1115,7 +1114,29 @@ AND EXTRA NOT LIKE '%GENERATED'";
                     }
 
                     var action = dataRow.Field<string>("action").ToUpperInvariant();
-                    BranchesHelpers.TrackObjectAction(objectsCreatedInBranch, action, originalItemId, tableName);
+                    var field = dataRow.Field<string>("field");
+                    var objectId = originalItemId.ToString();
+                    switch (action)
+                    {
+                        case "ADD_LINK":
+                        {
+                            // With ADD_LINK actions, the ID of the link itself isn't saved in wiser_history, so we need to use the concat the destination item ID (which is saved in "item_id"),
+                            // the source item ID (which is saved in "newvalue") and the link type (which is saved in "field", together with the ordering) to get a unique ID for the link.
+                            var linkType = field?.Split(",").FirstOrDefault() ?? "0";
+                            objectId = $"{originalItemId}_{dataRow["newvalue"]}_{linkType}";
+                            break;
+                        }
+                        case "REMOVE_LINK":
+                        {
+                            // With REMOVE_LINK actions, the ID of the link itself isn't saved in wiser_history, so we need to use the concat the destination item ID (which is saved in "item_id"),
+                            // the source item ID (which is saved in "oldvalue") and the link type (which is saved in "field") to get a unique ID for the link.
+                            var linkType = field ?? "0";
+                            objectId = $"{originalItemId}_{dataRow["oldvalue"]}_{linkType}";
+                            break;
+                        }
+                    }
+
+                    BranchesHelpers.TrackObjectAction(objectsCreatedInBranch, action, objectId, tableName);
                 }
 
                 tablesToLock = tablesToLock.Distinct().ToList();
@@ -1224,7 +1245,27 @@ AND EXTRA NOT LIKE '%GENERATED'";
                     ulong? oldDestinationItemId = null;
                     (string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)? linkData = null;
 
-                    var objectCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalObjectId && String.Equals(i.TableName, tableName, StringComparison.OrdinalIgnoreCase));
+                    var idForComparison = originalItemId.ToString();
+                    switch (action)
+                    {
+                        case "ADD_LINK":
+                        {
+                            // With ADD_LINK actions, the ID of the link itself isn't saved in wiser_history, so we need to use the concat the destination item ID (which is saved in "item_id"),
+                            // the source item ID (which is saved in "newvalue") and the link type (which is saved in "field", together with the ordering) to get a unique ID for the link.
+                            var type = field?.Split(",").FirstOrDefault() ?? "0";
+                            idForComparison = $"{originalItemId}_{newValue}_{type}";
+                            break;
+                        }
+                        case "REMOVE_LINK":
+                        {
+                            // With REMOVE_LINK actions, the ID of the link itself isn't saved in wiser_history, so we need to use the concat the destination item ID (which is saved in "item_id"),
+                            // the source item ID (which is saved in "oldvalue") and the link type (which is saved in "field") to get a unique ID for the link.
+                            var type = field ?? "0";
+                            idForComparison = $"{originalItemId}_{oldValue}_{type}";
+                            break;
+                        }
+                    }
+                    var objectCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == idForComparison && String.Equals(i.TableName, tableName, StringComparison.OrdinalIgnoreCase));
                     if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
                     {
                         // This item was created and then deleted in the branch, so we don't need to do anything.
@@ -1499,8 +1540,8 @@ LIMIT 1";
                         linkId = GetMappedId(tableName, idMapping, linkId);
                         fileId = GetMappedId(tableName, idMapping, fileId);
                         objectId = GetMappedId(tableName, idMapping, objectId) ?? 0;
-                        var linkSourceItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalItemId && String.Equals(i.TableName, $"{linkData?.SourceTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
-                        var linkDestinationItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalDestinationItemId && String.Equals(i.TableName, $"{linkData?.DestinationTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
+                        var linkSourceItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalItemId.ToString() && String.Equals(i.TableName, $"{linkData?.SourceTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
+                        var linkDestinationItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalDestinationItemId.ToString() && String.Equals(i.TableName, $"{linkData?.DestinationTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
 
                         var (_, isWiserItemChange) = BranchesHelpers.GetTablePrefix(tableName, originalItemId);
                         var itemData = listOfItems.FirstOrDefault(item => item.Id == itemId);
