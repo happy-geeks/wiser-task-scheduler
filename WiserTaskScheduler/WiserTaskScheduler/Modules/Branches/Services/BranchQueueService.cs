@@ -321,6 +321,10 @@ FROM (
                     await branchDatabaseConnection.ExecuteAsync(createTableResult.Rows[0].Field<string>("Create table"));
                 }
 
+                // Create the wiser_id_mappings table in the new branch.
+                // This is used to know which IDs are already synced to the production environment.
+                await branchDatabaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WiserIdMappings});
+
                 var allLinkTypes = await wiserItemsService.GetAllLinkTypeSettingsAsync();
 
                 // Fill the tables with data.
@@ -551,6 +555,8 @@ FROM (
                             }
                         }
 
+                        await AddInitialIdMappingAsync(branchDatabaseConnection, tableName);
+
                         continue;
                     }
 
@@ -759,6 +765,8 @@ FROM (
                                 }
                             }
                         }
+                        
+                        await AddInitialIdMappingAsync(branchDatabaseConnection, tableName);
 
                         continue;
                     }
@@ -840,6 +848,26 @@ AND EXTRA NOT LIKE '%GENERATED'";
                         }
                     }
                 }
+
+                // Add initial ID mappings for all link tables.
+                var mappedLinkTables = new HashSet<string>();
+                foreach (var linkType in allLinkTypes)
+                {
+                    var tablePrefix = await wiserItemsService.GetTablePrefixForLinkAsync(linkType.Type, linkType.SourceEntityType);
+                    var tableName = $"{tablePrefix}{WiserTableNames.WiserItemLink}";
+                    
+                    if (mappedLinkTables.Contains(tableName))
+                    {
+                        continue;
+                    }
+
+                    mappedLinkTables.Add(tableName);
+                    await AddInitialIdMappingAsync(branchDatabaseConnection, tableName);
+                }
+                
+                await AddInitialIdMappingAsync(branchDatabaseConnection, WiserTableNames.WiserQuery);
+                await AddInitialIdMappingAsync(branchDatabaseConnection, WiserTableNames.WiserDataSelector);
+                await AddInitialIdMappingAsync(branchDatabaseConnection, WiserTableNames.WiserStyledOutput);
 
                 // Add triggers to the new database, after inserting all data, so that the wiser_history table will still be empty.
                 // We use wiser_history to later synchronise all changes to production, so it needs to be empty before the user starts to make changes in the new branch.
@@ -963,6 +991,20 @@ AND EXTRA NOT LIKE '%GENERATED'";
             await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Bulk copy of table '{tableName}' to branch database '{branchDatabase}' resulted in warnings: {String.Join(", ", warnings)}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
 
             return bulkCopyResult.RowsInserted;
+        }
+
+        /// <summary>
+        /// Add the initial ID mappings for a table. These will be the same ID in both databases and is used to determine if an item is already mapped.
+        /// </summary>
+        /// <param name="branchDatabaseConnection">The database connection of the branch to use.</param>
+        /// <param name="tableName">The name of the table to map the initial IDs for.</param>
+        private async Task AddInitialIdMappingAsync(IDatabaseConnection branchDatabaseConnection, string tableName)
+        {      
+            await branchDatabaseConnection.ExecuteAsync($"""
+                INSERT INTO {WiserTableNames.WiserIdMappings} (table_name, our_id, production_id)
+                SELECT {tableName}, id, id
+                FROM {tableName}
+            """);
         }
 
         /// <summary>
