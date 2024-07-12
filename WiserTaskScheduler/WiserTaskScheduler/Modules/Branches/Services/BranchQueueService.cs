@@ -334,6 +334,17 @@ FROM (
                 foreach (DataRow dataRow in dataTable.Rows)
                 {
                     var tableName = dataRow.Field<string>("TABLE_NAME");
+                    
+                    // Skip copying the contents of certain tables if the table should not be copied or only the structure.
+                    if (branchQueue.CopyTableRules != null && branchQueue.CopyTableRules.Any(t => (t.CopyType == CopyTypes.Nothing || t.CopyType == CopyTypes.Structure) && (
+                            (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
+                            || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName[1..], StringComparison.OrdinalIgnoreCase))
+                            || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName[..^1], StringComparison.OrdinalIgnoreCase))
+                            || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase))))
+                    {
+                        continue;
+                    }
+                    
                     var bulkCopy = new MySqlBulkCopy((MySqlConnection) branchDatabaseConnection.GetConnectionForWriting()) {DestinationTableName = tableName, ConflictOption = MySqlBulkLoaderConflictOption.Ignore};
 
                     // For Wiser tables, we don't want to copy customer data, so copy everything except data of certain entity types.
@@ -887,6 +898,18 @@ AND EXTRA NOT LIKE '%GENERATED'";
 
                 foreach (DataRow dataRow in dataTable.Rows)
                 {
+                    var tableName = dataRow.Field<string>("EVENT_OBJECT_TABLE");
+                    
+                    // Check if the structure of the table is excluded from the creation of the branch.
+                    if (branchQueue.CopyTableRules != null && branchQueue.CopyTableRules.Any(t => t.CopyType == CopyTypes.Nothing && (
+                            (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
+                            || (t.TableName.StartsWith('%') && tableName.EndsWith(t.TableName[1..], StringComparison.OrdinalIgnoreCase))
+                            || (t.TableName.EndsWith('%') && tableName.StartsWith(t.TableName[..^1], StringComparison.OrdinalIgnoreCase))
+                            || tableName.Equals(t.TableName, StringComparison.OrdinalIgnoreCase))))
+                    {
+                        continue;
+                    }
+                    
                     query = $"CREATE TRIGGER `{dataRow.Field<string>("TRIGGER_NAME")}` {dataRow.Field<string>("ACTION_TIMING")} {dataRow.Field<string>("EVENT_MANIPULATION")} ON `{branchDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("EVENT_OBJECT_TABLE")}` FOR EACH {dataRow.Field<string>("ACTION_ORIENTATION")} {dataRow.Field<string>("ACTION_STATEMENT")}";
                     await branchDatabaseConnection.ExecuteAsync(query);
                 }
@@ -1002,7 +1025,7 @@ AND EXTRA NOT LIKE '%GENERATED'";
         {      
             await branchDatabaseConnection.ExecuteAsync($"""
                 INSERT INTO {WiserTableNames.WiserIdMappings} (table_name, our_id, production_id)
-                SELECT {tableName}, id, id
+                SELECT '{tableName}', id, id
                 FROM {tableName}
             """);
         }
