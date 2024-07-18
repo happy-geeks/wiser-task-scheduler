@@ -1283,6 +1283,8 @@ AND EXTRA NOT LIKE '%GENERATED'";
                     var newValue = dataRow.Field<string>("newvalue");
                     var languageCode = dataRow.Field<string>("language_code") ?? "";
                     var groupName = dataRow.Field<string>("groupname") ?? "";
+                    var targetId = dataTable.Columns.Contains("target_id") ? dataRow.Field<ulong>("target_id") : 0;
+                    var originalTargetId = targetId;
                     ulong? linkId = null;
                     ulong? originalLinkId;
                     ulong? originalFileId = null;
@@ -1586,6 +1588,7 @@ LIMIT 1";
 
                         // Did we map the item ID to something else? Then use that new ID.
                         var originalDestinationItemId = destinationItemId;
+                        // TODO: The table name that is used here isn't always the correct one. Like when an item detail or item link is updated, then we have an ID from wiser_item, but still have the table wiser_itemdetail.
                         itemId = GetMappedId(tableName, idMapping, itemId).Value;
                         destinationItemId = GetMappedId(tableName, idMapping, destinationItemId).Value;
                         oldItemId = GetMappedId(tableName, idMapping, oldItemId);
@@ -1593,6 +1596,7 @@ LIMIT 1";
                         linkId = GetMappedId(tableName, idMapping, linkId);
                         fileId = GetMappedId(tableName, idMapping, fileId);
                         objectId = GetMappedId(tableName, idMapping, objectId) ?? 0;
+                        targetId = GetMappedId(tableName, idMapping, targetId).Value;
                         var linkSourceItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalItemId.ToString() && String.Equals(i.TableName, $"{linkData?.SourceTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
                         var linkDestinationItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalDestinationItemId.ToString() && String.Equals(i.TableName, $"{linkData?.DestinationTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
 
@@ -1776,10 +1780,42 @@ AND groupname = ?groupName";
                                     sqlParameters["value"] = useLongValue ? "" : newValue;
                                     sqlParameters["longValue"] = useLongValue ? newValue : "";
 
-                                    AddParametersToCommand(sqlParameters, productionCommand);
-                                    productionCommand.CommandText += $@"INSERT INTO `{tableName}` (language_code, item_id, groupname, `key`, value, long_value)
-VALUES (?languageCode, ?itemId, ?groupName, ?key, ?value, ?longValue)
-ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), long_value = VALUES(long_value)";
+                                    // Check if this item detail already exists in production.
+                                    productionCommand.CommandText = $"""
+                                                                    SELECT id
+                                                                    FROM `{tableName}`
+                                                                    WHERE item_id = ?itemId
+                                                                    AND `key` = ?key
+                                                                    AND language_code = ?languageCode
+                                                                    AND groupname = ?groupName
+                                                                    """;
+                                    var existingId = Convert.ToUInt64(await productionCommand.ExecuteScalarAsync() ?? 0);
+                                    if (existingId > 0)
+                                    {
+                                        sqlParameters["existingId"] = existingId;
+                                        AddParametersToCommand(sqlParameters, productionCommand);
+                                        productionCommand.CommandText += $"""
+                                                                          UPDATE `{tableName}` SET value = ?value, long_value = ?longValue
+                                                                          WHERE id = ?existingId
+                                                                          """;
+
+                                        // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
+                                        await AddIdMappingAsync(idMapping, tableName, originalTargetId, existingId, branchConnection);
+                                    }
+                                    else
+                                    {
+                                        var newItemId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection);
+                                        sqlParameters["newId"] = newItemId;
+
+                                        AddParametersToCommand(sqlParameters, productionCommand);
+                                        productionCommand.CommandText += $"""
+                                                                          INSERT INTO `{tableName}` (id, language_code, item_id, groupname, `key`, value, long_value)
+                                                                          VALUES (?newId, ?languageCode, ?itemId, ?groupName, ?key, ?value, ?longValue)
+                                                                          """;
+
+                                        // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
+                                        await AddIdMappingAsync(idMapping, tableName, originalItemId, newItemId, branchConnection);
+                                    }
                                 }
 
                                 await productionCommand.ExecuteNonQueryAsync();
@@ -1805,6 +1841,32 @@ ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), lo
 UPDATE `{tableName}` 
 SET `{field.ToMySqlSafeValue(false)}` = ?newValue
 WHERE id = ?itemId";
+                                await productionCommand.ExecuteNonQueryAsync();
+
+                                break;
+                            }
+                            case "UPDATE_ITEM_DETAIL":
+                            {
+                                // Check if the user requested this change to be synchronised.
+                                if (!entityTypeMergeSettings.Update)
+                                {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                                    continue;
+                                }
+
+                                sqlParameters["itemId"] = itemId;
+                                sqlParameters["newValue"] = newValue;
+                                sqlParameters["detailId"] = targetId;
+
+                                await using var productionCommand = productionConnection.CreateCommand();
+                                AddParametersToCommand(sqlParameters, productionCommand);
+                                productionCommand.CommandText = $"""
+                                                                 {queryPrefix}
+                                                                 UPDATE `{tableName}` SET `{field.ToMySqlSafeValue(false)}` = ?newValue
+                                                                 WHERE id = ?detailId
+                                                                 """;;
+
                                 await productionCommand.ExecuteNonQueryAsync();
 
                                 break;
@@ -2888,9 +2950,11 @@ LIMIT 1";
 
             idMappings[tableName].Add(originalItemId, newItemId);
             await using var environmentCommand = environmentConnection.CreateCommand();
-            environmentCommand.CommandText = $@"INSERT INTO `{WiserTableNames.WiserIdMappings}` 
-(table_name, our_id, production_id)
-VALUES (?tableName, ?ourId, ?productionId)";
+            environmentCommand.CommandText = $"""
+                                              INSERT INTO `{WiserTableNames.WiserIdMappings}` 
+                                              (table_name, our_id, production_id)
+                                              VALUES (?tableName, ?ourId, ?productionId)
+                                              """;
 
             environmentCommand.Parameters.AddWithValue("tableName", tableName);
             environmentCommand.Parameters.AddWithValue("ourId", originalItemId);
