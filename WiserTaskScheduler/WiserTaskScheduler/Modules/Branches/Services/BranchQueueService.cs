@@ -1022,7 +1022,17 @@ AND EXTRA NOT LIKE '%GENERATED'";
         /// <param name="branchDatabaseConnection">The database connection of the branch to use.</param>
         /// <param name="tableName">The name of the table to map the initial IDs for.</param>
         private async Task AddInitialIdMappingAsync(IDatabaseConnection branchDatabaseConnection, string tableName)
-        {      
+        {
+            // If the current table is of wiser_item then insert a record for the root folder to match for parent IDs.
+            if (tableName.EndsWith("wiser_item"))
+            {
+                await branchDatabaseConnection.ExecuteAsync($"""
+                    INSERT IGNORE INTO {WiserTableNames.WiserIdMappings} (table_name, our_id, production_id)
+                    SELECT '{tableName}', 0, 0
+                """);
+            }
+            
+            // Add all IDs from the production database to the branch database to indicate that they are already mapped.
             await branchDatabaseConnection.ExecuteAsync($"""
                 INSERT INTO {WiserTableNames.WiserIdMappings} (table_name, our_id, production_id)
                 SELECT '{tableName}', id, id
