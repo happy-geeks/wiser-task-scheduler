@@ -31,7 +31,7 @@ namespace WiserTaskScheduler.Core.Services
             sendMessages = new ConcurrentDictionary<string, DateTime>();
         }
 
-#if DEBUG
+#if !DEBUG
         /// <inheritdoc />
         public async Task SendChannelMessageAsync(string message, string[] replies = null, string recipient = null, string messageHash = null)
         {
