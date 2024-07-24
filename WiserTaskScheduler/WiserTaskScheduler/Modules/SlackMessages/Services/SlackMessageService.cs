@@ -1,20 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Data;
-using System.Linq;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
-using GeeksCoreLibrary.Core.Helpers;
-using GeeksCoreLibrary.Modules.Databases.Interfaces;
-using Microsoft.CodeAnalysis.CSharp.Scripting;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
-using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Helpers;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
-using WiserTaskScheduler.Core.Services;
 using WiserTaskScheduler.Modules.SlackMessages.Interfaces;
 using WiserTaskScheduler.Modules.SlackMessages.Models;
 
