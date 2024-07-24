@@ -129,9 +129,7 @@ namespace WiserTaskScheduler.Core.Services
                 configuration.GenerateCommunicationGroup,
                 configuration.GenerateCommunications,
                 configuration.DocumentStoreReadersGroup,
-                configuration.DocumentStoreReader,
-                configuration.SlackMessageGroup,
-                configuration.SlackMessages
+                configuration.DocumentStoreReader
             };
 
             var allActions = new List<ActionModel>();
@@ -306,28 +304,7 @@ namespace WiserTaskScheduler.Core.Services
                     return true;
                 }
             }
-            
-            if (!String.IsNullOrWhiteSpace(action.OnlyWithValue))
-            {
-                var parts = action.OnlyWithValue.Split(",");
 
-                try
-                {
-                    var state = ReplacementHelper.GetValue(parts[0], ReplacementHelper.EmptyRows, resultSets, false);
-                    
-                    
-                    if (resultSets.Value<string>(state) != parts[1])
-                    {
-                        await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Skipped action because success state was '{state}'.", configurationServiceName, action.TimeId, action.Order);
-                        return true;
-                    }
-                }
-                catch (Exception e)
-                {
-                    await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Failed to validate action success, skipping action. Exception: {e}", configurationServiceName, action.TimeId, action.Order);
-                    return true;
-                }
-            }
             return false;
         }
     }
