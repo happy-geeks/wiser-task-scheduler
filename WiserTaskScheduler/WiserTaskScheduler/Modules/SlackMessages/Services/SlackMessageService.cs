@@ -52,9 +52,7 @@ namespace WiserTaskScheduler.Modules.SlackMessages.Services
         public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
         { 
             var slackMessage = (SlackMessageModel) action;
-
             var useResultSet = slackMessage.UseResultSet;
-            
             var msg = slackMessage.Message;
             
             if (!String.IsNullOrWhiteSpace(useResultSet))
