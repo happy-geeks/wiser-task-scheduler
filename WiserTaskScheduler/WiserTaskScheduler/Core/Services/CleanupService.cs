@@ -49,6 +49,7 @@ namespace WiserTaskScheduler.Core.Services
             await CleanupFilesAsync();
             await CleanupDatabaseLogsAsync(databaseConnection, databaseHelpersService);
             await CleanupDatabaseRenderTimesAsync(databaseConnection, databaseHelpersService);
+            await CleanupWtsServicesAsync(databaseConnection, databaseHelpersService);
         }
 
         /// <summary>
@@ -152,7 +153,10 @@ namespace WiserTaskScheduler.Core.Services
         private async Task CleanupWtsServicesAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
         {
             databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStoreWtsServices));
-            var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WtsServices} WHERE last_run < ?cleanupDate", cleanUp: true);
+
+            var query = $"DELETE FROM {WiserTableNames.WtsServices} WHERE last_run < ?cleanupDate";
+            var rowsDeleted = await databaseConnection.ExecuteAsync(query, cleanUp: true);
+            
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WtsServices}'.", LogName);
 
             if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
