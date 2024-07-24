@@ -7,11 +7,6 @@ namespace WiserTaskScheduler.Modules.SlackMessages.Models
     public class SlackMessageModel : ActionModel
     {
         /// <summary>
-        /// Gets or sets the firing condition, when resolved as true then the message is send
-        /// </summary>
-        public string FiringCondition { get; set; }
-
-        /// <summary>
         /// Gets or sets the Message 
         /// </summary>
         public string Message { get; set; }

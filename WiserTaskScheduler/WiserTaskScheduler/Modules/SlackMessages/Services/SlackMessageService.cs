@@ -62,10 +62,10 @@ namespace WiserTaskScheduler.Modules.SlackMessages.Services
                 var keyParts = useResultSet.Split('.');
                 var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(useResultSet, ReplacementHelper.EmptyRows, resultSets);
                 var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
-
                 var toPathTuple = ReplacementHelper.PrepareText(slackMessage.Message, usingResultSet, remainingKey, slackMessage.HashSettings);
 
                 msg = ReplacementHelper.ReplaceText(toPathTuple.Item1,  ReplacementHelper.EmptyRows, toPathTuple.Item2, usingResultSet, slackMessage.HashSettings);
+
             }
             
             await slackChatService.SendChannelMessageAsync(msg, [], slackMessage.Recipient);
