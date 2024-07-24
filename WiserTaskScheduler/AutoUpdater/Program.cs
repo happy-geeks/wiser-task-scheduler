@@ -1,6 +1,7 @@
 using AutoUpdater.Interfaces;
 using AutoUpdater.Models;
 using AutoUpdater.Services;
+using AutoUpdater.Slack.modules;
 using AutoUpdater.Workers;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
@@ -37,14 +38,16 @@ IHost host = Host.CreateDefaultBuilder(args)
 
         services.Configure<GclSettings>(hostContext.Configuration.GetSection("Gcl"));
         services.Configure<UpdateSettings>(hostContext.Configuration.GetSection("Updater"));
+
         services.AddHostedService<UpdateWorker>();
 
+        services.AddSingleton<ISlackChatService, SlackChatService>();
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddScoped<IHttpContextAccessor, HttpContextAccessor>();
         services.AddGclServices(hostContext.Configuration, false, false, false);
         
         // If there is a bot token provided for Slack add the service. 
-        var slackBotToken = hostContext.Configuration.GetSection("Wts").GetSection("SlackSettings").GetValue<string>("BotToken");
+        var slackBotToken = hostContext.Configuration.GetSection("Updater").GetSection("SlackSettings").GetValue<string>("BotToken");
         if (!String.IsNullOrWhiteSpace(slackBotToken))
         {
             services.AddSingleton(new SlackEndpointConfiguration());

@@ -23,17 +23,17 @@ public class UpdateService : IUpdateService
 
     private readonly UpdateSettings updateSettings;
     private readonly ILogger<UpdateService> logger;
+    private readonly ISlackChatService slackChatService;
     private readonly IServiceProvider serviceProvider;
 
     private Version lastDownloadedVersion;
-    private readonly SlackSettings slackSettings;
     
-    public UpdateService(IOptions<UpdateSettings> updateSettings, ILogger<UpdateService> logger, IServiceProvider serviceProvider)
+    public UpdateService(IOptions<UpdateSettings> updateSettings, ILogger<UpdateService> logger,ISlackChatService slackChatService,  IServiceProvider serviceProvider)
     {
         this.updateSettings = updateSettings.Value;
         this.logger = logger;
+        this.slackChatService = slackChatService;
         this.serviceProvider = serviceProvider;
-        slackSettings = updateSettings.Value.SlackSettings;
         
         Directory.CreateDirectory(Path.Combine(WtsTempPath, "update"));
         Directory.CreateDirectory(Path.Combine(WtsTempPath, "backups"));
@@ -150,8 +150,11 @@ public class UpdateService : IUpdateService
                 logger.LogInformation($"WTS '{wts.ServiceName}' is up-to-date.");
                 return;
             case UpdateStates.BreakingChanges:
-                logger.LogWarning($"Could not update WTS '{wts.ServiceName}' to version {versionList[0].Version} due to breaking changes since the current version of the WTS ({version}).{Environment.NewLine}Please check the release logs and resolve the breaking changes before manually updating the WTS.");
-                EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Manual action required", $"Could not update WTS '{wts.ServiceName}' to version {versionList[0].Version} due to breaking changes since the current version of the WTS ({version}).<br/>Please check the release logs and resolve the breaking changes before manually updating the WTS.", wts.ServiceName);
+                var msg = $"Could not update WTS '{wts.ServiceName}' to version {versionList[0].Version} due to breaking changes since the current version of the WTS ({version}).{Environment.NewLine}Please check the release logs and resolve the breaking changes before manually updating the WTS.";
+                
+                logger.LogWarning(msg);
+                slackChatService.SendChannelMessageAsync(msg);
+                EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Manual action required",msg.Replace(Environment.NewLine, "<br/>") , wts.ServiceName);
                 return;
             case UpdateStates.Update:
                 // If the update time is in the future wait until the update time.
@@ -232,7 +235,10 @@ public class UpdateService : IUpdateService
             }
             catch (InvalidOperationException)
             {
-                EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - WTS not found", $"The service for WTS '{wts.ServiceName}' could not be found on the server and can therefore not be updated.", wts.ServiceName);
+                var msg = $"The service for WTS '{wts.ServiceName}' could not be found on the server and can therefore not be updated.";
+                
+                slackChatService.SendChannelMessageAsync(msg);
+                EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - WTS not found", msg , wts.ServiceName);
                 logger.LogWarning($"No service found for '{wts.ServiceName}'.");
                 return;
             }
@@ -274,13 +280,19 @@ public class UpdateService : IUpdateService
 
             if (wts.SendEmailOnUpdateComplete)
             {
-                EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Update installed", $"The service for WTS '{wts.ServiceName}' has been successfully updated to version {versionToUpdateTo}.", wts.ServiceName);
+                var msg = $"The service for WTS '{wts.ServiceName}' has been successfully updated to version {versionToUpdateTo}.";
+                
+                slackChatService.SendChannelMessageAsync(msg);
+                EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Update installed", msg, wts.ServiceName);
             }
         }
         catch (Exception e)
         {
+            var msg = $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}.{Environment.NewLine}{Environment.NewLine} Error when updating:<br/>{e}";
+            
             logger.LogError($"Exception occured while updating WTS '{wts.ServiceName}'.{Environment.NewLine}{Environment.NewLine}{e}");
-            EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Updating failed!", $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}.<br/><br/>Error when updating:<br/>{e.ToString().ReplaceLineEndings("<br/>")}", wts.ServiceName);
+            slackChatService.SendChannelMessageAsync(msg);
+            EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Updating failed!",msg.Replace(Environment.NewLine, "<br/>") , wts.ServiceName);
         }
     }
 
@@ -356,12 +368,20 @@ public class UpdateService : IUpdateService
             // Try to start the previous installed version again.
             serviceController.Start();
             serviceController.WaitForStatus(ServiceControllerStatus.Running);
-            EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Updating failed!", $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}, successfully restored to version {currentVersion}.<br/><br/>Error when updating:<br/>{updateException.ToString().ReplaceLineEndings("<br/>")}", wts.ServiceName);
+            
+            var msg = $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}, successfully restored to version {currentVersion}.<br/><br/>Error when updating:<br/>{updateException}";
+            
+            logger.LogError(msg);
+            slackChatService.SendChannelMessageAsync(msg);
+            EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Updating failed!", msg.Replace(Environment.NewLine, "<br/>"), wts.ServiceName);
         }
         catch (InvalidOperationException revertException)
         {
-            logger.LogError($"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}, failed to restore version {currentVersion}.{Environment.NewLine}{Environment.NewLine}Error when reverting:{Environment.NewLine}{revertException}{Environment.NewLine}{Environment.NewLine}Error when updating:<br/>{updateException}");
-            EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Updating and reverting failed!", $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}, failed to restore version {currentVersion}.<br/><br/>Error when reverting:<br/>{revertException.ToString().ReplaceLineEndings("<br/>")}<br/><br/>Error when updating:<br/>{updateException.ToString().ReplaceLineEndings("<br/>")}", wts.ServiceName);
+            var msg = $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}, failed to restore version {currentVersion}.{Environment.NewLine}{Environment.NewLine}Error when reverting:{Environment.NewLine}{revertException}{Environment.NewLine}{Environment.NewLine}Error when updating:{Environment.NewLine}{updateException}";
+            
+            logger.LogError(msg);
+            slackChatService.SendChannelMessageAsync(msg);
+            EmailAdministrator(wts.ContactEmail, "WTS Auto Updater - Updating and reverting failed!", msg.Replace(Environment.NewLine, "<br/>") , wts.ServiceName);
         }
     }
     
@@ -374,6 +394,7 @@ public class UpdateService : IUpdateService
     /// <param name="serviceName">The name of the WTS service for which an email is being send.</param>
     private void EmailAdministrator(string receiver, string subject, string body, string serviceName)
     {
+        return;
         if (String.IsNullOrWhiteSpace(receiver))
         {
             logger.LogWarning($"No email address provided for '{serviceName}'.");

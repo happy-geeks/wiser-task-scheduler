@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel;
 using System.Xml;
 using System.Xml.Serialization;
+using AutoUpdater.Slack.modules;
 
 namespace AutoUpdater.Models;
 
@@ -25,6 +26,11 @@ public class WtsModel
     /// Send a email if the WTS has been updated.
     /// </summary>
     public bool SendEmailOnUpdateComplete { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the <see cref="SlackSettings"/> used by the <see cref="UpdateService"/>.
+    /// </summary>
+    public SlackSettings SlackSettings { get; set; }
     
     /// <summary>
     /// Gets or sets the time the WTS needs to be updated. If no value has been provided or the time has already been passed the WTS will be updated immediately.
