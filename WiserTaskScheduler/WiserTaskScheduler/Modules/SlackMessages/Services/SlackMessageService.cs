@@ -65,7 +65,6 @@ namespace WiserTaskScheduler.Modules.SlackMessages.Services
                 var toPathTuple = ReplacementHelper.PrepareText(slackMessage.Message, usingResultSet, remainingKey, slackMessage.HashSettings);
 
                 msg = ReplacementHelper.ReplaceText(toPathTuple.Item1,  ReplacementHelper.EmptyRows, toPathTuple.Item2, usingResultSet, slackMessage.HashSettings);
-
             }
             
             await slackChatService.SendChannelMessageAsync(msg, [], slackMessage.Recipient);
