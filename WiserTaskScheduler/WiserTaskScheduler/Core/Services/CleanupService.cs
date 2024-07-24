@@ -107,7 +107,7 @@ namespace WiserTaskScheduler.Core.Services
         {
             try
             {
-				databaseConnection.SetCommandTimeout(cleanupServiceSettings.Timeout);
+                databaseConnection.SetCommandTimeout(cleanupServiceSettings.Timeout);
                 databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStore));
                 var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WtsLogs} WHERE added_on < ?cleanupDate", cleanUp: true);
                 await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WtsLogs}'.", LogName);
