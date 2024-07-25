@@ -322,6 +322,12 @@ namespace WiserTaskScheduler.Core.Services
                     }
                     
                     var state = ReplacementHelper.GetValue($"{parts[0]}{defaultValue}", ReplacementHelper.EmptyRows, resultSets, false);
+
+                    if (parts.Length < 2)
+                    {
+                        await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Skipped action because no value was provided to check state against (did you forget a comma?).", configurationServiceName, action.TimeId, action.Order);
+                        return true;
+                    }
                     
                     if (state != parts[1])
                     {
