@@ -13,7 +13,7 @@ namespace AutoUpdater.Services
         private readonly IServiceProvider serviceProvider;
         private readonly SlackSettings slackSettings;
 
-        private ConcurrentDictionary<string, DateTime> sendMessages;
+        private ConcurrentDictionary<string, DateTime> sendMessages = new ConcurrentDictionary<string, DateTime>();
 
         public SlackChatService(IOptions<SlackSettings> slackSettings, IServiceProvider serviceProvider)
         {

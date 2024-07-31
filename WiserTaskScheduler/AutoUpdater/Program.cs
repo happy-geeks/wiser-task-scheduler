@@ -39,15 +39,18 @@ IHost host = Host.CreateDefaultBuilder(args)
         services.Configure<GclSettings>(hostContext.Configuration.GetSection("Gcl"));
         services.Configure<UpdateSettings>(hostContext.Configuration.GetSection("Updater"));
 
+        var slackSettings = hostContext.Configuration.GetSection("Updater").GetSection("SlackSettings");
+        services.Configure<SlackSettings>(slackSettings);
+        
         services.AddHostedService<UpdateWorker>();
 
         services.AddSingleton<ISlackChatService, SlackChatService>();
         services.AddSingleton<IUpdateService, UpdateService>();
-        services.AddScoped<IHttpContextAccessor, HttpContextAccessor>();
+        services.AddHttpContextAccessor();
         services.AddGclServices(hostContext.Configuration, false, false, false);
         
         // If there is a bot token provided for Slack add the service. 
-        var slackBotToken = hostContext.Configuration.GetSection("Updater").GetSection("SlackSettings").GetValue<string>("BotToken");
+        var slackBotToken = slackSettings.GetValue<string>("BotToken");
         if (!String.IsNullOrWhiteSpace(slackBotToken))
         {
             services.AddSingleton(new SlackEndpointConfiguration());
