@@ -409,7 +409,6 @@ public class UpdateService : IUpdateService
     /// <param name="serviceName">The name of the WTS service for which an email is being send.</param>
     private void EmailAdministrator(string receiver, string subject, string body, string serviceName)
     {
-        return;
         if (String.IsNullOrWhiteSpace(receiver))
         {
             logger.LogWarning($"No email address provided for '{serviceName}'.");

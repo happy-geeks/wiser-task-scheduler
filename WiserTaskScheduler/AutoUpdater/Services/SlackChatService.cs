@@ -21,12 +21,12 @@ namespace AutoUpdater.Services
             this.serviceProvider = serviceProvider;
         }
 
-#if !DEBUG
+#if DEBUG
         /// <inheritdoc />
         public async Task SendChannelMessageAsync(string message, string[] replies = null, string recipient = null, string messageHash = null)
         {
             return;
-            // Only send messages to Slack for production Wiser Task Schedulers to prevent exceptions during developing/testing to trigger it.
+            // Only send messages to Slack for production, to prevent exceptions during developing/testing to trigger it.
         }
 #else
         /// <inheritdoc />
