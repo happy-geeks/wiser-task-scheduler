@@ -27,7 +27,7 @@ public class UpdateService : IUpdateService
 
     private Version lastDownloadedVersion;
     
-    public UpdateService(IOptions<UpdateSettings> updateSettings, ILogger<UpdateService> logger,ISlackChatService slackChatService,  IServiceProvider serviceProvider)
+    public UpdateService(IOptions<UpdateSettings> updateSettings, ILogger<UpdateService> logger, ISlackChatService slackChatService, IServiceProvider serviceProvider)
     {
         this.updateSettings = updateSettings.Value;
         this.logger = logger;
@@ -153,7 +153,7 @@ public class UpdateService : IUpdateService
                 var message= $"Could not update WTS '{wts.ServiceName}' to version {versionList[0].Version} due to breaking changes since the current version of the WTS ({version}).{Environment.NewLine}Please check the release logs and resolve the breaking changes before manually updating the WTS.";
                 
                 logger.LogWarning(message);
-                InformPeople(wts,subject,message);
+                InformPeople(wts, subject, message);
                 return;
             case UpdateStates.Update:
                 // If the update time is in the future wait until the update time.
@@ -237,7 +237,7 @@ public class UpdateService : IUpdateService
                 var subject = "WTS Auto Updater - WTS not found";
                 var message= $"The service for WTS '{wts.ServiceName}' could not be found on the server and can therefore not be updated.";
                 
-                InformPeople(wts,subject,message);
+                InformPeople(wts, subject, message);
                 
                 logger.LogWarning($"No service found for '{wts.ServiceName}'.");
                 return;
@@ -283,7 +283,7 @@ public class UpdateService : IUpdateService
 
             if (wts.SendEmailOnUpdateComplete)
             {
-                InformPeople(wts,subject,message);
+                InformPeople(wts, subject, message);
             }
         }
         catch (Exception e)
@@ -293,7 +293,7 @@ public class UpdateService : IUpdateService
             
             logger.LogError($"Exception occured while updating WTS '{wts.ServiceName}'.{Environment.NewLine}{Environment.NewLine}{e}");
             
-            InformPeople(wts,subject,message);
+            InformPeople(wts, subject, message);
         }
     }
 
@@ -374,7 +374,7 @@ public class UpdateService : IUpdateService
             var message= $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}, successfully restored to version {currentVersion}.<br/><br/>Error when updating:<br/>{updateException}";
             
             logger.LogError(message);
-            InformPeople(wts,subject,message);
+            InformPeople(wts, subject, message);
         }
         catch (InvalidOperationException revertException)
         {
@@ -382,7 +382,7 @@ public class UpdateService : IUpdateService
             var message= $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}, failed to restore version {currentVersion}.{Environment.NewLine}{Environment.NewLine}Error when reverting:{Environment.NewLine}{revertException}{Environment.NewLine}{Environment.NewLine}Error when updating:{Environment.NewLine}{updateException}";
             
             logger.LogError(message);
-            InformPeople(wts,subject,message);
+            InformPeople(wts, subject, message);
         }
     }
 
@@ -391,7 +391,7 @@ public class UpdateService : IUpdateService
         if (sendEmail)
         {
             var emailMessage = message.Replace(Environment.NewLine, "<br/>");
-            EmailAdministrator(wts.ContactEmail,subject,emailMessage,wts.ServiceName);
+            EmailAdministrator(wts.ContactEmail, subject,emailMessage, wts.ServiceName);
         }
 
         if (sendSlack)
