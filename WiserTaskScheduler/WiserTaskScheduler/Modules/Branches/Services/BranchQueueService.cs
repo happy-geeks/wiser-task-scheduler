@@ -2432,6 +2432,20 @@ WHERE `id` = ?id";
 
                 await UpdateProgressInQueue(databaseConnection, queueId, totalItemsInHistory, true);
 
+                // Check if any ids need to be updated for styledoutput entries.
+                foreach (var oldId  in idMapping[WiserTableNames.WiserStyledOutput])
+                {
+                    var newId = GetMappedId(WiserTableNames.WiserStyledOutput, idMapping, oldId.Key);
+                    if (newId != oldId.Key)
+                    {
+                        // An Id is different and needs to be updated inside the styledoutputs.
+                        foreach (var processingId in idMapping[WiserTableNames.WiserStyledOutput])
+                        {
+                            await ReplaceStyledOutputIdInsideStyledOutput(databaseConnection, processingId.Key, oldId.Key, newId.Value);
+                        }
+                    }
+                }
+                
                 try
                 {
                     // Clear wiser_history in the selected environment, so that next time we can just sync all changes again.
@@ -2532,6 +2546,55 @@ WHERE `id` = ?id";
             databaseConnection.AddParameter("itemsProcessed", itemsProcessed);
             await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET items_processed = ?itemsProcessed WHERE id = ?queueId");
         }
+
+        private static async Task ReplaceStyledOutputIdInsideStyledOutput(IDatabaseConnection databaseConnection,
+            ulong targetStyledOutput, ulong oldId, ulong newId)
+        {
+            var originalDatabase = databaseConnection.ConnectedDatabase;
+
+            // Get current Content
+            var items = await databaseConnection.GetAsync($"""
+                                                           SELECT
+                                                           `format_begin`, `format_item`, `format_end`, `format_empty`
+                                                           FROM `{originalDatabase}`.`{WiserTableNames.WiserStyledOutput}` AS prod
+                                                           WHERE prod.id = {targetStyledOutput}
+                                                           ORDER BY file.id ASC
+                                                           LIMIT 1
+                                                           """);
+            if (items.Rows.Count == 0)
+            {
+                // The Target styledOutput does not exist, no need to update this one.
+                return;
+            }
+
+            var formatBegin = items.Rows[0].Field<string>("format_begin");
+            var formatItem = items.Rows[0].Field<string>("format_item");
+            var formatEnd = items.Rows[0].Field<string>("format_end");
+            var formatEmpty = items.Rows[0].Field<string>("format_empty");
+
+            // Note: Curly Brace needs to be included in search/replace
+            var searchString = "{StyledOutput~" + oldId.ToString();
+            var replaceString = "{StyledOutput~" + newId.ToString();
+
+            formatBegin = formatBegin.Replace(searchString, replaceString);
+            formatItem = formatItem.Replace(searchString, replaceString);
+            formatEnd = formatEnd.Replace(searchString, replaceString);
+            formatEmpty = formatEmpty.Replace(searchString, replaceString);
+
+            await databaseConnection.ExecuteAsync($"""
+                                                   UPDATE {WiserTableNames.WiserStyledOutput}
+                                                   SET
+                                                        format_begin = {formatBegin},
+                                                        format_item = {formatItem},
+                                                        format_end = {formatEnd},
+                                                        format_empty = {formatEmpty}
+                                                   WHERE id = {targetStyledOutput}
+                                                   ORDER BY file.id ASC
+                                                   LIMIT 1
+                                                   """);
+
+        }
+
 
         private static async Task<BranchMergeLinkCacheModel> GetLinkDataAsync(ulong? linkId, Dictionary<string, object> sqlParameters, string tableName, MySqlConnection branchConnection, List<BranchMergeLinkCacheModel> linksCache)
         {
