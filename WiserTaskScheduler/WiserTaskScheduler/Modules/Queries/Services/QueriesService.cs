@@ -140,7 +140,15 @@ namespace WiserTaskScheduler.Modules.Queries.Services
                 if (keyWithSecondLayer != null)
                 {
                     var secondLayerKey = keyWithSecondLayer.Substring(0, keyWithSecondLayer.IndexOf("[j]"));
-                    var secondLayerArray = ResultSetHelper.GetCorrectObject<JArray>($"{query.UseResultSet}[i].{secondLayerKey}", rows, resultSets);
+                    JArray secondLayerArray = null;
+
+                    try
+                    {
+                        secondLayerArray = ResultSetHelper.GetCorrectObject<JArray>($"{query.UseResultSet}[i].{secondLayerKey}", rows, resultSets);
+                    }
+                    catch (ResultSetException)
+                    {
+                    }
 
                     if (secondLayerArray == null)
                     {
