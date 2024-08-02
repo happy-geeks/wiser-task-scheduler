@@ -22,21 +22,21 @@ namespace WiserTaskScheduler.Core.Helpers
             {
                 return usingResultSet as T;
             }
-            
+
             if (usingResultSet == null)
             {
                 throw new ResultSetException($"Failed to get correct object because no result set was given. The key being processed is '{key}', already processed '{processedKey}'. If the key is correct but the value is not always present it is recommended to use a default value.");
             }
-            
+
             var currentPart = "";
-            
+
             try
             {
                 var keyParts = key.Split(".");
                 currentPart = keyParts[0];
 
                 // No next step left, return object as requested type.
-                if (keyParts.Length == 1)
+                if (keyParts.Length == 1 || usingResultSet.ContainsKey(key))
                 {
                     if (!key.EndsWith(']'))
                     {
@@ -61,7 +61,7 @@ namespace WiserTaskScheduler.Core.Helpers
                             return GetCorrectObject<T>(remainingKey, rows, valueAsJObject, $"{processedKey}.{currentPart}");
                     }
                 }
-            
+
                 var index = GetIndex(keyParts, rows);
                 var bracketIndexOf = currentPart.IndexOf('[');
                 var firstPartKey = currentPart;
@@ -89,7 +89,7 @@ namespace WiserTaskScheduler.Core.Helpers
             {
                 var fullKey = $"{processedKey}.{key}";
                 fullKey = fullKey.StartsWith('.') ? fullKey.Substring(1) : fullKey;
-                
+
                 throw new ResultSetException($"Something went wrong while processing the key in the result set. The key being processed is '{fullKey}' at part '{currentPart}'. Already processed '{processedKey}'. If the key is correct but the value is not always present it is recommended to use a default value.", e);
             }
         }
@@ -98,7 +98,7 @@ namespace WiserTaskScheduler.Core.Helpers
         {
             var indexLetter = keyParts[0][keyParts[0].Length - 2];
             var index = 0;
-            
+
             // If an index letter is used get the correct value based on letter, starting from 'i'.
             if (Char.IsLetter(indexLetter))
             {
