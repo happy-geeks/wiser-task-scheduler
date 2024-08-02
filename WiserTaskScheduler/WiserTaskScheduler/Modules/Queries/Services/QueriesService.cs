@@ -5,9 +5,11 @@ using System.Linq;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Helpers;
+using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Helpers;
@@ -26,17 +28,19 @@ namespace WiserTaskScheduler.Modules.Queries.Services
         private readonly ILogService logService;
         private readonly ILogger<QueriesService> logger;
         private readonly IServiceProvider serviceProvider;
+        private readonly GclSettings gclSettings;
 
         private string connectionString;
 
         /// <summary>
         /// Creates a new instance of <see cref="QueriesService"/>.
         /// </summary>
-        public QueriesService(ILogService logService, ILogger<QueriesService> logger, IServiceProvider serviceProvider)
+        public QueriesService(ILogService logService, ILogger<QueriesService> logger, IServiceProvider serviceProvider, IOptions<GclSettings> gclSettings)
         {
             this.logService = logService;
             this.logger = logger;
             this.serviceProvider = serviceProvider;
+            this.gclSettings = gclSettings.Value;
         }
 
         /// <inheritdoc />
@@ -44,11 +48,11 @@ namespace WiserTaskScheduler.Modules.Queries.Services
         {
             connectionString = configuration.ConnectionString;
 
-            if (String.IsNullOrWhiteSpace(connectionString))
+            if (String.IsNullOrWhiteSpace(connectionString) && String.IsNullOrWhiteSpace(gclSettings.ConnectionString))
             {
-                throw new ArgumentException($"Configuration '{configuration.ServiceName}' has no connection string defined but contains active `Query` actions. Please provide a connection string.");
+                throw new ArgumentException($"Configuration '{configuration.ServiceName}' has no connection string defined, but contains active `Query` actions and there is also no connection string in the app settings. Please provide a connection string either in the app settings, or in the WTS configuration.");
             }
-            
+
             return Task.CompletedTask;
         }
 
@@ -57,11 +61,15 @@ namespace WiserTaskScheduler.Modules.Queries.Services
         {
             var query = (QueryModel)action;
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, query.LogSettings, $"Executing query in time id: {query.TimeId}, order: {query.Order}", configurationServiceName, query.TimeId, query.Order);
-            
+
             using var scope = serviceProvider.CreateScope();
             var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
-            await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
+            if (!String.IsNullOrWhiteSpace(connectionString))
+            {
+                await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
+            }
+
             databaseConnection.ClearParameters();
             await databaseConnection.EnsureOpenConnectionForWritingAsync();
             await databaseConnection.EnsureOpenConnectionForReadingAsync();
@@ -72,15 +80,15 @@ namespace WiserTaskScheduler.Modules.Queries.Services
             databaseConnection.AddParameter("collation", query.CharacterEncoding.Collation);
             await databaseConnection.GetAsync("SET NAMES ?characterSet COLLATE ?collation", cleanUp: false);
             databaseConnection.ClearParameters();
-            
+
             if (query.UseTransaction) await databaseConnection.BeginTransactionAsync();
 
             try
             {
                 var result = await Execute(query, databaseConnection, resultSets, configurationServiceName);
-                
+
                 if (!query.UseTransaction) return result;
-                
+
                 await databaseConnection.CommitTransactionAsync();
                 await logService.LogInformation(logger, LogScopes.RunStartAndStop, query.LogSettings, $"Transaction committed in time id: {query.TimeId}, order: {query.Order}", configurationServiceName, query.TimeId, query.Order);
                 return result;
@@ -88,13 +96,13 @@ namespace WiserTaskScheduler.Modules.Queries.Services
             catch
             {
                 if (!query.UseTransaction) throw;
-                
+
                 await databaseConnection.RollbackTransactionAsync();
                 await logService.LogInformation(logger, LogScopes.RunStartAndStop, query.LogSettings, $"Action failed, rolled back transaction in time id: {query.TimeId}, order: {query.Order}", configurationServiceName, query.TimeId, query.Order);
                 throw;
             }
         }
-        
+
         private async Task<JObject> Execute(QueryModel query, IDatabaseConnection databaseConnection, JObject resultSets, string configurationServiceName)
         {
             // If not using a result set execute the query as given.
@@ -155,7 +163,7 @@ namespace WiserTaskScheduler.Modules.Queries.Services
                         await logService.LogWarning(logger, LogScopes.RunBody, query.LogSettings, $"Could not find second layer array with key '{secondLayerKey}' in result set '{query.UseResultSet}' at index '{i}', referring to object:\n{ResultSetHelper.GetCorrectObject<JObject>($"{query.UseResultSet}[i]", rows, resultSets)}", configurationServiceName, query.TimeId, query.Order);
                         continue;
                     }
-                    
+
                     for (var j = 0; j < secondLayerArray.Count; j++)
                     {
                         rows[1] = j;
@@ -200,7 +208,7 @@ namespace WiserTaskScheduler.Modules.Queries.Services
                 {
                     value = StringHelpers.HashValue(value, query.HashSettings);
                 }
-                
+
                 parameters.Add(new KeyValuePair<string, string>(parameterKey.ReplacementKey, value));
             }
 
