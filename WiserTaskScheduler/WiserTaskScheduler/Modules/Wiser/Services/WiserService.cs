@@ -198,6 +198,10 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
         private List<TemplateSettingsModel> FlattenTree(List<TemplateTreeViewModel> templateTrees)
         {
             var results = new List<TemplateSettingsModel>();
+            if (templateTrees == null)
+            {
+                return results;
+            }
 
             foreach (var templateTree in templateTrees)
             {
