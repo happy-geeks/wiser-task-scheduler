@@ -36,6 +36,7 @@ namespace WiserTaskScheduler.Core.Helpers
                 currentPart = keyParts[0];
 
                 // No next step left, return object as requested type.
+                // Or the entire key can be found in the result set (this can happen for properties that contain a dot in the name, such as "@odata.nextpage"),
                 if (keyParts.Length == 1 || usingResultSet.ContainsKey(key))
                 {
                     if (!key.EndsWith(']'))
