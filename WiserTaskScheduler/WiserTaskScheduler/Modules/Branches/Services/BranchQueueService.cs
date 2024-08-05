@@ -334,7 +334,7 @@ FROM (
                 foreach (DataRow dataRow in dataTable.Rows)
                 {
                     var tableName = dataRow.Field<string>("TABLE_NAME");
-                    
+
                     // Skip copying the contents of certain tables if the table should not be copied or only the structure.
                     if (branchQueue.CopyTableRules != null && branchQueue.CopyTableRules.Any(t => (t.CopyType == CopyTypes.Nothing || t.CopyType == CopyTypes.Structure) && (
                             (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
@@ -344,7 +344,7 @@ FROM (
                     {
                         continue;
                     }
-                    
+
                     var bulkCopy = new MySqlBulkCopy((MySqlConnection) branchDatabaseConnection.GetConnectionForWriting()) {DestinationTableName = tableName, ConflictOption = MySqlBulkLoaderConflictOption.Ignore};
 
                     // For Wiser tables, we don't want to copy customer data, so copy everything except data of certain entity types.
@@ -877,7 +877,7 @@ AND EXTRA NOT LIKE '%GENERATED'";
                 foreach (DataRow dataRow in dataTable.Rows)
                 {
                     var tableName = dataRow.Field<string>("EVENT_OBJECT_TABLE");
-                    
+
                     // Check if the structure of the table is excluded from the creation of the branch.
                     if (branchQueue.CopyTableRules != null && branchQueue.CopyTableRules.Any(t => t.CopyType == CopyTypes.Nothing && (
                             (t.TableName.StartsWith('%') && t.TableName.EndsWith('%') && tableName.Contains(t.TableName.Substring(1, t.TableName.Length - 2), StringComparison.OrdinalIgnoreCase))
@@ -887,7 +887,7 @@ AND EXTRA NOT LIKE '%GENERATED'";
                     {
                         continue;
                     }
-                    
+
                     query = $"CREATE TRIGGER `{dataRow.Field<string>("TRIGGER_NAME")}` {dataRow.Field<string>("ACTION_TIMING")} {dataRow.Field<string>("EVENT_MANIPULATION")} ON `{branchDatabase.ToMySqlSafeValue(false)}`.`{dataRow.Field<string>("EVENT_OBJECT_TABLE")}` FOR EACH {dataRow.Field<string>("ACTION_ORIENTATION")} {dataRow.Field<string>("ACTION_STATEMENT")}";
                     await branchDatabaseConnection.ExecuteAsync(query);
                 }
@@ -1009,7 +1009,7 @@ AND EXTRA NOT LIKE '%GENERATED'";
                     SELECT '{tableName}', 0, 0
                 """);
             }
-            
+
             // Add all IDs that have been copied from the production database to the branch database to indicate that they are already mapped in the ID mappings.
             await branchDatabaseConnection.ExecuteAsync($"""
                 INSERT INTO {WiserTableNames.WiserIdMappings} (table_name, our_id, production_id)
@@ -1160,7 +1160,7 @@ AND EXTRA NOT LIKE '%GENERATED'";
                     var originalItemId = Convert.ToUInt64(dataRow["item_id"]);
                     var (tablePrefix, isWiserItemChange) = BranchesHelpers.GetTablePrefix(tableName, originalItemId);
                     var wiserItemTableName = $"{tablePrefix}{WiserTableNames.WiserItem}";
-                    if (isWiserItemChange && originalItemId > 0 && !tablesToLock.Contains(wiserItemTableName))
+                    if (isWiserItemChange && originalItemId > 0 && !tablesToLock.Contains(wiserItemTableName) && !tableName.Contains(WiserTableNames.WiserItemLink))
                     {
                         tablesToLock.Add(wiserItemTableName);
                         tablesToLock.Add($"{wiserItemTableName}{WiserTableNames.ArchiveSuffix}");
@@ -1222,7 +1222,7 @@ AND EXTRA NOT LIKE '%GENERATED'";
                 await LockTablesAsync(productionConnection, tablesToLock, false);
                 await LockTablesAsync(branchConnection, tablesToLock, true);
 
-                // This is to cache some information about items, like the entity type and whether or not the item has been deleted.
+                // This is to cache some information about items, like the entity type and whether the item has been deleted.
                 // By using this, we don't have to look up the entity type of an item multiple times, if an item has multiple changes in the history.
                 // The key is the table prefix and the value is a list with the items that we already looked up.
                 var itemsCache = new Dictionary<string, List<BranchMergeItemCacheModel>>();
@@ -1822,8 +1822,11 @@ AND groupname = ?groupName";
                                                                           WHERE id = ?existingId
                                                                           """;
 
-                                        // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                                        await AddIdMappingAsync(idMapping, itemTableName, originalTargetId, existingId, branchConnection);
+                                        // Map the item detail ID from wiser_history to the ID of the current item detail, locally and in database.
+                                        if (originalTargetId > 0)
+                                        {
+                                            await AddIdMappingAsync(idMapping, tableName, originalTargetId, existingId, branchConnection);
+                                        }
                                     }
                                     else
                                     {
@@ -1835,6 +1838,8 @@ AND groupname = ?groupName";
                                                                           INSERT INTO `{tableName}` (id, language_code, item_id, groupname, `key`, value, long_value)
                                                                           VALUES (?newId, ?languageCode, ?itemId, ?groupName, ?key, ?value, ?longValue)
                                                                           """;
+
+                                        await AddIdMappingAsync(idMapping, tableName, originalTargetId, newItemId, branchConnection);
                                     }
                                 }
 
@@ -1885,7 +1890,7 @@ WHERE id = ?itemId";
                                                                  {queryPrefix}
                                                                  UPDATE `{tableName}` SET `{field.ToMySqlSafeValue(false)}` = ?newValue
                                                                  WHERE id = ?detailId
-                                                                 """;;
+                                                                 """;
 
                                 await productionCommand.ExecuteNonQueryAsync();
 
