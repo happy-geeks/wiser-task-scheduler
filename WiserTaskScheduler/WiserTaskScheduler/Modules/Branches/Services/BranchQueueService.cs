@@ -325,6 +325,7 @@ FROM (
                 // This is used to know which IDs are already synced to the production environment.
                 await branchDatabaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WiserIdMappings});
 
+                // Cache some settings that we'll need later.
                 var allLinkTypes = await wiserItemsService.GetAllLinkTypeSettingsAsync();
 
                 // Fill the tables with data.
@@ -1254,6 +1255,10 @@ AND EXTRA NOT LIKE '%GENERATED'";
                     }
                 }
 
+                // Cache some settings that we'll need later.
+                var allLinkTypeSettings = await wiserItemsService.GetAllLinkTypeSettingsAsync();
+                var allEntityTypeSettings = new Dictionary<string, EntitySettingsModel>();
+
                 // Start synchronising all history items one by one.
                 var historyItemsSynchronised = new List<ulong>();
                 var itemsProcessed = 0;
@@ -1612,7 +1617,7 @@ LIMIT 1";
                             branchCommand.CommandText = "UNLOCK TABLES";
                             await branchCommand.ExecuteNonQueryAsync();
 
-                            linkData = await GetEntityTypesOfLinkAsync(originalItemId, originalDestinationItemId, linkType.Value, branchConnection, wiserItemsService);
+                            linkData = await GetEntityTypesOfLinkAsync(originalItemId, originalDestinationItemId, linkType.Value, branchConnection, wiserItemsService, allLinkTypeSettings, allEntityTypeSettings);
                             if (linkData.HasValue)
                             {
                                 itemTableName = $"{linkData.Value.SourceTablePrefix}{WiserTableNames.WiserItem}";
@@ -2868,20 +2873,35 @@ WHERE `id` = ?id";
         /// <param name="destinationId">The ID of the destination item.</param>
         /// <param name="linkType">The link type number.</param>
         /// <param name="mySqlConnection">The connection to the database.</param>
-        /// <param name="wiserItemsService"></param>
+        /// <param name="wiserItemsService">An instance of the <see cref="IWiserItemsService"/>.</param>
+        /// <param name="allLinkTypeSettings">The list with all link type settings.</param>
+        /// <param name="allEntityTypeSettings">The dictionary with settings for each entity type. This function will add items to this dictionary if they don't exist yet.</param>
         /// <returns>A named tuple with the entity types and table prefixes for both the source and the destination.</returns>
-        private async Task<(string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)?> GetEntityTypesOfLinkAsync(ulong sourceId, ulong destinationId, int linkType, MySqlConnection mySqlConnection, IWiserItemsService wiserItemsService)
+        private async Task<(string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)?> GetEntityTypesOfLinkAsync(ulong sourceId, ulong destinationId, int linkType, MySqlConnection mySqlConnection, IWiserItemsService wiserItemsService, List<LinkSettingsModel> allLinkTypeSettings, Dictionary<string, EntitySettingsModel> allEntityTypeSettings)
         {
-            var allLinkTypeSettings = (await wiserItemsService.GetAllLinkTypeSettingsAsync()).Where(l => l.Type == linkType);
+            var currentLinkTypeSettings = allLinkTypeSettings.Where(l => l.Type == linkType);
             await using var command = mySqlConnection.CreateCommand();
             command.Parameters.AddWithValue("sourceId", sourceId);
             command.Parameters.AddWithValue("destinationId", destinationId);
 
             // It's possible that there are multiple link types that use the same number, so we have to check all of them.
-            foreach (var linkTypeSettings in allLinkTypeSettings)
+            foreach (var linkTypeSettings in currentLinkTypeSettings)
             {
-                var sourceTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkTypeSettings.SourceEntityType);
-                var destinationTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkTypeSettings.DestinationEntityType);
+                // Get settings entity settings from cache if we have them, otherwise get them from database and add to cache.
+                if (!allEntityTypeSettings.TryGetValue(linkTypeSettings.SourceEntityType, out var sourceEntityTypeSettings))
+                {
+                    sourceEntityTypeSettings = await wiserItemsService.GetEntityTypeSettingsAsync(linkTypeSettings.SourceEntityType);
+                    allEntityTypeSettings.Add(linkTypeSettings.SourceEntityType, sourceEntityTypeSettings);
+                }
+                if (!allEntityTypeSettings.TryGetValue(linkTypeSettings.SourceEntityType, out var destinationEntityTypeSettings))
+                {
+                    destinationEntityTypeSettings = await wiserItemsService.GetEntityTypeSettingsAsync(linkTypeSettings.DestinationEntityType);
+                    allEntityTypeSettings.Add(linkTypeSettings.DestinationEntityType, destinationEntityTypeSettings);
+                }
+
+                // Get the table prefixes we need from the entity settings.
+                var sourceTablePrefix = wiserItemsService.GetTablePrefixForEntity(sourceEntityTypeSettings);
+                var destinationTablePrefix = wiserItemsService.GetTablePrefixForEntity(destinationEntityTypeSettings);
 
                 // Check if the source item exists in this table.
                 command.CommandText = $@"SELECT entity_type FROM {sourceTablePrefix}{WiserTableNames.WiserItem} WHERE id = ?sourceId
