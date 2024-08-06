@@ -1839,7 +1839,11 @@ AND groupname = ?groupName";
                                                                           VALUES (?newId, ?languageCode, ?itemId, ?groupName, ?key, ?value, ?longValue)
                                                                           """;
 
-                                        await AddIdMappingAsync(idMapping, tableName, originalTargetId, newItemId, branchConnection);
+                                        // Map the item detail ID from wiser_history to the ID of the current item detail, locally and in database.
+                                        if (originalTargetId > 0)
+                                        {
+                                            await AddIdMappingAsync(idMapping, tableName, originalTargetId, newItemId, branchConnection);
+                                        }
                                     }
                                 }
 
