@@ -22,7 +22,7 @@ namespace WiserTaskScheduler.Core.Services
         private readonly IServiceProvider serviceProvider;
         private readonly ISlackChatService slackChatService;
         private readonly WtsSettings settings;
-        
+
         public LogService(IServiceProvider serviceProvider, ISlackChatService slackChatService, IOptions<WtsSettings> settings)
         {
             this.serviceProvider = serviceProvider;
@@ -63,6 +63,7 @@ namespace WiserTaskScheduler.Core.Services
         /// <inheritdoc />
         public async Task Log<T>(ILogger<T> logger, LogLevel logLevel, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0, List<string> extraValuesToObfuscate = null)
         {
+            logSettings ??= new LogSettings();
             if (logLevel < logSettings.LogMinimumLevel)
             {
                 return;
@@ -99,7 +100,7 @@ namespace WiserTaskScheduler.Core.Services
 #else
                             databaseConnection.AddParameter("isTest", 0);
 #endif
-                            
+
                             await databaseConnection.ExecuteAsync(@$"INSERT INTO {WiserTableNames.WtsLogs} (message, level, scope, source, configuration, time_id, `order`, added_on, is_test)
                                                                     VALUES(?message, ?level, ?scope, ?source, ?configuration, ?timeId, ?order, ?addedOn, ?isTest)");
                         }
@@ -108,17 +109,17 @@ namespace WiserTaskScheduler.Core.Services
                             // If writing to the database fails log its error.
                             logger.Log(logLevel, $"Failed to write log to database due to exception: ${e}");
                         }
-                        
+
                         logger.Log(logLevel, message);
-                        
-                        // log to slack chat service in case configured 
+
+                        // Log to Slack chat service, if Slack logging is enabled.
                         if (logLevel >= logSettings.SlackLogLevel)
                         {
                             var linebreakIndex = message.IndexOf(Environment.NewLine, StringComparison.InvariantCulture);
                             var title = linebreakIndex >= 0 ? message.Substring(0, linebreakIndex) : message;
                             var slackMessage = $@"Server: {Environment.MachineName}
 Log level: {logLevel}
-Configuration : '{configurationName}'
+Configuration: '{configurationName}'
 Time ID: '{timeId}'
 Order: '{order}'
 Message:
@@ -127,8 +128,8 @@ Message:
                             // Generate SHA 256 based on configuration name, time id, order id and message
                             using var sha256 = System.Security.Cryptography.SHA256.Create();
                             var hash = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes($"{configurationName}{timeId}{order}{message}"));
-                            var messageHash = string.Join("", hash.Select(b => b.ToString("x2")));
-                            
+                            var messageHash = String.Join("", hash.Select(b => b.ToString("x2")));
+
                             await slackChatService.SendChannelMessageAsync(slackMessage,new[] { message },  messageHash: messageHash);
                         }
                     }
@@ -136,7 +137,7 @@ Message:
                     {
                         // If writing to the log file fails ignore it. We can't write it somewhere else and the application needs to continue.
                     }
-                    
+
                     break;
                 }
 
@@ -163,7 +164,7 @@ Message:
             {
                 return text;
             }
-            
+
             if (extraValuesToObfuscate != null)
             {
                 foreach (var value in extraValuesToObfuscate)
@@ -171,12 +172,12 @@ Message:
                     text = text.Replace(value, "*****");
                 }
             }
-            
+
             if (settings.Credentials == null)
             {
                 return text;
             }
-            
+
             foreach(var credential in settings.Credentials)
             {
                 text = text.Replace(credential.Value, "*****");
