@@ -2441,7 +2441,7 @@ WHERE `id` = ?id";
                         // An Id is different and needs to be updated inside the styledoutputs.
                         foreach (var processingId in idMapping[WiserTableNames.WiserStyledOutput])
                         {
-                            await ReplaceStyledOutputIdInsideStyledOutput(databaseConnection, processingId.Key, oldId.Key, newId.Value);
+                            await ReplaceStyledOutputIdInsideStyledOutputAsync(databaseConnection, processingId.Key, oldId.Key, newId.Value);
                         }
                     }
                 }
@@ -2547,7 +2547,7 @@ WHERE `id` = ?id";
             await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET items_processed = ?itemsProcessed WHERE id = ?queueId");
         }
 
-        private static async Task ReplaceStyledOutputIdInsideStyledOutput(IDatabaseConnection databaseConnection,
+        private static async Task ReplaceStyledOutputIdInsideStyledOutputAsync(IDatabaseConnection databaseConnection,
             ulong targetStyledOutput, ulong oldId, ulong newId)
         {
             var originalDatabase = databaseConnection.ConnectedDatabase;
@@ -2573,8 +2573,8 @@ WHERE `id` = ?id";
             var formatEmpty = items.Rows[0].Field<string>("format_empty");
 
             // Note: Curly Brace needs to be included in search/replace
-            var searchString = "{StyledOutput~" + oldId.ToString();
-            var replaceString = "{StyledOutput~" + newId.ToString();
+            var searchString = $"{{StyledOutput~{oldId}";
+            var replaceString = $"{{StyledOutput~{newId}";
 
             formatBegin = formatBegin.Replace(searchString, replaceString);
             formatItem = formatItem.Replace(searchString, replaceString);
@@ -2594,7 +2594,6 @@ WHERE `id` = ?id";
                                                    """);
 
         }
-
 
         private static async Task<BranchMergeLinkCacheModel> GetLinkDataAsync(ulong? linkId, Dictionary<string, object> sqlParameters, string tableName, MySqlConnection branchConnection, List<BranchMergeLinkCacheModel> linksCache)
         {
