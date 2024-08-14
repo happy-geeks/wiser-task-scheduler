@@ -1039,7 +1039,8 @@ AND EXTRA NOT LIKE '%GENERATED'";
             var result = new JObject
             {
                 {"SuccessfulChanges", 0},
-                {"Errors", errors}
+                {"Errors", errors},
+                {"Success", false}
             };
 
             // Make sure the queue table is up-to-date.
@@ -2619,6 +2620,7 @@ WHERE `id` = ?id";
 
             await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, errors, stopwatch, startDate, branchQueue.MergedBranchTemplateId, MergeBranchSubject, MergeBranchTemplate);
 
+            result["Success"] = !errors.Any();
             return result;
         }
 
