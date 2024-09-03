@@ -122,7 +122,15 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
                 var response = await client.SendAsync(request);
                 if (response.StatusCode != HttpStatusCode.OK)
                 {
-                    await logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to login to the Wiser API.", "WiserService");
+                    // If we are trying to refresh the token and it fails, we need to login with credentials again.
+                    if (!useRefreshToken)
+                    {
+                        await logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, "Failed to login to the Wiser API.", "WiserService");
+                        return;
+                    }
+
+                    await logService.LogWarning(logger, LogScopes.StartAndStop, logSettings, "Failed to refresh the access token. Will try to login with credentials again.", "WiserService");
+                    await LoginAsync();
                     return;
                 }
 
