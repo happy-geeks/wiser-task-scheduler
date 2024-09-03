@@ -138,6 +138,12 @@ namespace WiserTaskScheduler.Modules.Queries.Services
 
             // Perform the query for each row in the result set that is being used.
             var usingResultSet = ResultSetHelper.GetCorrectObject<JArray>(query.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
+
+            if (usingResultSet == null)
+            {
+                throw new ResultSetException($"Failed to find an array at key '{query.UseResultSet}' in result sets to loop over for replacements in the query.");
+            }
+            
             var rows = new List<int> {0, 0};
             var keyWithSecondLayer = parameterKeys.FirstOrDefault(parameterKey => parameterKey.Key.Contains("[j]"))?.Key;
             for (var i = 0; i < usingResultSet.Count; i++)
