@@ -147,7 +147,7 @@ namespace WiserTaskScheduler.Core.Services
             }
             catch (InvalidOperationException e)
             {
-                await logService.LogError(logger, LogScopes.StartAndStop, LogSettings, $"Could not parse OAuth configuration due to exception {e}", "OAuth");
+                await logService.LogCritical(logger, LogScopes.StartAndStop, LogSettings, $"Could not parse OAuth configuration due to exception {e}", "OAuth");
                 await errorNotificationService.NotifyOfErrorByEmailAsync(wtsSettings.ServiceFailedNotificationEmails, $"OAuth configuration of '{wtsSettings.Name}' could not be parsed.", $"Wiser Task Scheduler '{wtsSettings.Name}' could not parse OAuth configuration. Please check the logs for more details.", LogSettings, LogScopes.StartAndStop, "OAuth");
             }
 
@@ -234,6 +234,14 @@ namespace WiserTaskScheduler.Core.Services
                 {
                     return null;
                 }
+                
+                var numberOfOAuthConfigurations = wiserConfigurations.Count(configuration => !String.IsNullOrWhiteSpace(configuration.EditorValue) && configuration.EditorValue.StartsWith("<OAuthConfiguration>"));
+                if (numberOfOAuthConfigurations > 1)
+                {
+                    await logService.LogCritical(logger, LogScopes.StartAndStop, LogSettings, $"Found {numberOfOAuthConfigurations} OAuth configurations. Only one is allowed.", LogName);
+                    await errorNotificationService.NotifyOfErrorByEmailAsync(wtsSettings.ServiceFailedNotificationEmails, $"Found {numberOfOAuthConfigurations} OAuth configurations. Only one is allowed.", $"Wiser Task Scheduler '{wtsSettings.Name}' found {numberOfOAuthConfigurations} OAuth configurations. Only one is allowed. Please check the logs for more details.", LogSettings, LogScopes.StartAndStop, LogName);
+                    return null;
+                }
 
                 foreach (var wiserConfiguration in wiserConfigurations)
                 {
@@ -269,7 +277,7 @@ namespace WiserTaskScheduler.Core.Services
                     }
                     catch (InvalidOperationException e)
                     {
-                        await logService.LogError(logger, LogScopes.StartAndStop, LogSettings, $"Could not parse configuration {wiserConfiguration.Name} due to exception {e}", wiserConfiguration.Name);
+                        await logService.LogCritical(logger, LogScopes.StartAndStop, LogSettings, $"Could not parse configuration {wiserConfiguration.Name} due to exception {e}", wiserConfiguration.Name);
                         await errorNotificationService.NotifyOfErrorByEmailAsync(wtsSettings.ServiceFailedNotificationEmails, $"Configuration '{wiserConfiguration.Name}' of '{wtsSettings.Name}' could not be parsed.", $"Wiser Task Scheduler '{wtsSettings.Name}' could not parse configuration '{wiserConfiguration.Name}'. Please check the logs for more details.", LogSettings, LogScopes.StartAndStop, wiserConfiguration.Name);
                     }
 
