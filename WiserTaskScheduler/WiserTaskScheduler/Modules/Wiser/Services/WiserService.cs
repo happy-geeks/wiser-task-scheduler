@@ -120,6 +120,13 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
             try
             {
                 var response = await client.SendAsync(request);
+                
+                if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
+                {
+                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configuration because Wiser is unavailable. This is likely due to an ongoing update.", "WiserService");
+                    return;
+                }
+
                 if (response.StatusCode != HttpStatusCode.OK)
                 {
                     // If we are trying to refresh the token and it fails, we need to login with credentials again.
@@ -186,7 +193,6 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
                         await logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.{Environment.NewLine}{Environment.NewLine}The Wiser API returned the following error:{Environment.NewLine}{body}", "WiserService");
                         return null;
                     }
-                    
 
                     var templateTrees = JsonConvert.DeserializeObject<List<TemplateTreeViewModel>>(body);
 
