@@ -123,7 +123,7 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
                 
                 if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
                 {
-                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configuration because Wiser is unavailable. This is likely due to an ongoing update.", "WiserService");
+                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, logSettings, "Failed to login because Wiser is unavailable. This is likely due to an ongoing update.", "WiserService");
                     return;
                 }
 
