@@ -171,6 +171,12 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
                     request.Headers.Add("Authorization", $"Bearer {await GetAccessTokenAsync()}");
 
                     var response = await client.SendAsync(request);
+                    
+                    if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
+                    {
+                        await logService.LogInformation(logger, LogScopes.RunStartAndStop, logSettings, "Failed to get configuration because Wiser is unavailable. This is likely due to an ongoing update.", "WiserService");
+                        return null;
+                    } 
 
                     using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
                     var body = await reader.ReadToEndAsync();
@@ -180,14 +186,7 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
                         await logService.LogCritical(logger, LogScopes.RunStartAndStop, logSettings, $"Failed to get configurations from the Wiser API.{Environment.NewLine}{Environment.NewLine}The Wiser API returned the following error:{Environment.NewLine}{body}", "WiserService");
                         return null;
                     }
-
-                    // The call to wiser configuration responds with an html document when Wiser is updating
-                    // We check for both html tag and doctype so this document is more free to change
-                    if (body.StartsWith("<html", StringComparison.InvariantCultureIgnoreCase) || body.StartsWith("<!DOCTYPE html", StringComparison.InvariantCultureIgnoreCase))
-                    {
-                        await logService.LogInformation(logger, LogScopes.RunStartAndStop, logSettings, "Unable to get configuration due to Wiser update.", "WiserService");
-                        return null;
-                    }
+                    
 
                     var templateTrees = JsonConvert.DeserializeObject<List<TemplateTreeViewModel>>(body);
 
