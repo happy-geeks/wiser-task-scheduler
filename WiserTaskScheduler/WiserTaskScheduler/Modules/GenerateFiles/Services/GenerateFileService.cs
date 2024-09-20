@@ -85,6 +85,11 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
 
             var rows = ResultSetHelper.GetCorrectObject<JArray>(generateFile.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
 
+            if (rows == null)
+            {
+                throw new ResultSetException($"Failed to find an array at key '{generateFile.UseResultSet}' in result sets to loop over for generating multiple files.");
+            }
+            
             var indexRows = new List<int> { 0 };
             for (var i = 0; i < rows.Count; i++)
             {
