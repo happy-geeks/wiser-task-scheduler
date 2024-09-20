@@ -392,6 +392,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    }
 		    
 		    databaseConnection.AddParameter("attempt_count", email.AttemptCount);
+		    databaseConnection.AddParameter("last_attempt", DateTime.Now);
 			databaseConnection.AddParameter("status_code", statusCode);
 			databaseConnection.AddParameter("status_message", statusMessage);
 		    await databaseConnection.InsertOrUpdateRecordBasedOnParametersAsync(WiserTableNames.WiserCommunicationGenerated, email.Id);
@@ -460,6 +461,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    }
 
 		    databaseConnection.AddParameter("attempt_count", sms.AttemptCount);
+		    databaseConnection.AddParameter("last_attempt", DateTime.Now);
 		    databaseConnection.AddParameter("status_code", statusCode);
 		    databaseConnection.AddParameter("status_message", statusMessage);
 		    await databaseConnection.InsertOrUpdateRecordBasedOnParametersAsync(WiserTableNames.WiserCommunicationGenerated, sms.Id);
@@ -522,6 +524,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
             }
 
             databaseConnection.AddParameter("attempt_count", whatsApp.AttemptCount);
+            databaseConnection.AddParameter("last_attempt", DateTime.Now);
             databaseConnection.AddParameter("status_code", statusCode);
             databaseConnection.AddParameter("status_message", statusMessage);
             await databaseConnection.InsertOrUpdateRecordBasedOnParametersAsync(WiserTableNames.WiserCommunicationGenerated, whatsApp.Id);
