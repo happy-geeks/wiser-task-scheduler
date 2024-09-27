@@ -1,4 +1,3 @@
-using System.ComponentModel.DataAnnotations;
 using System.Xml.Serialization;
 using WiserTaskScheduler.Core.Models;
 

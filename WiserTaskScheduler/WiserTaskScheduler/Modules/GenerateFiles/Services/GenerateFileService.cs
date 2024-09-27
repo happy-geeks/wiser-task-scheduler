@@ -1,17 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 using EvoPdf;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
-using GeeksCoreLibrary.Core.Services;
 using GeeksCoreLibrary.Modules.GclConverters.Models;
-using GeeksCoreLibrary.Modules.ItemFiles;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -109,6 +105,9 @@ namespace WiserTaskScheduler.Modules.GenerateFiles.Services
         /// <param name="generateFile">The information for the file to be generated.</param>
         /// <param name="rows">The indexes/rows of the array, passed to be used if '[i]' is used in the key.</param>
         /// <param name="resultSets">The result sets from previous actions in the same run.</param>
+        /// <param name="configurationServiceName">The name of the configuration that is being executed.</param>
+        /// <param name="useResultSet">The path/key to the result set that needs to be used.</param>
+        /// <param name="forcedIndex">The index a body part uses if it is set to use the forced index.</param>
         /// <returns></returns>
         private async Task<JObject> GenerateFile(GenerateFileModel generateFile, List<int> rows, JObject resultSets, string configurationServiceName, string useResultSet, int forcedIndex = -1)
         {

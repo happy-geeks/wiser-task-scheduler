@@ -11,9 +11,6 @@ using Microsoft.Extensions.Options;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
-using SlackNet;
-using SlackNet.WebApi;
-using WiserTaskScheduler.Modules.Wiser.Models;
 
 namespace WiserTaskScheduler.Core.Services
 {

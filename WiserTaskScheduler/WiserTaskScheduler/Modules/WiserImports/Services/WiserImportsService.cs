@@ -8,9 +8,7 @@ using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
-using GeeksCoreLibrary.Modules.Communication.Interfaces;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
-using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
 using GeeksCoreLibrary.Modules.Imports.Models;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection;
@@ -416,6 +414,7 @@ ORDER BY added_on ASC");
     /// <param name="usernameForLogs">The username to use for the logs in Wiser.</param>
     /// <param name="importRow">The information of the import itself.</param>
     /// <param name="configurationServiceName">The name of the configuration the import is executed within.</param>
+    /// <param name="entityType">The entity type of the imported items to clean up links for.</param>
     private async Task CleanupLinks(WiserImportModel wiserImport, IDatabaseConnection databaseConnection, IWiserItemsService wiserItemsService, List<string> errors, Dictionary<int, Dictionary<ulong, List<ulong>>> destinationLinksToKeep, Dictionary<int, Dictionary<ulong, List<ulong>>> itemParentIdsToKeep, Dictionary<int, Dictionary<ulong, List<ulong>>> sourceLinksToKeep, string usernameForLogs, ImportRowModel importRow, string configurationServiceName, string entityType)
     {
         foreach (var destinationLink in destinationLinksToKeep)

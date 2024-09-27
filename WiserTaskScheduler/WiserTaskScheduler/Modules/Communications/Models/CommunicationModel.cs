@@ -1,5 +1,4 @@
 ﻿using System.Xml.Serialization;
-using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Communication.Enums;
 using GeeksCoreLibrary.Modules.Communication.Models;
 using WiserTaskScheduler.Core.Models;

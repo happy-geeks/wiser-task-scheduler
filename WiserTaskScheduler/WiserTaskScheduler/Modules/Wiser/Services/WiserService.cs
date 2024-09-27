@@ -84,7 +84,7 @@ namespace WiserTaskScheduler.Modules.Wiser.Services
         /// <summary>
         /// DO NOT CALL THIS BY YOURSELF!
         /// Login to the Wiser API.
-        /// This method is called when using <see cref="AccessToken"/> or <see cref="GetAccessTokenAsync"/> with a lock.
+        /// This method is called when using <see cref="accessToken"/> or <see cref="GetAccessTokenAsync"/> with a lock.
         /// </summary>
         private async Task LoginAsync(bool useRefreshToken = false)
         {

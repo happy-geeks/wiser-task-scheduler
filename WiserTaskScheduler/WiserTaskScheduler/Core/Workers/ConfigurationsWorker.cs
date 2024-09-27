@@ -11,7 +11,6 @@ namespace WiserTaskScheduler.Core.Workers
     /// </summary>
     public class ConfigurationsWorker : BaseWorker
     {
-        private readonly ILogger<ConfigurationsWorker> logger;
         private readonly IConfigurationsService configurationsService;
         
         public ConfigurationModel Configuration { get; private set; }
@@ -20,12 +19,10 @@ namespace WiserTaskScheduler.Core.Workers
         /// <summary>
         /// Creates a new instance of <see cref="ConfigurationsWorker"/>.
         /// </summary>
-        /// <param name="logger"></param>
-        /// <param name="configurationsService"></param>
-        /// <param name="baseWorkerDependencyAggregate"></param>
-        public ConfigurationsWorker(ILogger<ConfigurationsWorker> logger, IConfigurationsService configurationsService, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
+        /// <param name="configurationsService">The service to handle configurations.</param>
+        /// <param name="baseWorkerDependencyAggregate">The aggregate containing the dependencies needed by the <see cref="BaseWorker"/>.</param>
+        public ConfigurationsWorker(IConfigurationsService configurationsService, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
         {
-            this.logger = logger;
             this.configurationsService = configurationsService;
         }
 

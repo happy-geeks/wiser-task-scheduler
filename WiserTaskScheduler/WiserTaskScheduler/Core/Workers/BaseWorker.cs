@@ -48,7 +48,7 @@ namespace WiserTaskScheduler.Core.Workers
         /// <summary>
         /// Creates a new instance of <see cref="BaseWorker"/>.
         /// </summary>
-        /// <param name="baseWorkerDependencyAggregate"></param>
+        /// <param name="baseWorkerDependencyAggregate">The aggregate containing the dependencies needed by the <see cref="BaseWorker"/>.</param>
         protected BaseWorker(IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate)
         {
             logService = baseWorkerDependencyAggregate.LogService;
@@ -72,7 +72,7 @@ namespace WiserTaskScheduler.Core.Workers
             if (!String.IsNullOrWhiteSpace(Name))
                 return;
 
-            Name = $"{name} ({Environment.MachineName})";;
+            Name = $"{name} ({Environment.MachineName})";
             RunScheme = runScheme;
             RunImmediately = runImmediately;
             ConfigurationName = configurationName;

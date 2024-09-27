@@ -11,22 +11,19 @@ namespace WiserTaskScheduler.Core.Workers
         private const string LogName = "CleanupService";
 
         private readonly ICleanupService cleanupService;
-        private readonly ILogger<CleanupWorker> logger;
 
         /// <summary>
         /// Creates a new instance of <see cref="CleanupWorker"/>.
         /// </summary>
         /// <param name="wtsSettings">The settings of the WTS for the run scheme.</param>
-        /// <param name="cleanupService"></param>
-        /// <param name="logger"></param>
-        /// <param name="baseWorkerDependencyAggregate"></param>
-        public CleanupWorker(IOptions<WtsSettings> wtsSettings, ICleanupService cleanupService, ILogger<CleanupWorker> logger, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
+        /// <param name="cleanupService">The service to handle the clean up for the WTS.</param>
+        /// <param name="baseWorkerDependencyAggregate">The aggregate containing the dependencies needed by the <see cref="BaseWorker"/>.</param>
+        public CleanupWorker(IOptions<WtsSettings> wtsSettings, ICleanupService cleanupService, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
         {
             Initialize(LogName, wtsSettings.Value.CleanupService.RunScheme, wtsSettings.Value.ServiceFailedNotificationEmails, true);
             RunScheme.LogSettings ??= new LogSettings();
 
             this.cleanupService = cleanupService;
-            this.logger = logger;
 
             this.cleanupService.LogSettings = RunScheme.LogSettings;
         }

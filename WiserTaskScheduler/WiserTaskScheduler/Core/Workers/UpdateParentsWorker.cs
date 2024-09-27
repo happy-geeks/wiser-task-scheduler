@@ -11,22 +11,19 @@ namespace WiserTaskScheduler.Core.Workers
         private const string LogName = "ParentUpdateService";
 
         private readonly IParentUpdateService parentUpdateService;
-        private readonly ILogger<UpdateParentsWorker> logger;
 
         /// <summary>
         /// Creates a new instance of <see cref="UpdateParentsWorker"/>.
         /// </summary>
         /// <param name="wtsSettings">The settings of the WTS for the run scheme.</param>
-        /// <param name="parentUpdateService"></param>
-        /// <param name="logger"></param>
-        /// <param name="baseWorkerDependencyAggregate"></param>
-        public UpdateParentsWorker(IOptions<WtsSettings> wtsSettings, IParentUpdateService parentUpdateService, ILogger<UpdateParentsWorker> logger, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
+        /// <param name="parentUpdateService">The service to handle updating the changed information of the item.</param>
+        /// <param name="baseWorkerDependencyAggregate">The aggregate containing the dependencies needed by the <see cref="BaseWorker"/>.</param>
+        public UpdateParentsWorker(IOptions<WtsSettings> wtsSettings, IParentUpdateService parentUpdateService, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
         {
             Initialize(LogName, wtsSettings.Value.ParentsUpdateService.RunScheme, wtsSettings.Value.ServiceFailedNotificationEmails, true);
             RunScheme.LogSettings = wtsSettings.Value.ParentsUpdateService.LogSettings;
 
             this.parentUpdateService = parentUpdateService;
-            this.logger = logger;
 
             this.parentUpdateService.LogSettings = RunScheme.LogSettings;
         }

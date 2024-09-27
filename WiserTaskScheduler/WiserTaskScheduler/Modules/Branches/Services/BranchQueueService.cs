@@ -2798,6 +2798,7 @@ WHERE `id` = ?id";
         /// <param name="databaseConnection">The <see cref="IDatabaseConnection"/> with the connection to the database.</param>
         /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> for checking if a table exists, creating new tables etc.</param>
         /// <param name="wiserItemsService">The <see cref="IWiserItemsService"/> for getting settings of entity types and for (un)deleting items.</param>
+        /// <param name="taskAlertsService">Service to send task alerts to an user.</param>
         /// <returns>An <see cref="JObject"/> with properties "Success" and "ErrorMessage".</returns>
         /// <exception cref="ArgumentOutOfRangeException">Then we get unknown options in enums.</exception>
         private async Task<JToken> HandleDeleteBranchActionAsync(DataRow dataRowWithSettings, BranchQueueModel branchQueue, string configurationServiceName, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService, ITaskAlertsService taskAlertsService)

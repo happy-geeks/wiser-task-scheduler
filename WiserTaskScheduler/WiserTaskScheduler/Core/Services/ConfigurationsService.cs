@@ -49,10 +49,11 @@ namespace WiserTaskScheduler.Core.Services
         /// Creates a new instance of <see cref="ConfigurationsService"/>.
         /// </summary>
         /// <param name="logService">The service to use for logging.</param>
-        /// <param name="logger"></param>
-        /// <param name="actionsServiceFactory"></param>
-        /// <param name="errorNotificationService"></param>
-        /// <param name="databaseHelpersService"></param>
+        /// <param name="logger">The logger to use for logging.</param>
+        /// <param name="actionsServiceFactory">The factory to get the correct service per action type.</param>
+        /// <param name="errorNotificationService">Service to handle error notifications on errors.</param>
+        /// <param name="databaseHelpersService">Helper for database actions.</param>
+        /// <param name="wtsSettings">The settings of the WTS.</param>
         public ConfigurationsService(ILogService logService, ILogger<ConfigurationsService> logger, IActionsServiceFactory actionsServiceFactory, IErrorNotificationService errorNotificationService, IDatabaseHelpersService databaseHelpersService, IOptions<WtsSettings> wtsSettings)
         {
             this.logService = logService;
@@ -181,14 +182,14 @@ namespace WiserTaskScheduler.Core.Services
             // Check for duplicate order in a single time id.
             var allActions = GetAllActionsFromConfiguration(configuration);
 
-            foreach (var timeId in runSchemeTimeIds)
+            foreach (var runSchemeTimeId in runSchemeTimeIds)
             {
-                var duplicateOrders = allActions.Where(action => action.TimeId == timeId).GroupBy(action => action.Order).Where(action => action.Count() > 1).Select(action => action.Key).ToList();
+                var duplicateOrders = allActions.Where(action => action.TimeId == runSchemeTimeId).GroupBy(action => action.Order).Where(action => action.Count() > 1).Select(action => action.Key).ToList();
 
                 if (duplicateOrders.Count > 0)
                 {
                     conflicts++;
-                    await logService.LogError(logger, LogScopes.StartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate orders within run scheme {timeId}. Orders: {String.Join(", ", duplicateOrders)}", configuration.ServiceName, timeId);
+                    await logService.LogError(logger, LogScopes.StartAndStop, LogSettings, $"Configuration '{configuration.ServiceName}' has duplicate orders within run scheme {runSchemeTimeId}. Orders: {String.Join(", ", duplicateOrders)}", configuration.ServiceName, runSchemeTimeId);
                 }
             }
 

@@ -27,26 +27,24 @@ namespace WiserTaskScheduler.Core.Services
         private readonly IServiceProvider serviceProvider;
         private readonly ILogService logService;
         private readonly ILogger<ParentUpdateService> logger;
-        private readonly IBranchesService branchesService;
 
-        private bool updatedParentUpdatesTable = false;
-        private bool updatedTargetDatabaseList = false;
+        private bool updatedParentUpdatesTable;
+        private bool updatedTargetDatabaseList;
 
         // Database strings used to target other dbs in the same cluster.
         private readonly List<ParentUpdateDatabaseStrings> targetDatabases = [];
 
-        private int runCounter = 0;
+        private int runCounter;
 
         /// <inheritdoc />
         public LogSettings LogSettings { get; set; }
 
-        public ParentUpdateService(IOptions<WtsSettings> wtsSettings, IServiceProvider serviceProvider, ILogService logService, ILogger<ParentUpdateService> logger, IBranchesService branchesService)
+        public ParentUpdateService(IOptions<WtsSettings> wtsSettings, IServiceProvider serviceProvider, ILogService logService, ILogger<ParentUpdateService> logger)
         {
             parentsUpdateServiceSettings = wtsSettings.Value.ParentsUpdateService;
             this.serviceProvider = serviceProvider;
             this.logService = logService;
             this.logger = logger;
-            this.branchesService = branchesService;
         }
 
         /// <inheritdoc />

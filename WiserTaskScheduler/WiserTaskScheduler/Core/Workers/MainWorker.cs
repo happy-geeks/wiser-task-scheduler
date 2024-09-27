@@ -5,7 +5,6 @@ using Microsoft.Extensions.Options;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
-using WiserTaskScheduler.Core.Services;
 using Environment = System.Environment;
 
 namespace WiserTaskScheduler.Core.Workers
@@ -26,10 +25,11 @@ namespace WiserTaskScheduler.Core.Workers
         /// Creates a new instance of <see cref="MainWorker"/>.
         /// </summary>
         /// <param name="wtsSettings">The settings of the WTS for the run scheme.</param>
-        /// <param name="mainService"></param>
+        /// <param name="mainService">The main service to handle the main functionality of the WTS.</param>
+        /// <param name="slackChatService">The service for sending updates to a Slack channel.</param>
         /// <param name="logService">The service to use for logging.</param>
-        /// <param name="logger"></param>
-        /// <param name="baseWorkerDependencyAggregate"></param>
+        /// <param name="logger">The logger to use for logging.</param>
+        /// <param name="baseWorkerDependencyAggregate">The aggregate containing the dependencies needed by the <see cref="BaseWorker"/>.</param>
         public MainWorker(IOptions<WtsSettings> wtsSettings, IMainService mainService, ISlackChatService slackChatService, ILogService logService, ILogger<MainWorker> logger, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
         {
             Initialize(LogName, wtsSettings.Value.MainService.RunScheme, wtsSettings.Value.ServiceFailedNotificationEmails, true);
