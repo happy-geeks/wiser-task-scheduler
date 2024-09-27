@@ -163,7 +163,8 @@ namespace WiserTaskScheduler.Core.Services
         {
             databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStoreWtsServices));
 
-            var query = $"DELETE FROM {WiserTableNames.WtsServices} WHERE last_run < ?cleanupDate";
+            // Use the next_run column to determine if a service is older than the cleanup date to prevent paused and longer run schemes from being deleted.
+            var query = $"DELETE FROM {WiserTableNames.WtsServices} WHERE next_run < ?cleanupDate";
             var rowsDeleted = await databaseConnection.ExecuteAsync(query, cleanUp: true);
             
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WtsServices}'.", LogName);
