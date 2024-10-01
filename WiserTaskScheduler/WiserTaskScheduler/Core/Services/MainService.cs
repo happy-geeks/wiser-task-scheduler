@@ -29,7 +29,7 @@ namespace WiserTaskScheduler.Core.Services
     /// </summary>
     public class MainService : IMainService, ISingletonService
     {
-        private const string LogName = "MainService";
+        private readonly string logName;
 
         private readonly WtsSettings wtsSettings;
         private readonly GclSettings gclSettings;
@@ -65,6 +65,7 @@ namespace WiserTaskScheduler.Core.Services
             this.logger = logger;
             this.errorNotificationService = errorNotificationService;
 
+            logName = $"MainService ({Environment.MachineName})";
             activeConfigurations = new ConcurrentDictionary<string, ActiveConfigurationModel>();
         }
 
@@ -214,7 +215,7 @@ namespace WiserTaskScheduler.Core.Services
                 configurationStopTasks[i].worker.Dispose();
 
                 await logService.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"Stopped configuration {configurationStopTasks[i].worker.Configuration.ServiceName} with time ID {configurationStopTasks[i].worker.RunScheme.TimeId}.", configurationStopTasks[i].worker.Configuration.ServiceName, configurationStopTasks[i].worker.RunScheme.TimeId);
-                await logService.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.", LogName);
+                await logService.LogInformation(logger, LogScopes.StartAndStop, LogSettings, $"Stopped {i + 1}/{configurationStopTasks.Count} configurations workers.", logName);
             }
         }
 
@@ -238,8 +239,8 @@ namespace WiserTaskScheduler.Core.Services
                 var numberOfOAuthConfigurations = wiserConfigurations.Count(configuration => !String.IsNullOrWhiteSpace(configuration.EditorValue) && configuration.EditorValue.StartsWith("<OAuthConfiguration>"));
                 if (numberOfOAuthConfigurations > 1)
                 {
-                    await logService.LogCritical(logger, LogScopes.StartAndStop, LogSettings, $"Found {numberOfOAuthConfigurations} OAuth configurations. Only one is allowed.", LogName);
-                    await errorNotificationService.NotifyOfErrorByEmailAsync(wtsSettings.ServiceFailedNotificationEmails, $"Found {numberOfOAuthConfigurations} OAuth configurations. Only one is allowed.", $"Wiser Task Scheduler '{wtsSettings.Name}' found {numberOfOAuthConfigurations} OAuth configurations. Only one is allowed. Please check the logs for more details.", LogSettings, LogScopes.StartAndStop, LogName);
+                    await logService.LogCritical(logger, LogScopes.StartAndStop, LogSettings, $"Found {numberOfOAuthConfigurations} OAuth configurations. Only one is allowed.", logName);
+                    await errorNotificationService.NotifyOfErrorByEmailAsync(wtsSettings.ServiceFailedNotificationEmails, $"Found {numberOfOAuthConfigurations} OAuth configurations. Only one is allowed.", $"Wiser Task Scheduler '{wtsSettings.Name}' found {numberOfOAuthConfigurations} OAuth configurations. Only one is allowed. Please check the logs for more details.", LogSettings, LogScopes.StartAndStop, logName);
                     return null;
                 }
 

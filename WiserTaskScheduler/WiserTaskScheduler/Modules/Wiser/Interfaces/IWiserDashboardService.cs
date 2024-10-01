@@ -49,15 +49,6 @@ public interface IWiserDashboardService
     Task<bool> UpdateServiceAsync(string configuration, int timeId, string action = null, string scheme = null, DateTime? lastRun = null, DateTime? nextRun = null, TimeSpan? runTime = null, string state = null, bool? paused = null, bool? extraRun = null, int templateId = -1);
 
     /// <summary>
-    /// Get the unique states that logs have been written to since a certain time for a run scheme.
-    /// </summary>
-    /// <param name="configuration">The name of the configuration.</param>
-    /// <param name="timeId">The time ID of the run scheme.</param>
-    /// <param name="runStartTime">The datetime the run scheme started.</param>
-    /// <returns>A list with all unique result states</returns>
-    Task<List<string>> GetLogStatesFromLastRun(string configuration, int timeId, DateTime runStartTime);
-
-    /// <summary>
     /// Check if the service is paused.
     /// </summary>
     /// <param name="configuration">The name of the configuration.</param>

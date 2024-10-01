@@ -155,19 +155,22 @@ namespace WiserTaskScheduler.Core.Workers
                             }
                             else
                             {
-                                var states = await wiserDashboardService.GetLogStatesFromLastRun(ConfigurationName ?? Name, RunScheme.TimeId, runStartTime);
-                                if (states == null) // Exception occurred in getting states.
+                                var logStateFromLastRun = logService.GetLogLevelOfService(ConfigurationName ?? Name, RunScheme.TimeId).ToString();
+                                if (logStateFromLastRun.Equals("None", StringComparison.OrdinalIgnoreCase))
                                 {
                                     state = "unknown";
                                 }
-                                else if (states.Contains("Critical", StringComparer.OrdinalIgnoreCase) || states.Contains("Error", StringComparer.OrdinalIgnoreCase))
+                                else if (logStateFromLastRun.Equals("Critical", StringComparison.OrdinalIgnoreCase) || logStateFromLastRun.Equals("Error", StringComparison.OrdinalIgnoreCase))
                                 {
                                     state = "failed";
                                 }
-                                else if (states.Contains("Warning", StringComparer.OrdinalIgnoreCase))
+                                else if (logStateFromLastRun.Equals("Warning", StringComparison.OrdinalIgnoreCase))
                                 {
                                     state = "warning";
                                 }
+                                
+                                // Clear the log level of the service after the run to prevent an old state from being used.
+                                logService.ClearLogLevelOfService(ConfigurationName ?? Name, RunScheme.TimeId);
                             }
 
                             // If storing the state of this run fails, the state will stay on "running", which will prevent any future runs, so keep track of the success.

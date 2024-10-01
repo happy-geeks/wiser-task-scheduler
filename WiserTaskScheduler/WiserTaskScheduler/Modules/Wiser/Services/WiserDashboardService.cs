@@ -217,38 +217,6 @@ FROM {WiserTableNames.WtsServices}
     }
 
     /// <inheritdoc />
-    public async Task<List<string>> GetLogStatesFromLastRun(string configuration, int timeId, DateTime runStartTime)
-    {
-        var states = new List<string>();
-        try
-        {
-            using var scope = serviceProvider.CreateScope();
-            await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
-
-            databaseConnection.AddParameter("runStartTime", runStartTime.ToString("yyyy-MM-dd HH:mm:ss")); // Format to remove milliseconds.
-            databaseConnection.AddParameter("configuration", configuration);
-            databaseConnection.AddParameter("timeId", timeId);
-        
-            var data = await databaseConnection.GetAsync($@"SELECT DISTINCT level
-FROM {WiserTableNames.WtsLogs}
-WHERE added_on >= ?runStartTime
-AND configuration = ?configuration
-AND time_id = ?timeId");
-
-            foreach (DataRow row in data.Rows)
-            {
-                states.Add(row.Field<string>("level"));
-            }
-        }
-        catch (Exception e)
-        {
-            await logService.LogError(logger, LogScopes.RunBody, logSettings, $"{configuration} failed getting log states with exception {e}", configuration, timeId);
-            return null;
-        }
-        return states;
-    }
-
-    /// <inheritdoc />
     public async Task<bool?> IsServicePaused(string configuration, int timeId)
     {
         try

@@ -21,7 +21,7 @@ namespace WiserTaskScheduler.Core.Services
     /// </summary>
     public class CleanupService : ICleanupService, ISingletonService
     {
-        private const string LogName = "CleanupService";
+        private readonly string logName;
 
         private readonly CleanupServiceSettings cleanupServiceSettings;
         private readonly IServiceProvider serviceProvider;
@@ -37,6 +37,8 @@ namespace WiserTaskScheduler.Core.Services
             this.serviceProvider = serviceProvider;
             this.logService = logService;
             this.logger = logger;
+            
+            logName = $"CleanupService ({Environment.MachineName})";
         }
 
         /// <inheritdoc />
@@ -67,7 +69,7 @@ namespace WiserTaskScheduler.Core.Services
                 try
                 {
                     var files = Directory.GetFiles(folderPath);
-                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Found {files.Length} files in '{folderPath}' to perform cleanup on.", LogName);
+                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Found {files.Length} files in '{folderPath}' to perform cleanup on.", logName);
                     var filesDeleted = 0;
 
                     foreach (var file in files)
@@ -81,19 +83,19 @@ namespace WiserTaskScheduler.Core.Services
 
                             File.Delete(file);
                             filesDeleted++;
-                            await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Deleted file: {file}", LogName);
+                            await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Deleted file: {file}", logName);
                         }
                         catch (Exception e)
                         {
-                            await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Could not delete file: {file} due to exception {e}", LogName);
+                            await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Could not delete file: {file} due to exception {e}", logName);
                         }
                     }
 
-                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {filesDeleted} files in '{folderPath}'.", LogName);
+                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {filesDeleted} files in '{folderPath}'.", logName);
                 }
                 catch (Exception e)
                 {
-                    await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Could not delete files in folder: {folderPath} due to exception {e}", LogName);
+                    await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"Could not delete files in folder: {folderPath} due to exception {e}", logName);
                 }
             }
         }
@@ -110,7 +112,7 @@ namespace WiserTaskScheduler.Core.Services
                 databaseConnection.SetCommandTimeout(cleanupServiceSettings.Timeout);
                 databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStore));
                 var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WtsLogs} WHERE added_on < ?cleanupDate", cleanUp: true);
-                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WtsLogs}'.", LogName);
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WtsLogs}'.", logName);
 
                 if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
                 {
@@ -119,7 +121,7 @@ namespace WiserTaskScheduler.Core.Services
             }
             catch (Exception e)
             {
-                await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during cleanup: {e}", LogName);
+                await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during cleanup: {e}", logName);
             }
         }
 
@@ -137,14 +139,14 @@ namespace WiserTaskScheduler.Core.Services
             if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserTemplateRenderLog))
             {
                 var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserTemplateRenderLog} WHERE end < ?cleanupDate", cleanUp: true);
-                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserTemplateRenderLog}'.", LogName);
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserTemplateRenderLog}'.", logName);
                 optimizeRenderLogTables.Add(WiserTableNames.WiserTemplateRenderLog);
             }
 
             if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserDynamicContentRenderLog))
             {
                 var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserDynamicContentRenderLog} WHERE end < ?cleanupDate", cleanUp: true);
-                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserDynamicContentRenderLog}'.", LogName);
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserDynamicContentRenderLog}'.", logName);
                 optimizeRenderLogTables.Add(WiserTableNames.WiserDynamicContentRenderLog);
             }
 
@@ -167,7 +169,7 @@ namespace WiserTaskScheduler.Core.Services
             var query = $"DELETE FROM {WiserTableNames.WtsServices} WHERE next_run < ?cleanupDate";
             var rowsDeleted = await databaseConnection.ExecuteAsync(query, cleanUp: true);
             
-            await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WtsServices}'.", LogName);
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WtsServices}'.", logName);
 
             if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
             {

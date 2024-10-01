@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -19,12 +20,25 @@ namespace WiserTaskScheduler.Core.Services
         private readonly IServiceProvider serviceProvider;
         private readonly ISlackChatService slackChatService;
         private readonly WtsSettings settings;
+        private readonly ConcurrentDictionary<string, LogLevel> highestLogLevelOfServices = new();
 
         public LogService(IServiceProvider serviceProvider, ISlackChatService slackChatService, IOptions<WtsSettings> settings)
         {
             this.serviceProvider = serviceProvider;
             this.slackChatService = slackChatService;
             this.settings = settings.Value;
+        }
+
+        /// <inheritdoc />
+        public LogLevel GetLogLevelOfService(string configurationName, int timeId)
+        {
+            return highestLogLevelOfServices.TryGetValue($"{configurationName}-{timeId}", out var logLevel) ? logLevel : LogLevel.None;
+        }
+
+        /// <inheritdoc />
+        public void ClearLogLevelOfService(string configurationName, int timeId)
+        {
+            highestLogLevelOfServices.TryRemove($"{configurationName}-{timeId}", out _);
         }
 
         /// <inheritdoc />
@@ -60,6 +74,8 @@ namespace WiserTaskScheduler.Core.Services
         /// <inheritdoc />
         public async Task Log<T>(ILogger<T> logger, LogLevel logLevel, LogScopes logScope, LogSettings logSettings, string message, string configurationName, int timeId = 0, int order = 0, List<string> extraValuesToObfuscate = null)
         {
+            highestLogLevelOfServices.AddOrUpdate($"{configurationName}-{timeId}", logLevel, (key, value) => value >= logLevel ? value : logLevel);
+            
             logSettings ??= new LogSettings();
             if (logLevel < logSettings.LogMinimumLevel)
             {

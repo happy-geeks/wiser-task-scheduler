@@ -21,7 +21,7 @@ namespace WiserTaskScheduler.Core.Services
     /// </summary>
     public class ParentUpdateService : IParentUpdateService, ISingletonService
     {
-        private const string LogName = "ParentUpdateService";
+        private readonly string logName;
 
         private readonly ParentsUpdateServiceSettings parentsUpdateServiceSettings;
         private readonly IServiceProvider serviceProvider;
@@ -45,6 +45,8 @@ namespace WiserTaskScheduler.Core.Services
             this.serviceProvider = serviceProvider;
             this.logService = logService;
             this.logger = logger;
+            
+            logName = $"ParentUpdateService ({Environment.MachineName})";
         }
 
         /// <inheritdoc />
@@ -116,7 +118,7 @@ namespace WiserTaskScheduler.Core.Services
                         catch (Exception e)
                         {
                             exceptionOccurred = true;
-                            await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to run query ( {query} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}", "ParentUpdateService");
+                            await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to run query ( {query} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}", logName);
                         }
                     }
 
@@ -129,7 +131,7 @@ namespace WiserTaskScheduler.Core.Services
                     }
                     catch (Exception e)
                     {
-                        await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to run query ( {targetDatabase.CleanUpQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}", "ParentUpdateService");
+                        await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to run query ( {targetDatabase.CleanUpQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}", logName);
                     }
                 }
             }
@@ -153,7 +155,7 @@ namespace WiserTaskScheduler.Core.Services
                     }
                     catch (Exception e)
                     {
-                        await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to run query ( {targetDatabase.OptimizeQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}", "ParentUpdateService");
+                        await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to run query ( {targetDatabase.OptimizeQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}", logName);
                     }
                 }
             }
