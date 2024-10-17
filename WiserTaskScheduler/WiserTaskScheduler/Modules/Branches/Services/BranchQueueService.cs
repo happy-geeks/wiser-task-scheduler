@@ -1603,6 +1603,17 @@ LIMIT 1";
                                 break;
                             }
                         }
+                        
+                        // if we are paring a linktype, make sure we want to parse it
+                        if (linkType != null)
+                        {
+                            var linkEntry = settings.LinkTypes.SingleOrDefault(s => s.Type == linkType.ToString());
+
+                            if (!linkEntry.Create && !linkEntry.Update && !linkEntry.Delete)
+                            {
+                                continue;
+                            }
+                        }
 
                         // Did we map the item ID to something else? Then use that new ID.
                         var originalDestinationItemId = destinationItemId;
