@@ -2,6 +2,7 @@
 using System.ComponentModel;
 using System.Xml;
 using System.Xml.Serialization;
+using GeeksCoreLibrary.Modules.Communication.Models;
 using WiserTaskScheduler.Core.Enums;
 
 namespace WiserTaskScheduler.Core.Models.OAuth
@@ -53,6 +54,26 @@ namespace WiserTaskScheduler.Core.Models.OAuth
         /// /// This field is required when using ClientCredentials type
         /// </summary>
         public string ClientSecret { get; set; }
+        
+        /// <summary>
+        /// The scope of the OAuth request.
+        /// </summary>
+        public string Scope { get; set; }
+        
+        /// <summary>
+        /// This is the email address an authentication link is sent to, if user based OAuth2.0 is needed.
+        /// </summary>
+        public string EmailAddressForAuthentication { get; set; }
+        
+        /// <summary>
+        /// URL used for user authorization.
+        /// </summary>
+        public string AuthorizationUrl { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the redirect base uri.
+        /// </summary>
+        public string RedirectBaseUri { get; set; }
 
         /// <summary>
         /// Gets or sets the offset from the expire time.
@@ -113,5 +134,11 @@ namespace WiserTaskScheduler.Core.Models.OAuth
         /// </summary>
         [XmlIgnore]
         public DateTime ExpireTime { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the auth code.
+        /// </summary>
+        [XmlIgnore]
+        public string AuthCode { get; set; }
     }
 }

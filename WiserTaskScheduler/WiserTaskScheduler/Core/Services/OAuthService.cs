@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Modules.Communication.Interfaces;
+using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.Objects.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -82,6 +84,10 @@ namespace WiserTaskScheduler.Core.Services
         /// <inheritdoc />
         public async Task<string> GetAccessTokenAsync(string apiName, bool retryAfterWrongRefreshToken = true)
         {
+            using var scope = serviceProvider.CreateScope();
+            var communicationsService = scope.ServiceProvider.GetRequiredService<ICommunicationsService>();
+            var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+            
             var oAuthApi = configuration.OAuths.SingleOrDefault(oAuth => oAuth.ApiName.Equals(apiName));
 
             if (oAuthApi == null)
@@ -107,8 +113,22 @@ namespace WiserTaskScheduler.Core.Services
 
                     // Setup correct authentication.
                     OAuthState failState;
-                    if (String.IsNullOrWhiteSpace(oAuthApi.AccessToken) || String.IsNullOrWhiteSpace(oAuthApi.RefreshToken))
+                    var dataTable = await databaseConnection.GetAsync($"SELECT `value` FROM easy_objects WHERE `key` = 'authorizationCode'");
+                    
+                    if (dataTable.Rows.Count > 0)
                     {
+                        oAuthApi.AuthCode = dataTable.Rows[0]["value"].ToString();
+                    }
+                    
+                    if (string.IsNullOrWhiteSpace(oAuthApi.AuthCode))
+                    {
+                        var redirectUrl = $"{oAuthApi.AuthorizationUrl}?response_type=code&client_id={Uri.EscapeDataString(oAuthApi.ClientId)}&scope={Uri.EscapeDataString(oAuthApi.Scope)}&redirect_uri={Uri.EscapeDataString(oAuthApi.RedirectBaseUri)}/oauth/handle-callback";
+                        await communicationsService.SendEmailAsync(oAuthApi.EmailAddressForAuthentication, "WTS OAuth2.0 Authentication", $"Please authenticate your account by clicking the following link: {redirectUrl}");
+                        failState = OAuthState.NewToken;
+                    }
+                    else if (String.IsNullOrWhiteSpace(oAuthApi.AccessToken) || String.IsNullOrWhiteSpace(oAuthApi.RefreshToken))
+                    {
+                        
                         failState = OAuthState.FailedLogin;
 
                         if (oAuthApi.OAuthJwt == null)
@@ -121,7 +141,11 @@ namespace WiserTaskScheduler.Core.Services
                                     break;
                                     
                                 case OAuthGrantType.AuthCode:
-                                    throw new NotImplementedException("OAuthGrantType.AuthCode is not supported yet");
+                                    formData.Add(new KeyValuePair<string, string>("code", oAuthApi.AuthCode));
+                                    formData.Add(new KeyValuePair<string, string>("client_id", oAuthApi.ClientId));
+                                    formData.Add(new KeyValuePair<string, string>("client_secret", oAuthApi.ClientSecret));
+                                    formData.Add(new KeyValuePair<string, string>("redirect_uri", $"{oAuthApi.RedirectBaseUri}/oauth/handle-callback"));
+                                    formData.Add(new KeyValuePair<string, string>("grant_type", "authorization_code"));
                                     break;
 
                                 case OAuthGrantType.AuthCodeWithPKCE:
@@ -245,9 +269,8 @@ namespace WiserTaskScheduler.Core.Services
                     
                     request.Headers.Add("Accept", "application/json");
 
-                    if (!oAuthApi.SendClientCredentialsInBody && oAuthApi.GrantType == OAuthGrantType.ClientCredentials)
+                    if (!oAuthApi.SendClientCredentialsInBody && oAuthApi.GrantType == OAuthGrantType.ClientCredentials  || oAuthApi.GrantType == OAuthGrantType.AuthCode)
                     {
-
                         var authString = $"{oAuthApi.ClientId}:{oAuthApi.ClientSecret}";
                         var plainTextBytes = System.Text.Encoding.UTF8.GetBytes(authString);
                         request.Headers.Add("Authorization", "Basic " + System.Convert.ToBase64String(plainTextBytes));
