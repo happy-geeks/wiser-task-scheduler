@@ -2530,19 +2530,23 @@ WHERE `id` = ?id";
                 await UpdateProgressInQueue(databaseConnection, queueId, totalItemsInHistory, true);
 
                 // Check if any ids need to be updated for styledoutput entries.
-                foreach (var oldId  in idMapping[WiserTableNames.WiserStyledOutput])
+                if (idMapping.ContainsKey(WiserTableNames.WiserStyledOutput))
                 {
-                    var newId = GetMappedId(WiserTableNames.WiserStyledOutput, idMapping, oldId.Key);
-                    if (newId != oldId.Key)
+                    foreach (var oldId in idMapping[WiserTableNames.WiserStyledOutput])
                     {
-                        // An Id is different and needs to be updated inside the styledoutputs.
-                        foreach (var processingId in idMapping[WiserTableNames.WiserStyledOutput])
+                        var newId = GetMappedId(WiserTableNames.WiserStyledOutput, idMapping, oldId.Key);
+                        if (newId != oldId.Key)
                         {
-                            await ReplaceStyledOutputIdInsideStyledOutputAsync(databaseConnection, processingId.Key, oldId.Key, newId.Value);
+                            // An Id is different and needs to be updated inside the styledoutputs.
+                            foreach (var processingId in idMapping[WiserTableNames.WiserStyledOutput])
+                            {
+                                await ReplaceStyledOutputIdInsideStyledOutputAsync(databaseConnection, processingId.Key,
+                                    oldId.Key, newId.Value);
+                            }
                         }
                     }
                 }
-                
+
                 try
                 {
                     // Clear wiser_history in the selected environment, so that next time we can just sync all changes again.
