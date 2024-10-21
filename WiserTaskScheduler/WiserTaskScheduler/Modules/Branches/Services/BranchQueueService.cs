@@ -493,7 +493,9 @@ FROM (
                                                      {orderBy}
                                                  )
                                                  """);
+                            
                             var linkTypes = allLinkTypes.Where(t => String.Equals(t.DestinationEntityType, entity.EntityType, StringComparison.OrdinalIgnoreCase)).ToList();
+
                             if (!linkTypes.Any())
                             {
                                 queryBuilder.AppendLine($"""
@@ -1419,6 +1421,8 @@ AND EXTRA NOT LIKE '%GENERATED'";
                                     };
                                     linksCache.Add(linkCacheData);
                                 }
+                                
+                                
 
                                 await using var branchCommand = branchConnection.CreateCommand();
                                 AddParametersToCommand(sqlParameters, branchCommand);
@@ -1604,17 +1608,6 @@ LIMIT 1";
                             }
                         }
                         
-                        // if we are paring a linktype, make sure we want to parse it
-                        if (linkType != null)
-                        {
-                            var linkEntry = settings.LinkTypes.SingleOrDefault(s => s.Type == linkType.ToString());
-
-                            if (!linkEntry.Create && !linkEntry.Update && !linkEntry.Delete)
-                            {
-                                continue;
-                            }
-                        }
-
                         // Did we map the item ID to something else? Then use that new ID.
                         var originalDestinationItemId = destinationItemId;
 
@@ -1961,6 +1954,15 @@ WHERE id = ?itemId";
                             }
                             case "ADD_LINK":
                             {
+                                // check if the link type is in the list of changes 
+                                if (linkType != null)
+                                {
+                                    if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType).Create)
+                                    {
+                                        continue;
+                                    }
+                                }
+                                
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Update)
                                 {
@@ -2030,6 +2032,15 @@ VALUES (?newId, ?itemId, ?destinationItemId, ?ordering, ?type);";
                             }
                             case "CHANGE_LINK":
                             {
+                                // check if the link type is in the list of changes 
+                                if (linkType != null)
+                                {
+                                    if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType).Update)
+                                    {
+                                        continue;
+                                    }
+                                }
+                                
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Update)
                                 {
@@ -2065,6 +2076,15 @@ AND type = ?type";
                             }
                             case "REMOVE_LINK":
                             {
+                                // check if the link type is in the list of changes 
+                                if (linkType != null)
+                                {
+                                    if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType).Delete)
+                                    {
+                                        continue;
+                                    }
+                                }
+                                
                                 // Check if the user requested this change to be synchronised.
                                 if (!entityTypeMergeSettings.Update)
                                 {
@@ -2541,19 +2561,23 @@ WHERE `id` = ?id";
                 await UpdateProgressInQueue(databaseConnection, queueId, totalItemsInHistory, true);
 
                 // Check if any ids need to be updated for styledoutput entries.
-                foreach (var oldId  in idMapping[WiserTableNames.WiserStyledOutput])
+                if (idMapping.ContainsKey(WiserTableNames.WiserStyledOutput))
                 {
-                    var newId = GetMappedId(WiserTableNames.WiserStyledOutput, idMapping, oldId.Key);
-                    if (newId != oldId.Key)
+                    foreach (var oldId in idMapping[WiserTableNames.WiserStyledOutput])
                     {
-                        // An Id is different and needs to be updated inside the styledoutputs.
-                        foreach (var processingId in idMapping[WiserTableNames.WiserStyledOutput])
+                        var newId = GetMappedId(WiserTableNames.WiserStyledOutput, idMapping, oldId.Key);
+                        if (newId != oldId.Key)
                         {
-                            await ReplaceStyledOutputIdInsideStyledOutputAsync(databaseConnection, processingId.Key, oldId.Key, newId.Value);
+                            // An Id is different and needs to be updated inside the styledoutputs.
+                            foreach (var processingId in idMapping[WiserTableNames.WiserStyledOutput])
+                            {
+                                await ReplaceStyledOutputIdInsideStyledOutputAsync(databaseConnection, processingId.Key,
+                                    oldId.Key, newId.Value);
+                            }
                         }
                     }
                 }
-                
+
                 try
                 {
                     // Clear wiser_history in the selected environment, so that next time we can just sync all changes again.
