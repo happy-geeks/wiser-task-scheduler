@@ -1746,6 +1746,7 @@ LIMIT 1";
                         var fieldTemplatesMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.FieldTemplates);
                         var userRoleMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.UserRole);
                         var styledOutputMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.StyledOutput);
+                        var objectMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.EasyObjects);
 
                         // Update the item in the production environment.
                         switch (action)
@@ -2268,6 +2269,7 @@ WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
                             case "INSERT_API_CONNECTION":
                             case "INSERT_ROLE":
                             case "CREATE_STYLED_OUTPUT":
+                            case "CREATE_EASY_OBJECT":
                             {
                                 // Check if the user requested this change to be synchronised.
                                 switch (tableName)
@@ -2317,6 +2319,10 @@ WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
                                         await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserStyledOutput when styledOutputMergeSettings is not {Create: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                                        continue;
+                                    case "easy_objects" when objectMergeSettings is not {Create: true}:
                                         itemsProcessed++;
                                         await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
@@ -2377,6 +2383,7 @@ VALUES (?newId)";
                             case "UPDATE_API_CONNECTION":
                             case "UPDATE_ROLE":
                             case "UPDATE_STYLED_OUTPUT":
+                            case "UPDATE_EASY_OBJECT":
                             {
                                 // Check if the user requested this change to be synchronised.
                                 switch (tableName)
@@ -2429,6 +2436,10 @@ VALUES (?newId)";
                                         itemsProcessed++;
                                         await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
+                                    case "easy_objects" when objectMergeSettings is not {Update: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                                        continue;
                                 }
 
                                 sqlParameters["id"] = objectId;
@@ -2456,6 +2467,7 @@ WHERE id = ?id";
                             case "DELETE_API_CONNECTION":
                             case "DELETE_ROLE":
                             case "DELETE_STYLED_OUTPUT":
+                            case "DELETE_EASY_OBJECT":
                             {
                                 // Check if the user requested this change to be synchronised.
                                 switch (tableName)
@@ -2505,6 +2517,10 @@ WHERE id = ?id";
                                         await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     case WiserTableNames.WiserStyledOutput when styledOutputMergeSettings is not {Delete: true}:
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                                        continue;
+                                    case "easy_objects" when objectMergeSettings is not {Delete: true}:
                                         itemsProcessed++;
                                         await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
