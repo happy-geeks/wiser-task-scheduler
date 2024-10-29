@@ -1221,6 +1221,9 @@ AND EXTRA NOT LIKE '%GENERATED'";
                         }
                     }
                 }
+                
+                // Fetch Link settings before we lock the tables. 
+                var allLinkTypeSettings = await wiserItemsService.GetAllLinkTypeSettingsAsync();
 
                 // Lock the tables we're going to use, to be sure that other processes don't mess up our synchronisation.
                 await LockTablesAsync(productionConnection, tablesToLock, false);
@@ -1259,7 +1262,6 @@ AND EXTRA NOT LIKE '%GENERATED'";
                 }
 
                 // Cache some settings that we'll need later.
-                var allLinkTypeSettings = await wiserItemsService.GetAllLinkTypeSettingsAsync();
                 var allEntityTypeSettings = new Dictionary<string, EntitySettingsModel>();
 
                 // Start synchronising all history items one by one.
@@ -1957,7 +1959,7 @@ WHERE id = ?itemId";
                                 // check if the link type is in the list of changes 
                                 if (linkType != null)
                                 {
-                                    if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType).Create)
+                                    if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Create)
                                     {
                                         continue;
                                     }
@@ -2035,7 +2037,7 @@ VALUES (?newId, ?itemId, ?destinationItemId, ?ordering, ?type);";
                                 // check if the link type is in the list of changes 
                                 if (linkType != null)
                                 {
-                                    if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType).Update)
+                                    if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Update)
                                     {
                                         continue;
                                     }
@@ -2079,7 +2081,7 @@ AND type = ?type";
                                 // check if the link type is in the list of changes 
                                 if (linkType != null)
                                 {
-                                    if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType).Delete)
+                                    if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Delete)
                                     {
                                         continue;
                                     }
