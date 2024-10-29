@@ -1961,18 +1961,12 @@ WHERE id = ?itemId";
                                 {
                                     if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Create)
                                     {
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     }
                                 }
                                 
-                                // Check if the user requested this change to be synchronised.
-                                if (!entityTypeMergeSettings.Update)
-                                {
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
-                                }
-
                                 if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
                                 {
                                     // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
@@ -2039,18 +2033,12 @@ VALUES (?newId, ?itemId, ?destinationItemId, ?ordering, ?type);";
                                 {
                                     if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Update)
                                     {
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     }
                                 }
                                 
-                                // Check if the user requested this change to be synchronised.
-                                if (!entityTypeMergeSettings.Update)
-                                {
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
-                                }
-
                                 if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
                                 {
                                     // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
@@ -2083,16 +2071,10 @@ AND type = ?type";
                                 {
                                     if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Delete)
                                     {
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                         continue;
                                     }
-                                }
-                                
-                                // Check if the user requested this change to be synchronised.
-                                if (!entityTypeMergeSettings.Update)
-                                {
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                    continue;
                                 }
 
                                 if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
@@ -2104,16 +2086,17 @@ AND type = ?type";
                                     continue;
                                 }
 
-                                sqlParameters["oldItemId"] = oldItemId;
-                                sqlParameters["oldDestinationItemId"] = oldDestinationItemId;
+                                // note: We are removing links this is the current item id, not changing them, so its itemid instead of olditemid. 
+                                sqlParameters["itemId"] = itemId;
+                                sqlParameters["destinationItemId"] = destinationItemId;
                                 sqlParameters["type"] = linkType ?? 0;
 
                                 await using var productionCommand = productionConnection.CreateCommand();
                                 AddParametersToCommand(sqlParameters, productionCommand);
                                 productionCommand.CommandText = $@"{queryPrefix}
 DELETE FROM `{tableName}`
-WHERE item_id = ?oldItemId
-AND destination_item_id = ?oldDestinationItemId
+WHERE item_id = ?itemId
+AND destination_item_id = ?destinationItemId
 AND type = ?type";
                                 await productionCommand.ExecuteNonQueryAsync();
                                 break;
