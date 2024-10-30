@@ -1956,7 +1956,7 @@ WHERE id = ?itemId";
                             }
                             case "ADD_LINK":
                             {
-                                // check if the link type is in the list of changes 
+                                // Check if the link type is in the list of changes. 
                                 if (linkType != null)
                                 {
                                     if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Create)
@@ -2028,7 +2028,7 @@ VALUES (?newId, ?itemId, ?destinationItemId, ?ordering, ?type);";
                             }
                             case "CHANGE_LINK":
                             {
-                                // check if the link type is in the list of changes 
+                                // Check if the link type is in the list of changes. 
                                 if (linkType != null)
                                 {
                                     if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Update)
@@ -2066,7 +2066,7 @@ AND type = ?type";
                             }
                             case "REMOVE_LINK":
                             {
-                                // check if the link type is in the list of changes 
+                                // Check if the link type is in the list of changes.
                                 if (linkType != null)
                                 {
                                     if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Delete)
