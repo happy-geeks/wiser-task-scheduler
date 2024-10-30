@@ -1956,16 +1956,14 @@ WHERE id = ?itemId";
                             }
                             case "ADD_LINK":
                             {
-                                // Check if the link type is in the list of changes. 
-                                if (linkType != null)
+                                // Check if the link type is in the list of changes.
+                                if (linkType != null && !settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Create)
                                 {
-                                    if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Create)
-                                    {
-                                        itemsProcessed++;
-                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                        continue;
-                                    }
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                                    continue;
                                 }
+                                
                                 
                                 if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
                                 {
@@ -2029,15 +2027,13 @@ VALUES (?newId, ?itemId, ?destinationItemId, ?ordering, ?type);";
                             case "CHANGE_LINK":
                             {
                                 // Check if the link type is in the list of changes. 
-                                if (linkType != null)
+                                if (linkType != null && !settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Update)
                                 {
-                                    if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Update)
-                                    {
-                                        itemsProcessed++;
-                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                        continue;
-                                    }
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                                    continue;
                                 }
+                                
                                 
                                 if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
                                 {
@@ -2067,15 +2063,13 @@ AND type = ?type";
                             case "REMOVE_LINK":
                             {
                                 // Check if the link type is in the list of changes.
-                                if (linkType != null)
+                                if (linkType != null && !settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Delete)
                                 {
-                                    if (!settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Delete)
-                                    {
-                                        itemsProcessed++;
-                                        await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-                                        continue;
-                                    }
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                                    continue;
                                 }
+                                
 
                                 if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
                                 {
