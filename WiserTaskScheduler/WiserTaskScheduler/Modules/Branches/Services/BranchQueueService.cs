@@ -493,7 +493,7 @@ FROM (
                                                      {orderBy}
                                                  )
                                                  """);
-                            
+
                             var linkTypes = allLinkTypes.Where(t => String.Equals(t.DestinationEntityType, entity.EntityType, StringComparison.OrdinalIgnoreCase)).ToList();
 
                             if (!linkTypes.Any())
@@ -1068,6 +1068,21 @@ AND EXTRA NOT LIKE '%GENERATED'";
                 return result;
             }
 
+            // Get all merge settings that we'll need later.
+            var entityMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Entity);
+            var entityPropertyMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.EntityProperty);
+            var linkMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Link);
+            var moduleMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Module);
+            var permissionMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Permission);
+            var queryMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Query);
+            var roleMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Role);
+            var apiConnectionMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.ApiConnection);
+            var dataSelectorMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.DataSelector);
+            var fieldTemplatesMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.FieldTemplates);
+            var userRoleMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.UserRole);
+            var styledOutputMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.StyledOutput);
+            var objectMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.EasyObjects);
+
             // Store database names in variables for later use and create connection string for the branch database.
             var connectionStringBuilder = new MySqlConnectionStringBuilder(connectionString)
             {
@@ -1221,8 +1236,8 @@ AND EXTRA NOT LIKE '%GENERATED'";
                         }
                     }
                 }
-                
-                // Fetch Link settings before we lock the tables. 
+
+                // Fetch Link settings before we lock the tables.
                 var allLinkTypeSettings = await wiserItemsService.GetAllLinkTypeSettingsAsync();
 
                 // Lock the tables we're going to use, to be sure that other processes don't mess up our synchronisation.
@@ -1313,6 +1328,7 @@ AND EXTRA NOT LIKE '%GENERATED'";
                     ulong? oldItemId = null;
                     ulong? oldDestinationItemId = null;
                     (string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)? linkData = null;
+                    LinkTypeMergeSettingsModel linkTypeSettings = null;
 
                     var idForComparison = originalItemId.ToString();
                     switch (action)
@@ -1423,8 +1439,6 @@ AND EXTRA NOT LIKE '%GENERATED'";
                                     };
                                     linksCache.Add(linkCacheData);
                                 }
-                                
-                                
 
                                 await using var branchCommand = branchConnection.CreateCommand();
                                 AddParametersToCommand(sqlParameters, branchCommand);
@@ -1609,7 +1623,7 @@ LIMIT 1";
                                 break;
                             }
                         }
-                        
+
                         // Did we map the item ID to something else? Then use that new ID.
                         var originalDestinationItemId = destinationItemId;
 
@@ -1627,6 +1641,8 @@ LIMIT 1";
                             linkData = await GetEntityTypesOfLinkAsync(originalItemId, originalDestinationItemId, linkType.Value, branchConnection, wiserItemsService, allLinkTypeSettings, allEntityTypeSettings);
                             if (linkData.HasValue)
                             {
+                                linkTypeSettings = settings.LinkTypes.SingleOrDefault(s => s.Type == linkType.Value && String.Equals(s.SourceEntityType, linkData.Value.SourceType) && String.Equals(s.DestinationEntityType, linkData.Value.DestinationType));
+
                                 itemTableName = $"{linkData.Value.SourceTablePrefix}{WiserTableNames.WiserItem}";
                                 destinationItemTableName = $"{linkData.Value.DestinationTablePrefix}{WiserTableNames.WiserItem}";
 
@@ -1734,19 +1750,6 @@ LIMIT 1";
                         }
 
                         var entityTypeMergeSettings = settings.Entities.SingleOrDefault(e => String.Equals(e.Type, entityType, StringComparison.OrdinalIgnoreCase)) ?? new EntityMergeSettingsModel();
-                        var entityMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Entity);
-                        var entityPropertyMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.EntityProperty);
-                        var linkMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Link);
-                        var moduleMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Module);
-                        var permissionMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Permission);
-                        var queryMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Query);
-                        var roleMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Role);
-                        var apiConnectionMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.ApiConnection);
-                        var dataSelectorMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.DataSelector);
-                        var fieldTemplatesMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.FieldTemplates);
-                        var userRoleMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.UserRole);
-                        var styledOutputMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.StyledOutput);
-                        var objectMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.EasyObjects);
 
                         // Update the item in the production environment.
                         switch (action)
@@ -1780,7 +1783,7 @@ INSERT INTO `{tableName}` (id, entity_type) VALUES (?newId, '')";
                                 await productionCommand.ExecuteNonQueryAsync();
 
                                 // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                                await AddIdMappingAsync(idMapping, tableName, originalItemId, newItemId, branchConnection);
+                                await AddIdMappingAsync(idMapping, tableName, originalItemId, newItemId, branchConnection, productionConnection);
 
                                 break;
                             }
@@ -1804,11 +1807,15 @@ INSERT INTO `{tableName}` (id, entity_type) VALUES (?newId, '')";
                                 productionCommand.CommandText = queryPrefix;
                                 if (String.IsNullOrWhiteSpace(newValue))
                                 {
-                                    productionCommand.CommandText += $@"DELETE FROM `{tableName}`
-WHERE item_id = ?itemId
-AND `key` = ?key
-AND language_code = ?languageCode
-AND groupname = ?groupName";
+                                    productionCommand.CommandText += $"""
+                                                                      DELETE FROM `{tableName}`
+                                                                      WHERE item_id = ?itemId
+                                                                      AND `key` = ?key
+                                                                      AND language_code = ?languageCode
+                                                                      AND groupname = ?groupName
+                                                                      """;
+
+                                    await RemoveIdMappingAsync(idMapping, tableName, originalTargetId, branchConnection);
                                 }
                                 else
                                 {
@@ -1838,7 +1845,7 @@ AND groupname = ?groupName";
                                         // Map the item detail ID from wiser_history to the ID of the current item detail, locally and in database.
                                         if (originalTargetId > 0)
                                         {
-                                            await AddIdMappingAsync(idMapping, tableName, originalTargetId, existingId, branchConnection);
+                                            await AddIdMappingAsync(idMapping, tableName, originalTargetId, existingId, branchConnection, productionConnection);
                                         }
                                     }
                                     else
@@ -1855,7 +1862,7 @@ AND groupname = ?groupName";
                                         // Map the item detail ID from wiser_history to the ID of the current item detail, locally and in database.
                                         if (originalTargetId > 0)
                                         {
-                                            await AddIdMappingAsync(idMapping, tableName, originalTargetId, newItemId, branchConnection);
+                                            await AddIdMappingAsync(idMapping, tableName, originalTargetId, newItemId, branchConnection, productionConnection);
                                         }
                                     }
                                 }
@@ -1958,14 +1965,13 @@ WHERE id = ?itemId";
                             case "ADD_LINK":
                             {
                                 // Check if the link type is in the list of changes.
-                                if (linkType != null && !settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Create)
+                                if (linkTypeSettings is not { Create: true })
                                 {
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
-                                
-                                
+
                                 if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
                                 {
                                     // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
@@ -2021,21 +2027,20 @@ VALUES (?newId, ?itemId, ?destinationItemId, ?ordering, ?type);";
                                 await productionCommand.ExecuteNonQueryAsync();
 
                                 // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                                await AddIdMappingAsync(idMapping, tableName, originalLinkId.Value, linkId.Value, branchConnection);
+                                await AddIdMappingAsync(idMapping, tableName, originalLinkId.Value, linkId.Value, branchConnection, productionConnection);
 
                                 break;
                             }
                             case "CHANGE_LINK":
                             {
-                                // Check if the link type is in the list of changes. 
-                                if (linkType != null && !settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Update)
+                                // Check if the link type is in the list of changes.
+                                if (linkTypeSettings is not { Update: true })
                                 {
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
-                                
-                                
+
                                 if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
                                 {
                                     // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
@@ -2064,13 +2069,12 @@ AND type = ?type";
                             case "REMOVE_LINK":
                             {
                                 // Check if the link type is in the list of changes.
-                                if (linkType != null && !settings.LinkTypes.SingleOrDefault(s => s.Type == linkType && ( string.Equals(s.SourceEntityType, entityType) || string.Equals(s.DestinationEntityType, entityType))).Delete)
+                                if (linkTypeSettings is not { Delete: true })
                                 {
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
                                 }
-                                
 
                                 if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
                                 {
@@ -2081,18 +2085,19 @@ AND type = ?type";
                                     continue;
                                 }
 
-                                // note: We are removing links this is the current item id, not changing them, so its itemid instead of olditemid. 
                                 sqlParameters["itemId"] = itemId;
                                 sqlParameters["destinationItemId"] = destinationItemId;
                                 sqlParameters["type"] = linkType ?? 0;
 
                                 await using var productionCommand = productionConnection.CreateCommand();
                                 AddParametersToCommand(sqlParameters, productionCommand);
-                                productionCommand.CommandText = $@"{queryPrefix}
-DELETE FROM `{tableName}`
-WHERE item_id = ?itemId
-AND destination_item_id = ?destinationItemId
-AND type = ?type";
+                                productionCommand.CommandText = $"""
+                                                                 {queryPrefix}
+                                                                 DELETE FROM `{tableName}`
+                                                                 WHERE item_id = ?itemId
+                                                                 AND destination_item_id = ?destinationItemId
+                                                                 AND type = ?type
+                                                                 """;
                                 await productionCommand.ExecuteNonQueryAsync();
                                 break;
                             }
@@ -2178,7 +2183,7 @@ VALUES (?newId, ?fileItemId)";
                                 await productionCommand.ExecuteNonQueryAsync();
 
                                 // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                                await AddIdMappingAsync(idMapping, tableName, originalObjectId, newFileId, branchConnection);
+                                await AddIdMappingAsync(idMapping, tableName, originalObjectId, newFileId, branchConnection, productionConnection);
 
                                 break;
                             }
@@ -2340,34 +2345,50 @@ WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
                                 var newEntityId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection);
                                 sqlParameters["newId"] = newEntityId;
                                 sqlParameters["guid"] = Guid.NewGuid().ToString("N");
+                                sqlParameters["guid2"] = Guid.NewGuid().ToString("N");
 
                                 await using var productionCommand = productionConnection.CreateCommand();
                                 AddParametersToCommand(sqlParameters, productionCommand);
 
                                 if (tableName.Equals(WiserTableNames.WiserEntity, StringComparison.OrdinalIgnoreCase))
                                 {
-                                    productionCommand.CommandText = $@"{queryPrefix}
-INSERT INTO `{tableName}` (id, `name`) 
-VALUES (?newId, '')";
+                                    productionCommand.CommandText = $"""
+                                                                     {queryPrefix}
+                                                                     INSERT INTO `{tableName}` (id, `name`) 
+                                                                     VALUES (?newId, '')
+                                                                     """;
                                 }
                                 else if (tableName.Equals(WiserTableNames.WiserEntityProperty, StringComparison.OrdinalIgnoreCase))
                                 {
-                                    // The table wiser_entityproperty has a unique index on (entity_name, property_name), so we need to temporarily generate a unique property name, to prevent duplicate index errors when multiple properties are added in a row.
-                                    productionCommand.CommandText = $@"{queryPrefix}
-INSERT INTO `{tableName}` (id, `entity_name`, `property_name`) 
-VALUES (?newId, 'temp_wts', ?guid)";
+                                    // The table wiser_entityproperty has a unique index (on entity_name, property_name), so we need to temporarily generate a unique property name, to prevent duplicate index errors when multiple properties are added in a row.
+                                    productionCommand.CommandText = $"""
+                                                                     {queryPrefix}
+                                                                     INSERT INTO `{tableName}` (id, `entity_name`, `property_name`) 
+                                                                     VALUES (?newId, 'temp_wts', ?guid)
+                                                                     """;
+                                }
+                                else if (tableName.Equals(WiserTableNames.WiserLink, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    // The table wiser_link has a unique index (on type, desintation_entity_type, connected_entity_type), so we need to temporarily generate unique entity names, to prevent duplicate index errors when rows properties are added in a row.
+                                    productionCommand.CommandText = $"""
+                                                                     {queryPrefix}
+                                                                     INSERT INTO `{tableName}` (id, `type`, `destination_entity_type`, `connected_entity_type`) 
+                                                                     VALUES (?newId, 0, ?guid, ?guid2)
+                                                                     """;
                                 }
                                 else
                                 {
-                                    productionCommand.CommandText = $@"{queryPrefix}
-INSERT INTO `{tableName}` (id) 
-VALUES (?newId)";
+                                    productionCommand.CommandText = $"""
+                                                                     {queryPrefix}
+                                                                     INSERT INTO `{tableName}` (id) 
+                                                                     VALUES (?newId)
+                                                                     """;
                                 }
 
                                 await productionCommand.ExecuteNonQueryAsync();
 
                                 // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                                await AddIdMappingAsync(idMapping, tableName, originalObjectId, newEntityId, branchConnection);
+                                await AddIdMappingAsync(idMapping, tableName, originalObjectId, newEntityId, branchConnection, productionConnection);
 
                                 break;
                             }
@@ -3074,7 +3095,8 @@ LIMIT 1";
         /// <param name="originalItemId">The ID of the item in the selected environment.</param>
         /// <param name="newItemId">The ID of the item in the production environment.</param>
         /// <param name="environmentConnection">The database connection to the selected environment.</param>
-        private async Task AddIdMappingAsync(IDictionary<string, Dictionary<ulong, ulong>> idMappings, string tableName, ulong originalItemId, ulong newItemId, MySqlConnection environmentConnection)
+        /// <param name="productionConnection"></param>
+        private async Task AddIdMappingAsync(IDictionary<string, Dictionary<ulong, ulong>> idMappings, string tableName, ulong originalItemId, ulong newItemId, MySqlConnection environmentConnection, MySqlConnection productionConnection)
         {
             if (!idMappings.ContainsKey(tableName))
             {
@@ -3089,7 +3111,27 @@ LIMIT 1";
                     return;
                 }
 
-                throw new Exception($"Trying to map ID '{newItemId}' to '{originalItemId}', but it was already mapped to '{otherId}'.");
+                // If the item is already mapped to something else, check if that other item still exists.
+                await using var productionCommand = productionConnection.CreateCommand();
+                productionCommand.CommandText = $"""
+                                                 SELECT id 
+                                                 FROM `{tableName}` 
+                                                 WHERE id = ?otherId
+                                                 """;
+
+                productionCommand.Parameters.AddWithValue("otherId", otherId);
+                var existingId = Convert.ToUInt64(await productionCommand.ExecuteScalarAsync() ?? 0);
+
+                if (existingId == 0)
+                {
+                    // If the mapped ID does not exist anymore, remove it so that we can remap it.
+                    await RemoveIdMappingAsync(idMappings, tableName, originalItemId, environmentConnection);
+                }
+                else
+                {
+                    // If the mapped ID still exists, we can't map this ID to a different ID, so throw an error because we can't safely continue.
+                    throw new Exception($"Trying to map ID '{originalItemId}' to '{newItemId}', of table '{tableName}', but it was already mapped to '{otherId}'.");
+                }
             }
 
             idMappings[tableName].Add(originalItemId, newItemId);
@@ -3103,6 +3145,38 @@ LIMIT 1";
             environmentCommand.Parameters.AddWithValue("tableName", tableName);
             environmentCommand.Parameters.AddWithValue("ourId", originalItemId);
             environmentCommand.Parameters.AddWithValue("productionId", newItemId);
+            await environmentCommand.ExecuteNonQueryAsync();
+        }
+
+        /// <summary>
+        /// Remove an ID mapping, if an item that was already mapped was removed, it should also be removed from the mapping.
+        /// </summary>
+        /// <param name="idMappings">The dictionary that contains the in-memory mappings.</param>
+        /// <param name="tableName">The table that the ID belongs to.</param>
+        /// <param name="originalItemId">The ID of the item in the selected environment.</param>
+        /// <param name="environmentConnection">The database connection to the selected environment.</param>
+        private async Task RemoveIdMappingAsync(IDictionary<string, Dictionary<ulong, ulong>> idMappings, string tableName, ulong originalItemId, MySqlConnection environmentConnection)
+        {
+            if (!idMappings.ContainsKey(tableName))
+            {
+                idMappings.Add(tableName, new Dictionary<ulong, ulong>());
+            }
+
+            if (!idMappings[tableName].ContainsKey(originalItemId))
+            {
+                // If we didn't have a mapping for this ID, we can skip it.
+                return;
+            }
+
+            idMappings[tableName].Remove(originalItemId);
+            await using var environmentCommand = environmentConnection.CreateCommand();
+            environmentCommand.CommandText = $"""
+                                              DELETE FROM `{WiserTableNames.WiserIdMappings}` 
+                                              WHERE table_name = ?tableName AND our_id = ?ourId
+                                              """;
+
+            environmentCommand.Parameters.AddWithValue("tableName", tableName);
+            environmentCommand.Parameters.AddWithValue("ourId", originalItemId);
             await environmentCommand.ExecuteNonQueryAsync();
         }
     }
