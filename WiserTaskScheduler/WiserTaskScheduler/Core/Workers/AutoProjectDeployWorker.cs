@@ -10,27 +10,27 @@ namespace WiserTaskScheduler.Core.Workers;
 public class AutoProjectDeployWorker : BaseWorker
 {
     private const string LogName = "AutoProjectDeploy";
-    
+
     private readonly IAutoProjectDeployService autoProjectDeployService;
     private readonly ILogService logService;
     private readonly ILogger<AutoProjectDeployWorker> logger;
-    
+
     public AutoProjectDeployWorker(IOptions<WtsSettings> wtsSettings, IAutoProjectDeployService autoProjectDeployService, ILogService logService, ILogger<AutoProjectDeployWorker> logger, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
     {
         // TODO: Initialize with the run scheme from the settings.
         Initialize(LogName, new RunSchemeModel(), wtsSettings.Value.ServiceFailedNotificationEmails, true);
         RunScheme.LogSettings ??= new LogSettings();
-        
+
         this.autoProjectDeployService = autoProjectDeployService;
         this.logService = logService;
         this.logger = logger;
-        
+
         this.autoProjectDeployService.LogSettings = RunScheme.LogSettings;
     }
-    
+
     /// <inheritdoc />
     protected override async Task ExecuteActionAsync()
     {
-        await autoProjectDeployService.ManageAutoProjectDeploy();
+        await autoProjectDeployService.ManageAutoProjectDeployAsync();
     }
 }

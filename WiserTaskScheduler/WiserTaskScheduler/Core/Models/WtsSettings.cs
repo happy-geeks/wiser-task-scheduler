@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using WiserTaskScheduler.Core.Models.AutoProjectDeploy;
 using WiserTaskScheduler.Core.Models.Cleanup;
 using WiserTaskScheduler.Core.Models.ParentsUpdate;
 using WiserTaskScheduler.Core.Services;
@@ -32,32 +33,37 @@ namespace WiserTaskScheduler.Core.Models
         /// Gets or sets the settings of the <see cref="CleanupService"/>.
         /// </summary>
         public CleanupServiceSettings CleanupService { get; set; } = new CleanupServiceSettings();
-        
+
         /// <summary>
         /// Gets or sets the settings of the <see cref="ParentsUpdateService"/>.
         /// </summary>
         public ParentsUpdateServiceSettings ParentsUpdateService { get; set; } = new ParentsUpdateServiceSettings();
-        
+
         /// <summary>
         /// Gets or sets the settings for the connection to Wiser 3.
         /// </summary>
         public WiserSettings Wiser { get; set; }
-        
+
         /// <summary>
         /// Gets or sets the <see cref="SlackSettings"/> used by the <see cref="SlackChatService"/>.
         /// </summary>
         public SlackSettings SlackSettings { get; set; }
-        
+
+        /// <summary>
+        /// Gets or sets the <see cref="AutoProjectDeploySettings"/> used by the <see cref="AutoProjectDeployService"/>.
+        /// </summary>
+        public AutoProjectDeploySettings AutoProjectDeploySettings { get; set; }
+
         /// <summary>
         /// A semicolon (;) seperated list of email addresses to notify when a core service failed during execution.
         /// </summary>
         public string ServiceFailedNotificationEmails { get; set; }
-        
+
         /// <summary>
         /// The number of minutes to wait before sending the same error notification again.
         /// </summary>
         public int ErrorNotificationsIntervalInMinutes { get; set; } = 60;
-        
+
         /// <summary>
         /// Gets or sets the credentials from the secrets app settings.
         /// </summary>
