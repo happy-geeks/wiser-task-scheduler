@@ -55,7 +55,7 @@ namespace WiserTaskScheduler
                 .ConfigureServices((hostContext, services) =>
                 {
                     ConfigureSettings(hostContext.Configuration, services);
-                    ConfigureHostedServices(services);
+                    ConfigureHostedServices(services, hostContext);
                     ConfigureWtsServices(services, hostContext);
 
                     Log.Logger = new LoggerConfiguration()
@@ -70,11 +70,17 @@ namespace WiserTaskScheduler
             services.Configure<WtsSettings>(configuration.GetSection("Wts"));
         }
 
-        private static void ConfigureHostedServices(IServiceCollection services)
+        private static void ConfigureHostedServices(IServiceCollection services, HostBuilderContext hostContext)
         {
             services.AddHostedService<MainWorker>();
             services.AddHostedService<CleanupWorker>();
             services.AddHostedService<UpdateParentsWorker>();
+            
+            // Only add the auto project deploy worker if it is enabled.
+            if (hostContext.Configuration.GetSection("Wts").GetSection("AutoProjectDeploy").GetValue<bool>("IsEnabled"))
+            {
+                services.AddHostedService<AutoProjectDeployWorker>();
+            }
         }
 
         private static void ConfigureWtsServices(IServiceCollection services, HostBuilderContext hostContext)
