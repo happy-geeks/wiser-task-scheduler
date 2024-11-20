@@ -30,7 +30,7 @@ public class WiserDashboardService : IWiserDashboardService, ISingletonService
         this.logger = logger;
         this.logSettings = new LogSettings();
     }
-    
+
     /// <inheritdoc />
     public async Task<Service> GetServiceAsync(string configuration, int timeId)
     {
@@ -51,12 +51,12 @@ AND time_id = ?timeId";
         {
             return null;
         }
-        
+
         return GetServiceFromDataRow(data.Rows[0]);
     }
-    
+
     /// <inheritdoc />
-    public async Task<List<Service>> GetServices(bool onlyWithExtraRun)
+    public async Task<List<Service>> GetServicesAsync(bool onlyWithExtraRun)
     {
         var query = $@"SELECT  *
 FROM {WiserTableNames.WtsServices}
@@ -100,25 +100,25 @@ FROM {WiserTableNames.WtsServices}
             querySetParts.Add("scheme = ?scheme");
             parameters.Add("scheme", scheme);
         }
-        
+
         if (lastRun != null)
         {
             querySetParts.Add("last_run = ?lastRun");
             parameters.Add("lastRun", lastRun);
         }
-        
+
         if (nextRun != null)
         {
             querySetParts.Add("next_run = ?nextRun");
             parameters.Add("nextRun", nextRun);
         }
-        
+
         if (runTime != null)
         {
             querySetParts.Add("run_time = ?runTime");
             parameters.Add("runTime", runTime.Value.TotalMinutes);
         }
-        
+
         if (state != null)
         {
             querySetParts.Add("state = ?state");
@@ -246,7 +246,7 @@ AND time_id = ?timeId");
             return null;
         }
     }
-    
+
     /// <inheritdoc />
     public async Task<bool?> IsServiceRunning(string configuration, int timeId)
     {
@@ -262,7 +262,7 @@ AND time_id = ?timeId");
 FROM {WiserTableNames.WtsServices}
 WHERE configuration = ?configuration
 AND time_id = ?timeId");
-        
+
             return dataTable.Rows[0].Field<string>("state").Equals("running", StringComparison.InvariantCultureIgnoreCase);
         }
         catch (Exception e)

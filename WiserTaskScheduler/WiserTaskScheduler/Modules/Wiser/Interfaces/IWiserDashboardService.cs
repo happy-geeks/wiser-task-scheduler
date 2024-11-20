@@ -20,7 +20,7 @@ public interface IWiserDashboardService
     /// </summary>
     /// <param name="onlyWithExtraRun">If only services marked for an extra run need to be retrieved.</param>
     /// <returns></returns>
-    Task<List<Service>> GetServices(bool onlyWithExtraRun);
+    Task<List<Service>> GetServicesAsync(bool onlyWithExtraRun);
 
     /// <summary>
     /// Create a service to be stored in the database.

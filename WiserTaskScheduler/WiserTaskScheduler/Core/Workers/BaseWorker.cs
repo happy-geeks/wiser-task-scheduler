@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WiserTaskScheduler.Core.Enums;
+using WiserTaskScheduler.Core.Helpers;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Modules.RunSchemes.Interfaces;
@@ -100,7 +101,7 @@ namespace WiserTaskScheduler.Core.Workers
                         defaultServiceIsCreated = true;
                     }
                 }
-                
+
                 await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{ConfigurationName ?? Name} started, first run on: {runSchemesService.GetDateTimeTillNextRun(RunScheme)}", ConfigurationName ?? Name, RunScheme.TimeId);
                 await wiserDashboardService.UpdateServiceAsync(ConfigurationName ?? Name, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme));
 
@@ -116,7 +117,7 @@ namespace WiserTaskScheduler.Core.Workers
                     var stopWatch = new Stopwatch();
                     bool? paused = false;
                     bool? alreadyRunning = false;
-                    
+
                     // Only check running and pause state for custom configurations because the default services are always running for each instance of the WTS.
                     if (!String.IsNullOrWhiteSpace(ConfigurationName))
                     {
@@ -168,7 +169,7 @@ namespace WiserTaskScheduler.Core.Workers
                                 {
                                     state = "warning";
                                 }
-                                
+
                                 // Clear the log level of the service after the run to prevent an old state from being used.
                                 logService.ClearLogLevelOfService(ConfigurationName ?? Name, RunScheme.TimeId);
                             }
@@ -225,22 +226,7 @@ namespace WiserTaskScheduler.Core.Workers
         /// <returns></returns>
         private async Task WaitTillNextRun(CancellationToken stoppingToken)
         {
-            bool timeSplit;
-
-            do
-            {
-                timeSplit = false;
-                var timeTillNextRun = runSchemesService.GetTimeTillNextRun(RunScheme);
-
-                if (timeTillNextRun.TotalMilliseconds > Int32.MaxValue)
-                {
-                    timeTillNextRun = new TimeSpan(0, 0, 0, 0, Int32.MaxValue);
-                    timeSplit = true;
-                }
-
-                await Task.Delay(timeTillNextRun, stoppingToken);
-
-            } while (timeSplit);
+            await TaskHelpers.WaitAsync(runSchemesService.GetTimeTillNextRun(RunScheme), stoppingToken);
         }
 
         /// <summary>

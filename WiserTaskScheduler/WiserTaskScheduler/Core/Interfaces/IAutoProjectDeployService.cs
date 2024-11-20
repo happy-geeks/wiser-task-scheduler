@@ -10,5 +10,5 @@ public interface IAutoProjectDeployService
     /// </summary>
     LogSettings LogSettings { get; set; }
 
-    Task ManageAutoProjectDeploy();
+    Task ManageAutoProjectDeployAsync();
 }

@@ -44,7 +44,7 @@ namespace WiserTaskScheduler.Core.Services
         private readonly ConcurrentDictionary<string, ActiveConfigurationModel> activeConfigurations;
 
         private long oAuthConfigurationVersion;
-        
+
         private bool updatedServiceTable;
 
         /// <inheritdoc />
@@ -73,7 +73,7 @@ namespace WiserTaskScheduler.Core.Services
         public async Task ManageConfigurations()
         {
             using var scope = serviceProvider.CreateScope();
-            
+
             // Update service table if it has not already been done since launch. The table definitions can only change when the WTS restarts with a new update.
             if (!updatedServiceTable)
             {
@@ -81,7 +81,7 @@ namespace WiserTaskScheduler.Core.Services
                 await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string> {WiserTableNames.WtsServices});
                 updatedServiceTable = true;
             }
-            
+
             var configurations = await GetConfigurationsAsync();
 
             if (configurations == null)
@@ -110,11 +110,11 @@ namespace WiserTaskScheduler.Core.Services
                     Version = configuration.Version,
                     WorkerPerTimeId = new ConcurrentDictionary<int, ConfigurationsWorker>()
                 });
-                
+
                 foreach (var runScheme in configuration.GetAllRunSchemes())
                 {
                     runScheme.LogSettings ??= configuration.LogSettings ?? LogSettings;
-                    
+
                     if (runScheme.Id == 0)
                     {
                         var existingService = await wiserDashboardService.GetServiceAsync(configuration.ServiceName, runScheme.TimeId);
@@ -123,14 +123,14 @@ namespace WiserTaskScheduler.Core.Services
                             await wiserDashboardService.CreateServiceAsync(configuration.ServiceName, runScheme.TimeId);
                         }
                     }
-                    
+
                     await wiserDashboardService.UpdateServiceAsync(configuration.ServiceName, runScheme.TimeId, runScheme.Action, runScheme.Type.ToString().ToLower(), state: "active", templateId: configuration.TemplateId);
 
                     var thread = new Thread(() => StartConfigurationAsync(runScheme, configuration));
                     thread.Start();
                 }
             }
-            
+
             await StopRemovedConfigurationsAsync(configurations);
 
             await StartExtraRunsAsync();
@@ -226,7 +226,7 @@ namespace WiserTaskScheduler.Core.Services
         private async Task<List<ConfigurationModel>> GetConfigurationsAsync()
         {
             var configurations = new List<ConfigurationModel>();
-            
+
             if (String.IsNullOrWhiteSpace(wtsSettings.MainService.LocalConfiguration))
             {
                 var wiserConfigurations = await wiserService.RequestConfigurations();
@@ -235,7 +235,7 @@ namespace WiserTaskScheduler.Core.Services
                 {
                     return null;
                 }
-                
+
                 var numberOfOAuthConfigurations = wiserConfigurations.Count(configuration => !String.IsNullOrWhiteSpace(configuration.EditorValue) && configuration.EditorValue.StartsWith("<OAuthConfiguration>"));
                 if (numberOfOAuthConfigurations > 1)
                 {
@@ -342,7 +342,7 @@ namespace WiserTaskScheduler.Core.Services
                     configuration = configuration.Replace($"[{{Credential:{credential.Key}}}]", credential.Value);
                 }
             }
-            
+
             return configuration;
         }
 
@@ -400,7 +400,7 @@ namespace WiserTaskScheduler.Core.Services
             try
             {
                 await worker.InitializeAsync(configuration, $"{configuration.ServiceName}", runScheme, singleRun);
-                
+
                 // If there is no action to be performed the thread can be closed.
                 if (!worker.HasAction)
                 {
@@ -428,7 +428,7 @@ namespace WiserTaskScheduler.Core.Services
 
         private async Task StartExtraRunsAsync()
         {
-            var services = await wiserDashboardService.GetServices(true);
+            var services = await wiserDashboardService.GetServicesAsync(true);
 
             foreach (var service in services)
             {
@@ -444,10 +444,10 @@ namespace WiserTaskScheduler.Core.Services
                 {
                     continue;
                 }
-                
+
                 var configuration = activeConfigurations[service.Configuration].WorkerPerTimeId[service.TimeId].Configuration;
                 var runScheme = activeConfigurations[service.Configuration].WorkerPerTimeId[service.TimeId].RunScheme;
-                
+
                 var thread = new Thread(() => StartConfigurationAsync(runScheme, configuration, true));
                 thread.Start();
             }
