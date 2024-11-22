@@ -94,9 +94,12 @@ namespace WiserTaskScheduler.Modules.Branches.Services
 
             // Use .NET time and not database time, because we often use DigitalOcean and they have their timezone set to UTC by default.
             databaseConnection.AddParameter("now", DateTime.Now);
+            databaseConnection.AddParameter("processAutomaticDeploy", branchQueue.ProcessAutomaticDeployBranches);
             var dataTable = await databaseConnection.GetAsync($@"SELECT * 
 FROM {WiserTableNames.WiserBranchesQueue}
 WHERE started_on IS NULL
+AND is_template = 0
+AND is_for_automatic_deploy = ?processAutomaticDeploy
 AND start_on <= ?now
 ORDER BY start_on ASC, id ASC");
 

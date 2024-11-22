@@ -1,18 +1,24 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
+using System.Net.Http.Json;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Newtonsoft.Json.Linq;
+using Twilio.Jwt;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Helpers;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
+using WiserTaskScheduler.Modules.Branches.Interfaces;
 using WiserTaskScheduler.Modules.Wiser.Interfaces;
 
 namespace WiserTaskScheduler.Core.Services;
@@ -22,6 +28,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     private readonly WtsSettings wtsSettings;
     private readonly GclSettings gclSettings;
     private readonly IServiceProvider serviceProvider;
+    private readonly IHttpClientService httpClientService;
     private readonly ILogService logService;
     private readonly ILogger<AutoProjectDeployService> logger;
     private readonly string logName;
@@ -48,11 +55,12 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <summary>
     /// Creates a new instance of <see cref="AutoProjectDeployService" />.
     /// </summary>
-    public AutoProjectDeployService(IOptions<WtsSettings> wtsSettings, IOptions<GclSettings> gclSettings, IServiceProvider serviceProvider, ILogService logService, ILogger<AutoProjectDeployService> logger)
+    public AutoProjectDeployService(IOptions<WtsSettings> wtsSettings, IOptions<GclSettings> gclSettings, IServiceProvider serviceProvider, IHttpClientService httpClientService, ILogService logService, ILogger<AutoProjectDeployService> logger)
     {
         this.wtsSettings = wtsSettings.Value;
         this.gclSettings = gclSettings.Value;
         this.serviceProvider = serviceProvider;
+        this.httpClientService = httpClientService;
         this.logService = logService;
         this.logger = logger;
 
@@ -62,6 +70,9 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <inheritdoc />
     public async Task ManageAutoProjectDeployAsync()
     {
+        // Set the action to process automatic deploy branches instead of the normal branches. This object is always used for this flow.
+        wtsSettings.AutoProjectDeploySettings.BranchQueue.ProcessAutomaticDeployBranches = true;
+        
         // TODO: I found the "CreateAsyncScope" randomly. Normally we use "CreateScope" instead. But after reading the descriptions of the two, I think "CreateAsyncScope" is the better one. Not sure though, so check if that's actually true and if it actually works.
         await using var scope = serviceProvider.CreateAsyncScope();
         var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
@@ -73,10 +84,10 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         var branchName = branchSettings.GetDetailValue(BranchNameProperty);
         var branchMergeTemplate = branchSettings.GetDetailValue<int>(BranchMergeTemplateProperty);
         var emailsForStatusUpdates = branchSettings.GetDetailValue(EmailForStatusUpdatesProperty)?.Split(';');
-        var githubAccessToken = branchSettings.GetDetailValue(GitHubAccessTokenProperty)?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
-        var githubAccessTokenExpires = branchSettings.GetDetailValue<DateTime>(GitHubAccessTokenExpiresProperty);
-        var githubRepository = branchSettings.GetDetailValue(GitHubRepositoryProperty);
-        var githubOrganization = branchSettings.GetDetailValue(GitHubOrganizationProperty);
+        var gitHubAccessToken = branchSettings.GetDetailValue(GitHubAccessTokenProperty)?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
+        var gitHubAccessTokenExpires = branchSettings.GetDetailValue<DateTime>(GitHubAccessTokenExpiresProperty);
+        var gitHubRepository = branchSettings.GetDetailValue(GitHubRepositoryProperty);
+        var gitHubOrganization = branchSettings.GetDetailValue(GitHubOrganizationProperty);
         var configurationsToPause = branchSettings.GetDetailValue(ConfigurationsToPauseProperty)?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(Int32.Parse).ToList() ?? new List<int>();
         var currentDateTime = DateTime.Now;
 
@@ -104,15 +115,15 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             }
 
             // This is to prevent the thread from sleeping for too long.
-            var timeToWaitToPauzeConfigurations = configurationsPauseDatetime - currentDateTime;
-            if (timeToWaitToPauzeConfigurations > MaximumThreadSleepTime)
+            var timeToWaitToPauseConfigurations = configurationsPauseDatetime - currentDateTime;
+            if (timeToWaitToPauseConfigurations > MaximumThreadSleepTime)
             {
                 return;
             }
 
             // Wait till the configurations need to be paused.
             // TODO: Pass cancellation token from somewhere? MainWorker/MainService? I don't know.
-            await TaskHelpers.WaitAsync(timeToWaitToPauzeConfigurations, default);
+            await TaskHelpers.WaitAsync(timeToWaitToPauseConfigurations, default);
 
             // Pause configurations/services.
             foreach (var configurationId in configurationsToPause)
@@ -133,15 +144,111 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         await TaskHelpers.WaitAsync(deployStartDatetime - DateTime.Now, default);
 
         // TODO: Deploy the update
+        var gitHubBaseUrl = $"https://api.github.com/repos/{gitHubOrganization}/{gitHubRepository}/actions";
+        
+        // Disable the website according to the GitHub workflow to start the deployment.
+        if (!await DisableWebsiteAsync(gitHubBaseUrl, gitHubAccessToken))
+        {
+            // TODO: Enable website again in case multiple servers are running and not all of them failed.
+            await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploySettings.LogSettings, "The automatic deployment could not be executed, because the GitHub workflow failed to disable the website.", logName);
+            return;
+        }
+
+        // Make a backup of Wiser history before the merge. If the table does already exist, it will be dropped and recreated.
+        await BackupWiserHistoryAsync(scope, "before_merge");
+        
+        // TODO: Merge the branch
+        var branchQueueService = (IActionsService)scope.ServiceProvider.GetRequiredService<IBranchQueueService>();
+        var result = await branchQueueService.Execute(wtsSettings.AutoProjectDeploySettings.BranchQueue, [], logName);
+        
+        
+        // Make a backup of Wiser history after the merge. If the table does already exist, it will be dropped and recreated.
+        await BackupWiserHistoryAsync(scope, "after_merge");
 
         // TODO: Resume configurations
 
         throw new NotImplementedException();
     }
 
-    private Task<bool> CheckIfGithubActionsSucceededAsync(DateTime checkFrom, DateTime checkTill, TimeSpan interval)
+    /// <summary>
+    /// Disables the website according to the GitHub workflow to start the deployment.
+    /// </summary>
+    /// <param name="gitHubBaseUrl">The base URL to use for API calls to the GitHub API.</param>
+    /// <param name="gitHubAccessToken">The access token to use for the GitHub API.</param>
+    /// <returns></returns>
+    private async Task<bool> DisableWebsiteAsync(string gitHubBaseUrl, string gitHubAccessToken)
     {
-        // TODO: Get actions from Github to see if the action succeeded
-        throw new NotImplementedException();
+        var currentUtcTime = DateTime.UtcNow;
+        var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{gitHubBaseUrl}/disable-website.yml/dispatches");
+        httpRequest.Headers.Add("Authorization", $"Bearer {gitHubAccessToken}");
+        httpRequest.Headers.Add("Accept", "application/vnd.github+json");
+        httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
+        httpRequest.Content = JsonContent.Create(new {@ref = "main"});
+        
+        await httpClientService.Client.SendAsync(httpRequest);
+
+        return await CheckIfGithubWorkflowSucceededAsync(currentUtcTime, DateTime.Now.AddMinutes(15), new TimeSpan(0, 0, 1), gitHubBaseUrl, gitHubAccessToken);
+    }
+
+    private async Task BackupWiserHistoryAsync(AsyncServiceScope scope, string backupTableSuffix)
+    {
+        return;
+        var databaseConnection = scope.ServiceProvider.GetService<IDatabaseConnection>();
+        // TODO: Connect to branch database for backups. await databaseConnection.ChangeConnectionStringsAsync();
+        
+        var query = $"""
+                     DROP TABLE IF EXISTS _{WiserTableNames.WiserHistory}_{backupTableSuffix};
+                     CREATE TABLE _{WiserTableNames.WiserHistory}_{backupTableSuffix} AS TABLE {WiserTableNames.WiserHistory};
+                     INSERT INTO _{WiserTableNames.WiserHistory}_{backupTableSuffix} SELECT * FROM {WiserTableNames.WiserHistory};
+                     """;
+        
+        await databaseConnection.ExecuteAsync(query);
+    }
+
+    /// <summary>
+    /// Checks if the GitHub workflow succeeded.
+    /// </summary>
+    /// <param name="checkFromUtcTime">The time in UTC from when to request workflows.</param>
+    /// <param name="checkTillMachineTime">The time until the check needs to be executed before considering it a fail. This is local machine time.</param>
+    /// <param name="interval">The interval between checks.</param>
+    /// <param name="gitHubBaseUrl">The base URL to use for API calls to the GitHub API.</param>
+    /// <param name="gitHubAccessToken">The access token to use for the GitHub API.</param>
+    /// <returns>Returns true if the workflows have all been completed, false if at least one failed or something went wrong.</returns>
+    private async Task<bool> CheckIfGithubWorkflowSucceededAsync(DateTime checkFromUtcTime, DateTime checkTillMachineTime, TimeSpan interval, string gitHubBaseUrl, string gitHubAccessToken)
+    {
+        // Wait before first check to give the runner(s) time to start.
+        await Task.Delay(interval);
+
+        // Check if the Github actions succeeded.
+        while (DateTime.Now <= checkTillMachineTime)
+        {
+            var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"{gitHubBaseUrl}/runs?branch=main&created>={checkFromUtcTime:yyyy-MM-ddTHH:mm:ssZ}}}");
+            httpRequest.Headers.Add("Authorization", $"Bearer {gitHubAccessToken}");
+            httpRequest.Headers.Add("Accept", "application/vnd.github+json");
+            httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
+            
+            var response = await httpClientService.Client.SendAsync(httpRequest);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploySettings.LogSettings, $"Failed to get the Github actions to check if the actions succeeded, server returned status '{response.StatusCode}' with reason '{response.ReasonPhrase}'.", logName);
+                return false;
+            }
+            
+            var body = await response.Content.ReadAsStringAsync();
+            var result = JToken.Parse(body);
+            var workflowRuns = result["workflow_runs"] as JArray;
+
+            // Wait till all the runs are completed. If no runs are found yet the Github API might still be processing it.
+            if (!workflowRuns.Any() || workflowRuns.All(wr => wr["status"].Value<string>() != "completed"))
+            {
+                await Task.Delay(interval);
+                continue;
+            }
+            
+            return workflowRuns.All(wr => wr["conclusion"].Value<string>() == "success");
+        }
+
+        return false;
     }
 }
