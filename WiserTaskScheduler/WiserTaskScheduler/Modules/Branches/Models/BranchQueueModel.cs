@@ -1,5 +1,6 @@
 ﻿using System.Xml.Serialization;
 using MySqlConnector;
+using Newtonsoft.Json;
 using WiserTaskScheduler.Core.Models;
 
 namespace WiserTaskScheduler.Modules.Branches.Models
@@ -55,5 +56,13 @@ namespace WiserTaskScheduler.Modules.Branches.Models
         [XmlArray("CopyTableRules")]
         [XmlArrayItem(typeof(CopyTableRuleModel))]
         public CopyTableRuleModel[] CopyTableRules { get; set; }
+        
+        /// <summary>
+        /// Gets or sets whether to process automatic deploy branches.
+        /// This is used internally and can't be overwritten in the XML configuration.
+        /// </summary>
+        [XmlIgnore]
+        [JsonIgnore]
+        public bool ProcessAutomaticDeployBranches { get; set; }
     }
 }
