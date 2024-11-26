@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
@@ -13,7 +14,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
-using Twilio.Jwt;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Helpers;
 using WiserTaskScheduler.Core.Interfaces;
@@ -29,6 +29,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     private readonly GclSettings gclSettings;
     private readonly IServiceProvider serviceProvider;
     private readonly IHttpClientService httpClientService;
+    private readonly IWiserService wiserService;
     private readonly ILogService logService;
     private readonly ILogger<AutoProjectDeployService> logger;
     private readonly string logName;
@@ -55,12 +56,13 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <summary>
     /// Creates a new instance of <see cref="AutoProjectDeployService" />.
     /// </summary>
-    public AutoProjectDeployService(IOptions<WtsSettings> wtsSettings, IOptions<GclSettings> gclSettings, IServiceProvider serviceProvider, IHttpClientService httpClientService, ILogService logService, ILogger<AutoProjectDeployService> logger)
+    public AutoProjectDeployService(IOptions<WtsSettings> wtsSettings, IOptions<GclSettings> gclSettings, IServiceProvider serviceProvider, IHttpClientService httpClientService, IWiserService wiserService, ILogService logService, ILogger<AutoProjectDeployService> logger)
     {
         this.wtsSettings = wtsSettings.Value;
         this.gclSettings = gclSettings.Value;
         this.serviceProvider = serviceProvider;
         this.httpClientService = httpClientService;
+        this.wiserService = wiserService;
         this.logService = logService;
         this.logger = logger;
 
@@ -159,11 +161,26 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         
         // TODO: Merge the branch
         var branchQueueService = (IActionsService)scope.ServiceProvider.GetRequiredService<IBranchQueueService>();
-        var result = await branchQueueService.Execute(wtsSettings.AutoProjectDeploySettings.BranchQueue, [], logName);
-        
+        var branchResult = await branchQueueService.Execute(wtsSettings.AutoProjectDeploySettings.BranchQueue, [], logName);
         
         // Make a backup of Wiser history after the merge. If the table does already exist, it will be dropped and recreated.
         await BackupWiserHistoryAsync(scope, "after_merge");
+
+        if (!branchResult.TryGetValue("Success", out var success) || !(bool) success)
+        {
+            await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploySettings.LogSettings, "The automatic deployment could not be executed, because the branch merge failed.", logName);
+            // TODO: send mail
+            return;
+        }
+        
+        var publishResult = await PublishWiserCommitsAsync();
+
+        if (publishResult != HttpStatusCode.OK)
+        {
+            // TODO: Send error mail.
+        }
+        
+        // TODO: Merge staging into main on GitHub
 
         // TODO: Resume configurations
 
@@ -183,7 +200,10 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         httpRequest.Headers.Add("Authorization", $"Bearer {gitHubAccessToken}");
         httpRequest.Headers.Add("Accept", "application/vnd.github+json");
         httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
-        httpRequest.Content = JsonContent.Create(new {@ref = "main"});
+        httpRequest.Content = JsonContent.Create(new
+        {
+            @ref = "main"
+        });
         
         await httpClientService.Client.SendAsync(httpRequest);
 
@@ -250,5 +270,55 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         }
 
         return false;
+    }
+    
+    /// <summary>
+    /// Publishes the Wiser commits to the production environment.
+    /// </summary>
+    /// <returns>Returns the status code from the Wiser API.</returns>
+    private async Task<HttpStatusCode> PublishWiserCommitsAsync()
+    {
+        var accessToken = await wiserService.GetAccessTokenAsync();
+        var wiserApiBaseUrl = $"{wtsSettings.Wiser.WiserApiUrl}/api/v3/version-control";
+        
+        var commitsToPublish = await GetWiserCommitsToPublishAsync(accessToken, wiserApiBaseUrl);
+        
+        var httpRequest = new HttpRequestMessage(HttpMethod.Put, $"{wiserApiBaseUrl}/deploy");
+        httpRequest.Headers.Add("Authorization", $"Bearer {accessToken}");
+        httpRequest.Headers.Add("Accept", "application/json");
+        httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
+        httpRequest.Content = JsonContent.Create(new
+        {
+            environment = "Live",
+            commitIds = String.Join(',', commitsToPublish)
+        });
+        
+        var response = await httpClientService.Client.SendAsync(httpRequest);
+        return response.StatusCode;
+    }
+
+    /// <summary>
+    /// Get all commits in Wiser that need to be published and are currently published to the acceptance environment.
+    /// </summary>
+    /// <param name="accessToken">The access token for the Wiser API.</param>
+    /// <param name="wiserApiBaseUrl">The base URL to the Wiser API.</param>
+    /// <returns>Returns a list with all commit IDs that need to be published.</returns>
+    private async Task<List<int>> GetWiserCommitsToPublishAsync(string accessToken, string wiserApiBaseUrl)
+    {
+        var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"{wiserApiBaseUrl}/not-completed-commits");
+        httpRequest.Headers.Add("Authorization", $"Bearer {accessToken}");
+        httpRequest.Headers.Add("Accept", "application/json");
+        httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
+        
+        var response = await httpClientService.Client.SendAsync(httpRequest);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new NotImplementedException();
+        }
+        
+        var body = await response.Content.ReadAsStringAsync();
+        var result = JArray.Parse(body);
+        return result.Where(x => (bool) x["isAcceptance"]).Select(x => (int)x["id"]).ToList();
     }
 }
