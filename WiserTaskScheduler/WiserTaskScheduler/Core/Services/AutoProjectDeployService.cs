@@ -165,13 +165,13 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         var connectionStringBuilder = branchQueueService.GetConnectionStringBuilderForBranch(mergeBranchSettings, mergeBranchSettings.DatabaseName);
         
         var branchDatabaseConnection = scope.ServiceProvider.GetService<IDatabaseConnection>();
-        
         await branchDatabaseConnection.ChangeConnectionStringsAsync(connectionStringBuilder.ConnectionString);
 
         // Make a backup of Wiser history before the merge. If the table does already exist, it will be dropped and recreated.
         await BackupWiserHistoryAsync(branchDatabaseConnection, "before_merge");
         
-        // TODO: Merge the branch
+        // Prepare the branch merge based on the template and start the merge process.
+        await PrepareBranchMergeAsync(productionDatabaseConnection, deployStartDatetime, mergeBranchSettings);
         var branchResult = await ((IActionsService)branchQueueService).Execute(wtsSettings.AutoProjectDeploySettings.BranchQueue, [], logName);
         
         // Make a backup of Wiser history after the merge. If the table does already exist, it will be dropped and recreated.
@@ -240,18 +240,47 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         }
         
         var data = dataTable.Rows[0]["data"].ToString();
-        return JsonConvert.DeserializeObject<MergeBranchSettingsModel>(data!);
+        var result = JsonConvert.DeserializeObject<MergeBranchSettingsModel>(data!);
+        
+        // Clear template data to prepare for the merge.
+        result.TemplateId = 0;
+        result.IsTemplate = false;
+        result.TemplateName = null;
+
+        return result;
     }
 
+    /// <summary>
+    /// Makes a backup of the Wiser history table.
+    /// </summary>
+    /// <param name="databaseConnection">The database connection for the database where the backup needs to be made.</param>
+    /// <param name="backupTableSuffix">The suffix for the backup table.</param>
     private async Task BackupWiserHistoryAsync(IDatabaseConnection databaseConnection, string backupTableSuffix)
     {
-        return;
-        // TODO: Connect to branch database for backups. await databaseConnection.ChangeConnectionStringsAsync();
-        
         var query = $"""
                      DROP TABLE IF EXISTS _{WiserTableNames.WiserHistory}_{backupTableSuffix};
                      CREATE TABLE _{WiserTableNames.WiserHistory}_{backupTableSuffix} AS TABLE {WiserTableNames.WiserHistory};
                      INSERT INTO _{WiserTableNames.WiserHistory}_{backupTableSuffix} SELECT * FROM {WiserTableNames.WiserHistory};
+                     """;
+        
+        await databaseConnection.ExecuteAsync(query);
+    }
+
+    /// <summary>
+    /// Prepares the branch merge based on the provided template.
+    /// </summary>
+    /// <param name="databaseConnection">The database connection where the merge needs to be prepared, e.g. the production database.</param>
+    /// <param name="deployStartDatetime">The date and time the automatic deployment started.</param>
+    /// <param name="mergeBranchSettings">The settings for the merge, based on the original template.</param>
+    private async Task PrepareBranchMergeAsync(IDatabaseConnection databaseConnection, DateTime deployStartDatetime, MergeBranchSettingsModel mergeBranchSettings)
+    {
+        databaseConnection.AddParameter("name", $"Auto-deployment - {deployStartDatetime:yyyy-MM-dd HH:mm:ss}");
+        databaseConnection.AddParameter("branchId", mergeBranchSettings.Id);
+        databaseConnection.AddParameter("data", JsonConvert.SerializeObject(mergeBranchSettings));
+        
+        var query = $"""
+                     INSERT INTO {WiserTableNames.WiserBranchesQueue} (name, branchId, action, data, added_by, user_id, is_for_automatic_deploy)
+                     VALUES (@name, @branchId, 'merge', @data, 'Wiser Task Scheduler', 0, 1);
                      """;
         
         await databaseConnection.ExecuteAsync(query);
