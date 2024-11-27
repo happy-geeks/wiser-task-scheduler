@@ -9,10 +9,12 @@ using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Modules.Branches.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Helpers;
@@ -155,16 +157,25 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploySettings.LogSettings, "The automatic deployment could not be executed, because the GitHub workflow failed to disable the website.", logName);
             return;
         }
+        
+        var branchQueueService = scope.ServiceProvider.GetRequiredService<IBranchQueueService>();
+        var productionDatabaseConnection = scope.ServiceProvider.GetService<IDatabaseConnection>();
+        
+        var mergeBranchSettings = await GetMergeBranchSettingsAsync(productionDatabaseConnection, branchMergeTemplate);
+        var connectionStringBuilder = branchQueueService.GetConnectionStringBuilderForBranch(mergeBranchSettings, mergeBranchSettings.DatabaseName);
+        
+        var branchDatabaseConnection = scope.ServiceProvider.GetService<IDatabaseConnection>();
+        
+        await branchDatabaseConnection.ChangeConnectionStringsAsync(connectionStringBuilder.ConnectionString);
 
         // Make a backup of Wiser history before the merge. If the table does already exist, it will be dropped and recreated.
-        await BackupWiserHistoryAsync(scope, "before_merge");
+        await BackupWiserHistoryAsync(branchDatabaseConnection, "before_merge");
         
         // TODO: Merge the branch
-        var branchQueueService = (IActionsService)scope.ServiceProvider.GetRequiredService<IBranchQueueService>();
-        var branchResult = await branchQueueService.Execute(wtsSettings.AutoProjectDeploySettings.BranchQueue, [], logName);
+        var branchResult = await ((IActionsService)branchQueueService).Execute(wtsSettings.AutoProjectDeploySettings.BranchQueue, [], logName);
         
         // Make a backup of Wiser history after the merge. If the table does already exist, it will be dropped and recreated.
-        await BackupWiserHistoryAsync(scope, "after_merge");
+        await BackupWiserHistoryAsync(branchDatabaseConnection, "after_merge");
 
         if (!branchResult.TryGetValue("Success", out var success) || !(bool) success)
         {
@@ -209,11 +220,32 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
 
         return await CheckIfGithubWorkflowSucceededAsync(currentUtcTime, DateTime.Now.AddMinutes(15), new TimeSpan(0, 0, 1), gitHubBaseUrl, gitHubAccessToken);
     }
+    
+    /// <summary>
+    /// Gets the merge branch settings from the database based on the selected template.
+    /// </summary>
+    /// <param name="databaseConnection">The database connection to use.</param>
+    /// <param name="branchMergeTemplate"></param>
+    /// <returns></returns>
+    /// <exception cref="NotImplementedException"></exception>
+    private async Task<MergeBranchSettingsModel> GetMergeBranchSettingsAsync(IDatabaseConnection databaseConnection, int branchMergeTemplate)
+    {
+        databaseConnection.AddParameter("BranchMergeTemplate", branchMergeTemplate);
+        var query = $"SELECT data FROM {WiserTableNames.WiserBranchesQueue} WHERE id = @BranchMergeTemplate;";
+        
+        var dataTable = await databaseConnection.GetAsync(query);
+        if (dataTable.Rows.Count == 0 || dataTable.Rows[0]["data"] == DBNull.Value)
+        {
+            throw new NotImplementedException();
+        }
+        
+        var data = dataTable.Rows[0]["data"].ToString();
+        return JsonConvert.DeserializeObject<MergeBranchSettingsModel>(data!);
+    }
 
-    private async Task BackupWiserHistoryAsync(AsyncServiceScope scope, string backupTableSuffix)
+    private async Task BackupWiserHistoryAsync(IDatabaseConnection databaseConnection, string backupTableSuffix)
     {
         return;
-        var databaseConnection = scope.ServiceProvider.GetService<IDatabaseConnection>();
         // TODO: Connect to branch database for backups. await databaseConnection.ChangeConnectionStringsAsync();
         
         var query = $"""
