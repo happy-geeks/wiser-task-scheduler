@@ -129,6 +129,40 @@ ORDER BY start_on ASC, id ASC");
             };
         }
 
+        /// <inheritdoc />
+        public MySqlConnectionStringBuilder GetConnectionStringBuilderForBranch(BranchActionBaseModel branchActionBaseModel, string database, bool allowLoadLocalInfile = false)
+        {
+            var connectionStringBuilder = new MySqlConnectionStringBuilder(connectionString)
+            {
+                IgnoreCommandTransaction = true,
+                AllowLoadLocalInfile = allowLoadLocalInfile,
+                ConvertZeroDateTime = true,
+                Database = database
+            };
+
+            if (!String.IsNullOrWhiteSpace(branchActionBaseModel.DatabaseHost))
+            {
+                connectionStringBuilder.Server = branchActionBaseModel.DatabaseHost.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
+            }
+            
+            if (branchActionBaseModel.DatabasePort is > 0)
+            {
+                connectionStringBuilder.Port = (uint)branchActionBaseModel.DatabasePort.Value;
+            }
+            
+            if (!String.IsNullOrWhiteSpace(branchActionBaseModel.DatabaseUsername))
+            {
+                connectionStringBuilder.UserID = branchActionBaseModel.DatabaseUsername.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
+            }
+            
+            if (!String.IsNullOrWhiteSpace(branchActionBaseModel.DatabasePassword))
+            {
+                connectionStringBuilder.Password = branchActionBaseModel.DatabasePassword.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
+            }
+
+            return connectionStringBuilder;
+        }
+
         /// <summary>
         /// Handles the creation of a new branch. This will create the new database and fill it with the requested data.
         /// </summary>
@@ -194,31 +228,7 @@ ORDER BY start_on ASC, id ASC");
                     ConvertZeroDateTime = true
                 };
 
-                var branchConnectionStringBuilder = new MySqlConnectionStringBuilder(connectionString)
-                {
-                    IgnoreCommandTransaction = true,
-                    AllowLoadLocalInfile = true,
-                    ConvertZeroDateTime = true
-                };
-
-                branchConnectionStringBuilder.Database = "";
-
-                if (!String.IsNullOrWhiteSpace(settings.DatabaseHost))
-                {
-                    branchConnectionStringBuilder.Server = settings.DatabaseHost.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
-                }
-                if (settings.DatabasePort is > 0)
-                {
-                    branchConnectionStringBuilder.Port = (uint)settings.DatabasePort.Value;
-                }
-                if (!String.IsNullOrWhiteSpace(settings.DatabaseUsername))
-                {
-                    branchConnectionStringBuilder.UserID = settings.DatabaseUsername.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
-                }
-                if (!String.IsNullOrWhiteSpace(settings.DatabasePassword))
-                {
-                    branchConnectionStringBuilder.Password = settings.DatabasePassword.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
-                }
+                var branchConnectionStringBuilder = GetConnectionStringBuilderForBranch(settings, "", allowLoadLocalInfile: true);
 
                 // If the branch database is on the same server as the production database, we can use a quicker and more efficient way of copying data.
                 var branchIsOnSameServerAsProduction = String.Equals(productionConnectionStringBuilder.Server, branchConnectionStringBuilder.Server, StringComparison.OrdinalIgnoreCase);
@@ -1087,31 +1097,9 @@ AND EXTRA NOT LIKE '%GENERATED'";
             var objectMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.EasyObjects);
 
             // Store database names in variables for later use and create connection string for the branch database.
-            var connectionStringBuilder = new MySqlConnectionStringBuilder(connectionString)
-            {
-                IgnoreCommandTransaction = true,
-                ConvertZeroDateTime = true
-            };
-            var originalDatabase = connectionStringBuilder.Database;
+            var originalDatabase = new MySqlConnectionStringBuilder(connectionString).Database;
             var branchDatabase = settings.DatabaseName;
-            connectionStringBuilder.Database = branchDatabase;
-
-            if (!String.IsNullOrWhiteSpace(settings.DatabaseHost))
-            {
-                connectionStringBuilder.Server = settings.DatabaseHost.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
-            }
-            if (settings.DatabasePort is > 0)
-            {
-                connectionStringBuilder.Port = (uint)settings.DatabasePort.Value;
-            }
-            if (!String.IsNullOrWhiteSpace(settings.DatabaseUsername))
-            {
-                connectionStringBuilder.UserID = settings.DatabaseUsername.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
-            }
-            if (!String.IsNullOrWhiteSpace(settings.DatabasePassword))
-            {
-                connectionStringBuilder.Password = settings.DatabasePassword.DecryptWithAesWithSalt(gclSettings.DefaultEncryptionKey, useSlowerButMoreSecureMethod: true);
-            }
+            var connectionStringBuilder = GetConnectionStringBuilderForBranch(settings, branchDatabase);
 
             // Create and open connections to both databases and start transactions.
             var productionConnection = new MySqlConnection(connectionString);
