@@ -10,6 +10,9 @@ using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Branches.Models;
+using GeeksCoreLibrary.Modules.Communication.Enums;
+using GeeksCoreLibrary.Modules.Communication.Models;
+using IGclCommunicationsService = GeeksCoreLibrary.Modules.Communication.Interfaces.ICommunicationsService;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -75,7 +78,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     public async Task ManageAutoProjectDeployAsync()
     {
         // Set the action to process automatic deploy branches instead of the normal branches. This object is always used for this flow.
-        wtsSettings.AutoProjectDeploySettings.BranchQueue.ProcessAutomaticDeployBranches = true;
+        wtsSettings.AutoProjectDeploy.BranchQueue.ProcessAutomaticDeployBranches = true;
         
         // TODO: I found the "CreateAsyncScope" randomly. Normally we use "CreateScope" instead. But after reading the descriptions of the two, I think "CreateAsyncScope" is the better one. Not sure though, so check if that's actually true and if it actually works.
         await using var scope = serviceProvider.CreateAsyncScope();
@@ -114,7 +117,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             // So if the pause datetime is later than the deployment start datetime, we should stop.
             if (configurationsPauseDatetime > deployStartDatetime)
             {
-                await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploySettings.LogSettings, "The automatic deployment could not be executed, because the settings are invalid (the configurations pause datetime is set later than the deployment start datetime).", logName);
+                await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, "The automatic deployment could not be executed, because the settings are invalid (the configurations pause datetime is set later than the deployment start datetime).", logName);
                 return;
             }
 
@@ -135,7 +138,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
                 var service = allServices.SingleOrDefault(s => s.Id == configurationId);
                 if (service == null)
                 {
-                    await logService.LogWarning(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploySettings.LogSettings, $"The service with ID {configurationId} is set to be paused before automatic project deploy, but this service could not be found.", logName);
+                    await logService.LogWarning(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, $"The service with ID {configurationId} is set to be paused before automatic project deploy, but this service could not be found.", logName);
                     continue;
                 }
 
@@ -146,15 +149,22 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         // Wait till the start datetime of the deployment.
         // TODO: Pass cancellation token from somewhere? MainWorker/MainService? I don't know.
         await TaskHelpers.WaitAsync(deployStartDatetime - DateTime.Now, default);
-
-        // TODO: Deploy the update
+        
         var gitHubBaseUrl = $"https://api.github.com/repos/{gitHubOrganization}/{gitHubRepository}/actions";
         
         // Disable the website according to the GitHub workflow to start the deployment.
-        if (!await DisableWebsiteAsync(gitHubBaseUrl, gitHubAccessToken))
+        if (!await DispatchGitHubWorkflowEventAsync(gitHubBaseUrl, gitHubAccessToken, "disable-website"))
         {
-            // TODO: Enable website again in case multiple servers are running and not all of them failed.
-            await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploySettings.LogSettings, "The automatic deployment could not be executed, because the GitHub workflow failed to disable the website.", logName);
+            // If one or more of the GitHub workflows failed, we try to enable them again.
+            if (!await DispatchGitHubWorkflowEventAsync(gitHubBaseUrl, gitHubAccessToken, "enable-website"))
+            {
+                await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, "The automatic deployment could not be executed, because the GitHub workflow failed to disable the website and could not enable it again.", logName);
+                await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, because the GitHub workflow failed to disable the website and could not enable it again. The website may still be in maintenance mode and manual actions are required.");
+                return;
+            }
+            
+            await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, "The automatic deployment could not be executed, because the GitHub workflow failed to disable the website.", logName);
+            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, because the GitHub workflow failed to disable the website. The website has been enabled again, a new attempt needs to be configured.");
             return;
         }
         
@@ -172,15 +182,15 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         
         // Prepare the branch merge based on the template and start the merge process.
         await PrepareBranchMergeAsync(productionDatabaseConnection, deployStartDatetime, mergeBranchSettings);
-        var branchResult = await ((IActionsService)branchQueueService).Execute(wtsSettings.AutoProjectDeploySettings.BranchQueue, [], logName);
+        var branchResult = await ((IActionsService)branchQueueService).Execute(wtsSettings.AutoProjectDeploy.BranchQueue, [], logName);
         
         // Make a backup of Wiser history after the merge. If the table does already exist, it will be dropped and recreated.
         await BackupWiserHistoryAsync(branchDatabaseConnection, "after_merge");
 
         if (!branchResult.TryGetValue("Success", out var success) || !(bool) success)
         {
-            await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploySettings.LogSettings, "The automatic deployment could not be executed, because the branch merge failed.", logName);
-            // TODO: send mail
+            await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, $"The automatic deployment could not be completed, because the branch merge failed. See the '{WiserTableNames.WiserBranchesQueue}' table for more information.", logName);
+            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be completed, because the branch merge failed. The website is still in maintenance mode and manual actions are required.");
             return;
         }
         
@@ -188,26 +198,68 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
 
         if (publishResult != HttpStatusCode.OK)
         {
-            // TODO: Send error mail.
+            await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, "The automatic deployment could not be completed, because the Wiser commits could not be published. See the Wiser API logs for more information.", logName);
+            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be completed, because the Wiser commits could not be published. The website is still in maintenance mode and manual actions are required.");
+            return;
         }
         
-        // TODO: Merge staging into main on GitHub
+        // Merge staging into main on GitHub
+        var currentUtcTime = DateTime.UtcNow;
+        var gitHubMergeResult = await MergeGitHubBranchAsync(gitHubBaseUrl, gitHubAccessToken);
 
-        // TODO: Resume configurations
+        if (gitHubMergeResult != HttpStatusCode.Created && gitHubMergeResult != HttpStatusCode.NoContent)
+        {
+            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be completed, because the staging branch could not be merged into the main branch on GitHub. The website is still in maintenance mode and manual actions are required.");
+            return;
+        }
 
-        throw new NotImplementedException();
+        if (gitHubMergeResult == HttpStatusCode.Created)
+        {
+            if (!await CheckIfGithubWorkflowSucceededAsync(currentUtcTime, DateTime.Now.AddMinutes(15), new TimeSpan(0, 1, 0), gitHubBaseUrl, gitHubAccessToken))
+            {
+                await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, "The automatic deployment could not be completed, because the GitHub workflow failed to merge the staging branch into the main branch.", logName);
+                await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be completed, because the GitHub workflow failed to merge the staging branch into the main branch. The website is still in maintenance mode and manual actions are required.");
+                return;
+            }
+        }
+
+        if (configurationsToPause.Any())
+        {
+            // Resume configurations/services that have been paused for the deployment.
+            foreach (var configurationId in configurationsToPause)
+            {
+                var service = allServices.SingleOrDefault(s => s.Id == configurationId);
+                if (service == null)
+                {
+                    await logService.LogWarning(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, $"The service with ID {configurationId} is set to be paused before automatic project deploy, but this service could not be found.", logName);
+                    continue;
+                }
+
+                await wiserDashboardService.UpdateServiceAsync(service.Configuration, service.TimeId, paused: false, state: "active");
+            }
+        }
+        
+        if (!await DispatchGitHubWorkflowEventAsync(gitHubBaseUrl, gitHubAccessToken, "enable-website"))
+        {
+            await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, "The automatic deployment could not be completed, because the GitHub workflow failed to enable the website.", logName);
+            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be completed, because the GitHub workflow failed to enable the website. The website is still in maintenance mode and manual actions are required.");
+            return;
+        }
+        
+        await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment succeeded", "The automatic deployment has been completed successfully. The website is now live and available for visitors.");
     }
 
     /// <summary>
-    /// Disables the website according to the GitHub workflow to start the deployment.
+    /// Dispatch an event to start a GitHub workflow.
     /// </summary>
     /// <param name="gitHubBaseUrl">The base URL to use for API calls to the GitHub API.</param>
     /// <param name="gitHubAccessToken">The access token to use for the GitHub API.</param>
+    /// <param name="workflowName">The name of the workflow to dispatch the event for.</param>
     /// <returns></returns>
-    private async Task<bool> DisableWebsiteAsync(string gitHubBaseUrl, string gitHubAccessToken)
+    private async Task<bool> DispatchGitHubWorkflowEventAsync(string gitHubBaseUrl, string gitHubAccessToken, string workflowName)
     {
         var currentUtcTime = DateTime.UtcNow;
-        var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{gitHubBaseUrl}/disable-website.yml/dispatches");
+        var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{gitHubBaseUrl}/{workflowName}.yml/dispatches");
         httpRequest.Headers.Add("Authorization", $"Bearer {gitHubAccessToken}");
         httpRequest.Headers.Add("Accept", "application/vnd.github+json");
         httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
@@ -218,7 +270,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         
         await httpClientService.Client.SendAsync(httpRequest);
 
-        return await CheckIfGithubWorkflowSucceededAsync(currentUtcTime, DateTime.Now.AddMinutes(15), new TimeSpan(0, 0, 1), gitHubBaseUrl, gitHubAccessToken);
+        return await CheckIfGithubWorkflowSucceededAsync(currentUtcTime, DateTime.Now.AddMinutes(15), new TimeSpan(0, 1, 0), gitHubBaseUrl, gitHubAccessToken);
     }
     
     /// <summary>
@@ -312,7 +364,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
 
             if (!response.IsSuccessStatusCode)
             {
-                await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploySettings.LogSettings, $"Failed to get the Github actions to check if the actions succeeded, server returned status '{response.StatusCode}' with reason '{response.ReasonPhrase}'.", logName);
+                await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, $"Failed to get the Github actions to check if the actions succeeded, server returned status '{response.StatusCode}' with reason '{response.ReasonPhrase}'.", logName);
                 return false;
             }
             
@@ -381,5 +433,64 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         var body = await response.Content.ReadAsStringAsync();
         var result = JArray.Parse(body);
         return result.Where(x => (bool) x["isAcceptance"]).Select(x => (int)x["id"]).ToList();
+    }
+
+    private async Task<HttpStatusCode> MergeGitHubBranchAsync(string gitHubBaseUrl, string gitHubAccessToken)
+    {
+        var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{gitHubBaseUrl}/merges");
+        httpRequest.Headers.Add("Authorization", $"Bearer {gitHubAccessToken}");
+        httpRequest.Headers.Add("Accept", "application/json");
+        httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
+
+        httpRequest.Content = JsonContent.Create(new
+        {
+            @base = "main",
+            head = "staging",
+            commit_message = "Automatic deployment using the WTS"
+        });
+        
+        var response = await httpClientService.Client.SendAsync(httpRequest);
+        
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, $"Failed to merge the staging branch into the main branch on GitHub, server returned status '{response.StatusCode}' with reason '{response.ReasonPhrase}'. The following body was returned:{Environment.NewLine}{body}", logName);
+        }
+        
+        return response.StatusCode;
+    }
+
+    /// <summary>
+    /// Sends an email to the provided recipients with the subject and body to give an update about the automatic deployment.
+    /// </summary>
+    /// <param name="scope">A <see cref="IServiceScope"/> to use to get the <see cref="IGclCommunicationsService"/> to send the email.</param>
+    /// <param name="recipients">The recipients to receive the email.</param>
+    /// <param name="subject">The subject for the email.</param>
+    /// <param name="body">The body/content of the email.</param>
+    private async Task SendMailAsync(IServiceScope scope, string[] recipients, string subject, string body)
+    {
+        try
+        {
+            var communicationsService = scope.ServiceProvider.GetRequiredService<IGclCommunicationsService>();
+            var receivers = recipients.Select(email => new CommunicationReceiverModel() {Address = email}).ToList();
+
+            var email = new SingleCommunicationModel()
+            {
+                Type = CommunicationTypes.Email,
+                Receivers = receivers,
+                Cc = new List<string>(),
+                Bcc = new List<string>(),
+                Subject = subject,
+                Content = body,
+                Sender = gclSettings.SmtpSettings.SenderEmailAddress,
+                SenderName = gclSettings.SmtpSettings.SenderName
+            };
+
+            await communicationsService.SendEmailDirectlyAsync(email, gclSettings.SmtpSettings);
+        }
+        catch (Exception exception)
+        {
+            await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, $"Failed to send an email to '{recipients}' with the subject '{subject}' due to exception:{Environment.NewLine}{exception}.", logName);
+        }
     }
 }
