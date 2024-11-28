@@ -50,9 +50,9 @@ namespace WiserTaskScheduler.Core.Models
         public SlackSettings SlackSettings { get; set; }
 
         /// <summary>
-        /// Gets or sets the <see cref="AutoProjectDeploySettings"/> used by the <see cref="AutoProjectDeployService"/>.
+        /// Gets or sets the <see cref="AutoProjectDeploy"/> used by the <see cref="AutoProjectDeployService"/>.
         /// </summary>
-        public AutoProjectDeploySettings AutoProjectDeploySettings { get; set; }
+        public AutoProjectDeploySettings AutoProjectDeploy { get; set; }
 
         /// <summary>
         /// A semicolon (;) seperated list of email addresses to notify when a core service failed during execution.

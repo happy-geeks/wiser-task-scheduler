@@ -17,8 +17,7 @@ public class AutoProjectDeployWorker : BaseWorker
 
     public AutoProjectDeployWorker(IOptions<WtsSettings> wtsSettings, IAutoProjectDeployService autoProjectDeployService, ILogService logService, ILogger<AutoProjectDeployWorker> logger, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
     {
-        // TODO: Initialize with the run scheme from the settings.
-        Initialize(LogName, new RunSchemeModel(), wtsSettings.Value.ServiceFailedNotificationEmails, true);
+        Initialize(LogName, wtsSettings.Value.AutoProjectDeploy.RunScheme, wtsSettings.Value.ServiceFailedNotificationEmails, true);
         RunScheme.LogSettings ??= new LogSettings();
 
         this.autoProjectDeployService = autoProjectDeployService;
