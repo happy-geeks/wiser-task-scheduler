@@ -2811,7 +2811,7 @@ WHERE `id` = ?id";
             WiserItemModel template = null;
             if (templateId > 0)
             {
-                template = await wiserItemsService.GetItemDetailsAsync(branchQueue.MergedBranchTemplateId, userId: userId);
+                template = await wiserItemsService.GetItemDetailsAsync(branchQueue.MergedBranchTemplateId, userId: userId, skipPermissionsCheck: true);
             }
 
             var subject = template?.GetDetailValue("subject");
@@ -2826,8 +2826,11 @@ WHERE `id` = ?id";
                 content = defaultMessageContent;
             }
 
-            await taskAlertsService.NotifyUserByEmailAsync(userId, addedBy, branchQueue, configurationServiceName, subject, content, replaceData, template?.GetDetailValue("sender_email"), template?.GetDetailValue("sender_name"));
-            await taskAlertsService.SendMessageToUserAsync(userId, addedBy, subject, branchQueue, configurationServiceName, replaceData, userId, addedBy);
+            if (userId > 0)
+            {
+                await taskAlertsService.NotifyUserByEmailAsync(userId, addedBy, branchQueue, configurationServiceName, subject, content, replaceData, template?.GetDetailValue("sender_email"), template?.GetDetailValue("sender_name"));
+                await taskAlertsService.SendMessageToUserAsync(userId, addedBy, subject, branchQueue, configurationServiceName, replaceData, userId, addedBy);
+            }
         }
 
         /// <summary>
