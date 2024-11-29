@@ -168,13 +168,19 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             return;
         }
         
-        var branchQueueService = scope.ServiceProvider.GetRequiredService<IBranchQueueService>();
         var productionDatabaseConnection = scope.ServiceProvider.GetService<IDatabaseConnection>();
+        var branchQueueService = scope.ServiceProvider.GetRequiredService<IBranchQueueService>();
+        await ((IActionsService)branchQueueService).InitializeAsync(new ConfigurationModel()
+        {
+            ConnectionString = gclSettings.ConnectionString
+        }, null);
         
         var mergeBranchSettings = await GetMergeBranchSettingsAsync(productionDatabaseConnection, branchMergeTemplate);
+        mergeBranchSettings.StartOn = deployStartDatetime;
         var connectionStringBuilder = branchQueueService.GetConnectionStringBuilderForBranch(mergeBranchSettings, mergeBranchSettings.DatabaseName);
         
-        var branchDatabaseConnection = scope.ServiceProvider.GetService<IDatabaseConnection>();
+        await using var branchScope = serviceProvider.CreateAsyncScope();
+        var branchDatabaseConnection = branchScope.ServiceProvider.GetService<IDatabaseConnection>();
         await branchDatabaseConnection.ChangeConnectionStringsAsync(connectionStringBuilder.ConnectionString);
 
         // Make a backup of Wiser history before the merge. If the table does already exist, it will be dropped and recreated.
@@ -187,7 +193,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         // Make a backup of Wiser history after the merge. If the table does already exist, it will be dropped and recreated.
         await BackupWiserHistoryAsync(branchDatabaseConnection, "after_merge");
 
-        if (!branchResult.TryGetValue("Success", out var success) || !(bool) success)
+        if ((bool)branchResult.SelectToken("Results[0].Success"))
         {
             await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, $"The automatic deployment could not be completed, because the branch merge failed. See the '{WiserTableNames.WiserBranchesQueue}' table for more information.", logName);
             await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be completed, because the branch merge failed. The website is still in maintenance mode and manual actions are required.");
@@ -259,7 +265,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     private async Task<bool> DispatchGitHubWorkflowEventAsync(string gitHubBaseUrl, string gitHubAccessToken, string workflowName)
     {
         var currentUtcTime = DateTime.UtcNow;
-        var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{gitHubBaseUrl}/{workflowName}.yml/dispatches");
+        var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{gitHubBaseUrl}/workflows/{workflowName}.yml/dispatches");
         httpRequest.Headers.Add("Authorization", $"Bearer {gitHubAccessToken}");
         httpRequest.Headers.Add("Accept", "application/vnd.github+json");
         httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
@@ -331,7 +337,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         databaseConnection.AddParameter("data", JsonConvert.SerializeObject(mergeBranchSettings));
         
         var query = $"""
-                     INSERT INTO {WiserTableNames.WiserBranchesQueue} (name, branchId, action, data, added_by, user_id, is_for_automatic_deploy)
+                     INSERT INTO {WiserTableNames.WiserBranchesQueue} (name, branch_id, action, data, added_by, user_id, is_for_automatic_deploy)
                      VALUES (@name, @branchId, 'merge', @data, 'Wiser Task Scheduler', 0, 1);
                      """;
         
@@ -355,7 +361,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         // Check if the Github actions succeeded.
         while (DateTime.Now <= checkTillMachineTime)
         {
-            var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"{gitHubBaseUrl}/runs?branch=main&created>={checkFromUtcTime:yyyy-MM-ddTHH:mm:ssZ}}}");
+            var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"{gitHubBaseUrl}/runs?branch=main&created={checkFromUtcTime:yyyy-MM-ddTHH:mm:ssZ}..{checkFromUtcTime.AddDays(1):yyyy-MM-ddTHH:mm:ssZ}");
             httpRequest.Headers.Add("Authorization", $"Bearer {gitHubAccessToken}");
             httpRequest.Headers.Add("Accept", "application/vnd.github+json");
             httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");

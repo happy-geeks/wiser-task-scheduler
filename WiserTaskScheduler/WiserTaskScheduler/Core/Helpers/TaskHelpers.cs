@@ -23,9 +23,9 @@ public class TaskHelpers
             if (remainingTime.TotalMilliseconds > Int32.MaxValue)
             {
                 timeToWaitNow = new TimeSpan(0, 0, 0, 0, Int32.MaxValue);
-                remainingTime -= timeToWaitNow;
             }
-
+            
+            remainingTime -= timeToWaitNow;
             await Task.Delay(timeToWaitNow, stoppingToken);
         }
     }
