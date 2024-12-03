@@ -77,9 +77,6 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <inheritdoc />
     public async Task ManageAutoProjectDeployAsync()
     {
-        // Set the action to process automatic deploy branches instead of the normal branches. This object is always used for this flow.
-        wtsSettings.AutoProjectDeploy.BranchQueue.ProcessAutomaticDeployBranches = true;
-        
         // TODO: I found the "CreateAsyncScope" randomly. Normally we use "CreateScope" instead. But after reading the descriptions of the two, I think "CreateAsyncScope" is the better one. Not sure though, so check if that's actually true and if it actually works.
         await using var scope = serviceProvider.CreateAsyncScope();
         var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
@@ -187,7 +184,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         await BackupWiserHistoryAsync(branchDatabaseConnection, "before_merge");
         
         // Prepare the branch merge based on the template and start the merge process.
-        await PrepareBranchMergeAsync(productionDatabaseConnection, deployStartDatetime, mergeBranchSettings);
+        wtsSettings.AutoProjectDeploy.BranchQueue.AutomaticDeployBranchQueueId = await PrepareBranchMergeAsync(productionDatabaseConnection, deployStartDatetime, mergeBranchSettings);
         var branchResult = await ((IActionsService)branchQueueService).Execute(wtsSettings.AutoProjectDeploy.BranchQueue, [], logName);
         
         // Make a backup of Wiser history after the merge. If the table does already exist, it will be dropped and recreated.
@@ -330,7 +327,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <param name="databaseConnection">The database connection where the merge needs to be prepared, e.g. the production database.</param>
     /// <param name="deployStartDatetime">The date and time the automatic deployment started.</param>
     /// <param name="mergeBranchSettings">The settings for the merge, based on the original template.</param>
-    private async Task PrepareBranchMergeAsync(IDatabaseConnection databaseConnection, DateTime deployStartDatetime, MergeBranchSettingsModel mergeBranchSettings)
+    private async Task<int> PrepareBranchMergeAsync(IDatabaseConnection databaseConnection, DateTime deployStartDatetime, MergeBranchSettingsModel mergeBranchSettings)
     {
         databaseConnection.AddParameter("name", $"Auto-deployment - {deployStartDatetime:yyyy-MM-dd HH:mm:ss}");
         databaseConnection.AddParameter("branchId", mergeBranchSettings.Id);
@@ -339,9 +336,12 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         var query = $"""
                      INSERT INTO {WiserTableNames.WiserBranchesQueue} (name, branch_id, action, data, added_by, user_id, is_for_automatic_deploy)
                      VALUES (@name, @branchId, 'merge', @data, 'Wiser Task Scheduler', 0, 1);
+                     
+                     SELECT LAST_INSERT_ID() AS id;
                      """;
         
-        await databaseConnection.ExecuteAsync(query);
+        var dataTable = await databaseConnection.GetAsync(query);
+        return Convert.ToInt32(dataTable.Rows[0]["id"]);
     }
 
     /// <summary>
