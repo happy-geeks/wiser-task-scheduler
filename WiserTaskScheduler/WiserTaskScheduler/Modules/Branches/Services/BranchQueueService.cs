@@ -92,16 +92,30 @@ namespace WiserTaskScheduler.Modules.Branches.Services
 
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, branchQueue.LogSettings, $"Start handling branches queue in time id: {branchQueue.TimeId}, order: {branchQueue.Order}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
 
-            // Use .NET time and not database time, because we often use DigitalOcean and they have their timezone set to UTC by default.
-            databaseConnection.AddParameter("now", DateTime.Now);
-            databaseConnection.AddParameter("processAutomaticDeploy", branchQueue.ProcessAutomaticDeployBranches);
-            var dataTable = await databaseConnection.GetAsync($@"SELECT * 
-FROM {WiserTableNames.WiserBranchesQueue}
-WHERE started_on IS NULL
-AND is_template = 0
-AND is_for_automatic_deploy = ?processAutomaticDeploy
-AND start_on <= ?now
-ORDER BY start_on ASC, id ASC");
+            string query;
+            
+            if (branchQueue.AutomaticDeployBranchQueueId > 0)
+            {
+                databaseConnection.AddParameter("automaticDeployBranchQueueId", branchQueue.AutomaticDeployBranchQueueId);
+                query = $"SELECT * FROM {WiserTableNames.WiserBranchesQueue} WHERE id = ?automaticDeployBranchQueueId";
+            }
+            else
+            {
+                // Use .NET time and not database time, because we often use DigitalOcean and they have their timezone set to UTC by default.
+                databaseConnection.AddParameter("now", DateTime.Now);
+                
+                query = $"""
+                         SELECT * 
+                         FROM {WiserTableNames.WiserBranchesQueue}
+                         WHERE started_on IS NULL
+                         AND is_template = 0
+                         AND is_for_automatic_deploy = 0
+                         AND start_on <= ?now
+                         ORDER BY start_on ASC, id ASC
+                         """;
+            }
+            
+            var dataTable = await databaseConnection.GetAsync(query);
 
             var results = new JArray();
             foreach (DataRow dataRow in dataTable.Rows)

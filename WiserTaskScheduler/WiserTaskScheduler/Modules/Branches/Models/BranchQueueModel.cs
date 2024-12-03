@@ -58,11 +58,11 @@ namespace WiserTaskScheduler.Modules.Branches.Models
         public CopyTableRuleModel[] CopyTableRules { get; set; }
         
         /// <summary>
-        /// Gets or sets whether to process automatic deploy branches.
+        /// Gets or sets the ID of the branch queue that the automatic deploy needs to execute.
         /// This is used internally and can't be overwritten in the XML configuration.
         /// </summary>
         [XmlIgnore]
         [JsonIgnore]
-        public bool ProcessAutomaticDeployBranches { get; set; }
+        public int AutomaticDeployBranchQueueId { get; set; }
     }
 }
