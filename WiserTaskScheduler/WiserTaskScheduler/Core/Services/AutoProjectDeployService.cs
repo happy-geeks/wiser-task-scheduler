@@ -77,14 +77,32 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <inheritdoc />
     public async Task ManageAutoProjectDeployAsync()
     {
+        var emailsForStatusUpdates = Array.Empty<string>();
+        
         // TODO: I found the "CreateAsyncScope" randomly. Normally we use "CreateScope" instead. But after reading the descriptions of the two, I think "CreateAsyncScope" is the better one. Not sure though, so check if that's actually true and if it actually works.
         await using var scope = serviceProvider.CreateAsyncScope();
-        var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
+        
+        try
+        {
+            var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
+            var branchSettings = await wiserItemsService.GetItemDetailsAsync(uniqueId: DefaultBranchSettingsId, entityType: BranchSettingsEntityType, skipPermissionsCheck: true);
+            emailsForStatusUpdates = branchSettings.GetDetailValue(EmailForStatusUpdatesProperty)?.Split(';');
+            
+            await RunAutoProjectDeployAsync(scope, wiserItemsService, branchSettings);
+        }
+        catch (Exception exception)
+        {
+            await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, $"An error occurred while trying to run the automatic project deployment:{Environment.NewLine}{exception.Message}", logName);
+            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "An error occurred while trying to run the automatic project deployment. Please check the logs for more information.");
+        }
+    }
+    
+    private async Task RunAutoProjectDeployAsync(IServiceScope scope, IWiserItemsService wiserItemsService, WiserItemModel branchSettings)
+    {
         var wiserDashboardService = scope.ServiceProvider.GetRequiredService<IWiserDashboardService>();
         var allServices = await wiserDashboardService.GetServicesAsync(false);
 
         // Get the settings from the database.
-        var branchSettings = await wiserItemsService.GetItemDetailsAsync(uniqueId: DefaultBranchSettingsId, entityType: BranchSettingsEntityType, skipPermissionsCheck: true);
         var branchName = branchSettings.GetDetailValue(BranchNameProperty);
         var branchMergeTemplate = branchSettings.GetDetailValue<int>(BranchMergeTemplateProperty);
         var emailsForStatusUpdates = branchSettings.GetDetailValue(EmailForStatusUpdatesProperty)?.Split(';');
@@ -173,6 +191,13 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         }, null);
         
         var mergeBranchSettings = await GetMergeBranchSettingsAsync(productionDatabaseConnection, branchMergeTemplate);
+        if (mergeBranchSettings == null)
+        {
+            await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, "The automatic deployment could not be executed, because the merge branch settings could not be retrieved.", logName);
+            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, because the merge branch settings could not be retrieved. The website is still in maintenance mode and manual actions are required.");
+            return;
+        }
+        
         mergeBranchSettings.StartOn = deployStartDatetime;
         var connectionStringBuilder = branchQueueService.GetConnectionStringBuilderForBranch(mergeBranchSettings, mergeBranchSettings.DatabaseName);
         
@@ -201,7 +226,6 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
 
         if (publishResult != HttpStatusCode.NoContent)
         {
-            await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, "The automatic deployment could not be completed, because the Wiser commits could not be published. See the Wiser API logs for more information.", logName);
             await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be completed, because the Wiser commits could not be published. The website is still in maintenance mode and manual actions are required.");
             return;
         }
@@ -291,7 +315,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         var dataTable = await databaseConnection.GetAsync(query);
         if (dataTable.Rows.Count == 0 || dataTable.Rows[0]["data"] == DBNull.Value)
         {
-            throw new NotImplementedException();
+            return null;
         }
         
         var data = dataTable.Rows[0]["data"].ToString();
@@ -400,7 +424,11 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         var accessToken = await wiserService.GetAccessTokenAsync();
         var wiserApiBaseUrl = $"{wtsSettings.Wiser.WiserApiUrl}{(wtsSettings.Wiser.WiserApiUrl.EndsWith('/') ? "" : "/")}api/v3/version-control";
         
-        var commitsToPublish = await GetWiserCommitsToPublishAsync(accessToken, wiserApiBaseUrl);
+        var (commitsToPublish, retrievedCommitsStatusCode) = await GetWiserCommitsToPublishAsync(accessToken, wiserApiBaseUrl);
+        if (retrievedCommitsStatusCode != HttpStatusCode.OK)
+        {
+            return retrievedCommitsStatusCode;
+        }
         
         var httpRequest = new HttpRequestMessage(HttpMethod.Put, $"{wiserApiBaseUrl}/deploy");
         httpRequest.Headers.Add("Authorization", $"Bearer {accessToken}");
@@ -413,6 +441,12 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         });
         
         var response = await httpClientService.Client.SendAsync(httpRequest);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to publish the Wiser commits to the production environment, server returned status '{response.StatusCode}' with reason '{response.ReasonPhrase}'. The following body was returned:{Environment.NewLine}{body}", logName);
+        }
+
         return response.StatusCode;
     }
 
@@ -422,7 +456,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <param name="accessToken">The access token for the Wiser API.</param>
     /// <param name="wiserApiBaseUrl">The base URL to the Wiser API.</param>
     /// <returns>Returns a list with all commit IDs that need to be published.</returns>
-    private async Task<List<int>> GetWiserCommitsToPublishAsync(string accessToken, string wiserApiBaseUrl)
+    private async Task<(List<int> commitIds, HttpStatusCode statusCode)> GetWiserCommitsToPublishAsync(string accessToken, string wiserApiBaseUrl)
     {
         var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"{wiserApiBaseUrl}/not-completed-commits");
         httpRequest.Headers.Add("Authorization", $"Bearer {accessToken}");
@@ -430,15 +464,15 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
         
         var response = await httpClientService.Client.SendAsync(httpRequest);
+        var body = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
         {
-            throw new NotImplementedException();
+            await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, $"Failed to get the commits from Wiser that need to be published, server returned status '{response.StatusCode}' with reason '{response.ReasonPhrase}'. The following body was returned:{Environment.NewLine}{body}", logName);
+            return (null, response.StatusCode);
         }
-        
-        var body = await response.Content.ReadAsStringAsync();
         var result = JArray.Parse(body);
-        return result.Where(x => (bool) x["isAcceptance"]).Select(x => (int)x["id"]).ToList();
+        return (result.Where(x => (bool) x["isAcceptance"]).Select(x => (int)x["id"]).ToList(), response.StatusCode);
     }
 
     private async Task<HttpStatusCode> MergeGitHubBranchAsync(string gitHubBaseUrl, string gitHubAccessToken)
@@ -477,6 +511,11 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     {
         try
         {
+            if (recipients.Length == 0)
+            {
+                return;
+            }
+            
             var communicationsService = scope.ServiceProvider.GetRequiredService<IGclCommunicationsService>();
             var receivers = recipients.Select(email => new CommunicationReceiverModel() {Address = email}).ToList();
 
