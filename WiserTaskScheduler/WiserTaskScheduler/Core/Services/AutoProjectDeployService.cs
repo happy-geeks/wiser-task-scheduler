@@ -147,7 +147,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         // TODO: Pass cancellation token from somewhere? MainWorker/MainService? I don't know.
         await TaskHelpers.WaitAsync(deployStartDatetime - DateTime.Now, default);
         
-        var gitHubBaseUrl = $"https://api.github.com/repos/{gitHubOrganization}/{gitHubRepository}/actions";
+        var gitHubBaseUrl = $"https://api.github.com/repos/{gitHubOrganization}/{gitHubRepository}";
         
         // Disable the website according to the GitHub workflow to start the deployment.
         if (!await DispatchGitHubWorkflowEventAsync(gitHubBaseUrl, gitHubAccessToken, "disable-website"))
@@ -190,7 +190,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         // Make a backup of Wiser history after the merge. If the table does already exist, it will be dropped and recreated.
         await BackupWiserHistoryAsync(branchDatabaseConnection, "after_merge");
 
-        if ((bool)branchResult.SelectToken("Results[0].Success"))
+        if (!(bool)branchResult.SelectToken("Results[0].Success"))
         {
             await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, $"The automatic deployment could not be completed, because the branch merge failed. See the '{WiserTableNames.WiserBranchesQueue}' table for more information.", logName);
             await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be completed, because the branch merge failed. The website is still in maintenance mode and manual actions are required.");
@@ -199,7 +199,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         
         var publishResult = await PublishWiserCommitsAsync();
 
-        if (publishResult != HttpStatusCode.OK)
+        if (publishResult != HttpStatusCode.NoContent)
         {
             await logService.LogError(logger, LogScopes.RunBody, wtsSettings.AutoProjectDeploy.LogSettings, "The automatic deployment could not be completed, because the Wiser commits could not be published. See the Wiser API logs for more information.", logName);
             await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be completed, because the Wiser commits could not be published. The website is still in maintenance mode and manual actions are required.");
@@ -262,7 +262,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     private async Task<bool> DispatchGitHubWorkflowEventAsync(string gitHubBaseUrl, string gitHubAccessToken, string workflowName)
     {
         var currentUtcTime = DateTime.UtcNow;
-        var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{gitHubBaseUrl}/workflows/{workflowName}.yml/dispatches");
+        var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{gitHubBaseUrl}/actions/workflows/{workflowName}.yml/dispatches");
         httpRequest.Headers.Add("Authorization", $"Bearer {gitHubAccessToken}");
         httpRequest.Headers.Add("Accept", "application/vnd.github+json");
         httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
@@ -358,10 +358,10 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         // Wait before first check to give the runner(s) time to start.
         await Task.Delay(interval);
 
-        // Check if the Github actions succeeded.
+        // Check if the GitHub actions succeeded.
         while (DateTime.Now <= checkTillMachineTime)
         {
-            var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"{gitHubBaseUrl}/runs?branch=main&created={checkFromUtcTime:yyyy-MM-ddTHH:mm:ssZ}..{checkFromUtcTime.AddDays(1):yyyy-MM-ddTHH:mm:ssZ}");
+            var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"{gitHubBaseUrl}/actions/runs?branch=main&created={checkFromUtcTime:yyyy-MM-ddTHH:mm:ssZ}..{checkFromUtcTime.AddDays(1):yyyy-MM-ddTHH:mm:ssZ}");
             httpRequest.Headers.Add("Authorization", $"Bearer {gitHubAccessToken}");
             httpRequest.Headers.Add("Accept", "application/vnd.github+json");
             httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
@@ -398,7 +398,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     private async Task<HttpStatusCode> PublishWiserCommitsAsync()
     {
         var accessToken = await wiserService.GetAccessTokenAsync();
-        var wiserApiBaseUrl = $"{wtsSettings.Wiser.WiserApiUrl}/api/v3/version-control";
+        var wiserApiBaseUrl = $"{wtsSettings.Wiser.WiserApiUrl}{(wtsSettings.Wiser.WiserApiUrl.EndsWith('/') ? "" : "/")}api/v3/version-control";
         
         var commitsToPublish = await GetWiserCommitsToPublishAsync(accessToken, wiserApiBaseUrl);
         
@@ -409,7 +409,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         httpRequest.Content = JsonContent.Create(new
         {
             environment = "Live",
-            commitIds = String.Join(',', commitsToPublish)
+            commitIds = commitsToPublish
         });
         
         var response = await httpClientService.Client.SendAsync(httpRequest);
