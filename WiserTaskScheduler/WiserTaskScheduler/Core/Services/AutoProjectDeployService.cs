@@ -14,6 +14,7 @@ using GeeksCoreLibrary.Modules.Communication.Enums;
 using GeeksCoreLibrary.Modules.Communication.Models;
 using IGclCommunicationsService = GeeksCoreLibrary.Modules.Communication.Interfaces.ICommunicationsService;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
+using GeeksCoreLibrary.Modules.WiserDashboard.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -88,7 +89,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             var branchSettings = await wiserItemsService.GetItemDetailsAsync(uniqueId: DefaultBranchSettingsId, entityType: BranchSettingsEntityType, skipPermissionsCheck: true);
             emailsForStatusUpdates = branchSettings.GetDetailValue(EmailForStatusUpdatesProperty)?.Split(';');
             
-            await RunAutoProjectDeployAsync(scope, wiserItemsService, branchSettings);
+            await RunAutoProjectDeployAsync(scope, branchSettings);
         }
         catch (Exception exception)
         {
@@ -97,7 +98,12 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         }
     }
     
-    private async Task RunAutoProjectDeployAsync(IServiceScope scope, IWiserItemsService wiserItemsService, WiserItemModel branchSettings)
+    /// <summary>
+    /// Run the automatic project deployment.
+    /// </summary>
+    /// <param name="scope">A <see cref="IServiceScope"/> to use to request services.</param>
+    /// <param name="branchSettings">The settings for the deployment.</param>
+    private async Task RunAutoProjectDeployAsync(IServiceScope scope, WiserItemModel branchSettings)
     {
         var wiserDashboardService = scope.ServiceProvider.GetRequiredService<IWiserDashboardService>();
         var allServices = await wiserDashboardService.GetServicesAsync(false);
@@ -119,47 +125,10 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             return;
         }
 
-        // Check if configurations need to be paused and wait till that moment.
-        if (configurationsToPause.Any())
+        // Pause configurations/services that need to be paused before the deployment. Any errors are logged and notified about inside the method.
+        if (!await PauseConfigurationsAsync(branchSettings, scope, configurationsToPause, wiserDashboardService, currentDateTime, deployStartDatetime, emailsForStatusUpdates, allServices))
         {
-            // If there are configurations that need to be paused, but the pause datetime is in the past, we should stop.
-            if (DateTime.TryParse(branchSettings.GetDetailValue(ConfigurationsPauseDatetimeProperty), out var configurationsPauseDatetime) && configurationsPauseDatetime < currentDateTime)
-            {
-                return;
-            }
-
-            // Pausing configurations should always be done first, otherwise there's no point in pausing them.
-            // So if the pause datetime is later than the deployment start datetime, we should stop.
-            if (configurationsPauseDatetime > deployStartDatetime)
-            {
-                await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be executed, because the settings are invalid (the configurations pause datetime is set later than the deployment start datetime).", logName);
-                await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, because the settings are invalid (the configurations pause datetime is set later than the deployment start datetime).");
-                return;
-            }
-
-            // This is to prevent the thread from sleeping for too long.
-            var timeToWaitToPauseConfigurations = configurationsPauseDatetime - currentDateTime;
-            if (timeToWaitToPauseConfigurations > MaximumThreadSleepTime)
-            {
-                return;
-            }
-
-            // Wait till the configurations need to be paused.
-            // TODO: Pass cancellation token from somewhere? MainWorker/MainService? I don't know.
-            await TaskHelpers.WaitAsync(timeToWaitToPauseConfigurations, default);
-
-            // Pause configurations/services.
-            foreach (var configurationId in configurationsToPause)
-            {
-                var service = allServices.SingleOrDefault(s => s.Id == configurationId);
-                if (service == null)
-                {
-                    await logService.LogWarning(logger, LogScopes.RunBody, LogSettings, $"The service with ID {configurationId} is set to be paused before automatic project deploy, but this service could not be found.", logName);
-                    continue;
-                }
-
-                await wiserDashboardService.UpdateServiceAsync(service.Configuration, service.TimeId, paused: true, state: "paused");
-            }
+            return;
         }
 
         // Wait till the start datetime of the deployment.
@@ -251,6 +220,78 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             }
         }
 
+        await SetConfigurationsPauseStateAsync(configurationsToPause, wiserDashboardService, allServices, false);
+        
+        if (!await DispatchGitHubWorkflowEventAsync(gitHubBaseUrl, gitHubAccessToken, "enable-website"))
+        {
+            await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be completed, because the GitHub workflow failed to enable the website.", logName);
+            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be completed, because the GitHub workflow failed to enable the website. The website is still in maintenance mode and manual actions are required.");
+            return;
+        }
+        
+        await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment succeeded", "The automatic deployment has been completed successfully. The website is now live and available for visitors.");
+    }
+
+    /// <summary>
+    /// Pause configurations if needed before the deployment.
+    /// </summary>
+    /// <param name="branchSettings">The settings for the deployment.</param>
+    /// <param name="scope">A <see cref="IServiceScope"/> to use to request services.</param>
+    /// <param name="configurationsToPause">The configurations that need to be paused during deployment.</param>
+    /// <param name="wiserDashboardService">The <see cref="IWiserDashboardService"/> to process changes to the configurations state.</param>
+    /// <param name="currentDateTime">The current date time to compare settings with.</param>
+    /// <param name="deployStartDatetime">The time the deployment needs to start to validate the pause time.</param>
+    /// <param name="emailsForStatusUpdates">The email addresses that need to receive an email when something went wrong.</param>
+    /// <param name="allServices">The WTS services running for this project.</param>
+    /// <returns>Returns true if nothing went wrong to indicate the deployment flow can continue.</returns>
+    private async Task<bool> PauseConfigurationsAsync(WiserItemModel branchSettings, IServiceScope scope, List<int> configurationsToPause, IWiserDashboardService wiserDashboardService, DateTime currentDateTime, DateTime deployStartDatetime, string[] emailsForStatusUpdates, List<Service> allServices)
+    {
+        // Check if configurations need to be paused and wait till that moment.
+        if (configurationsToPause.Any())
+        {
+            // If there are configurations that need to be paused, but the pause datetime is in the past, we should stop.
+            if (DateTime.TryParse(branchSettings.GetDetailValue(ConfigurationsPauseDatetimeProperty), out var configurationsPauseDatetime) && configurationsPauseDatetime < currentDateTime)
+            {
+                await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be executed, could not pause the configurations on the provided time since it is in the past.", logName);
+                await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, could not pause the configurations on the provided time since it is in the past.");
+                return false;
+            }
+
+            // Pausing configurations should always be done first, otherwise there's no point in pausing them.
+            // So if the pause datetime is later than the deployment start datetime, we should stop.
+            if (configurationsPauseDatetime > deployStartDatetime)
+            {
+                await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be executed, because the settings are invalid (the configurations pause datetime is set later than the deployment start datetime).", logName);
+                await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, because the settings are invalid (the configurations pause datetime is set later than the deployment start datetime).");
+                return false;
+            }
+
+            // This is to prevent the thread from sleeping for too long.
+            var timeToWaitToPauseConfigurations = configurationsPauseDatetime - currentDateTime;
+            if (timeToWaitToPauseConfigurations > MaximumThreadSleepTime)
+            {
+                return false;
+            }
+
+            // Wait till the configurations need to be paused.
+            // TODO: Pass cancellation token from somewhere? MainWorker/MainService? I don't know.
+            await TaskHelpers.WaitAsync(timeToWaitToPauseConfigurations, default);
+
+            await SetConfigurationsPauseStateAsync(configurationsToPause, wiserDashboardService, allServices, true);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Set the configurations to the paused or active state.
+    /// </summary>
+    /// <param name="configurationsToPause">The configurations that need to be paused during deployment.</param>
+    /// <param name="wiserDashboardService">The <see cref="IWiserDashboardService"/> to process changes to the configurations state.</param>
+    /// <param name="allServices">The WTS services running for this project.</param>
+    /// <param name="pause">If the configurations need to be paused or set back to active.</param>
+    private async Task SetConfigurationsPauseStateAsync(List<int> configurationsToPause, IWiserDashboardService wiserDashboardService, List<Service> allServices, bool pause)
+    {
         if (configurationsToPause.Any())
         {
             // Resume configurations/services that have been paused for the deployment.
@@ -263,18 +304,9 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
                     continue;
                 }
 
-                await wiserDashboardService.UpdateServiceAsync(service.Configuration, service.TimeId, paused: false, state: "active");
+                await wiserDashboardService.UpdateServiceAsync(service.Configuration, service.TimeId, paused: pause, state: pause ? "paused" : "active");
             }
         }
-        
-        if (!await DispatchGitHubWorkflowEventAsync(gitHubBaseUrl, gitHubAccessToken, "enable-website"))
-        {
-            await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be completed, because the GitHub workflow failed to enable the website.", logName);
-            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be completed, because the GitHub workflow failed to enable the website. The website is still in maintenance mode and manual actions are required.");
-            return;
-        }
-        
-        await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment succeeded", "The automatic deployment has been completed successfully. The website is now live and available for visitors.");
     }
 
     /// <summary>
@@ -476,6 +508,12 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         return (result.Where(x => (bool) x["isAcceptance"]).Select(x => (int)x["id"]).ToList(), response.StatusCode);
     }
 
+    /// <summary>
+    /// Merges the staging branch into the main branch on GitHub.
+    /// </summary>
+    /// <param name="gitHubBaseUrl">The base URL to the GitHub API.</param>
+    /// <param name="gitHubAccessToken">The access token for GitHub to authenticate with.</param>
+    /// <returns>Returns the <see cref="HttpStatusCode"/> from the GitHub API.</returns>
     private async Task<HttpStatusCode> MergeGitHubBranchAsync(string gitHubBaseUrl, string gitHubAccessToken)
     {
         var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{gitHubBaseUrl}/merges");
