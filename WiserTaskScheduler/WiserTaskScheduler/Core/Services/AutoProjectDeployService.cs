@@ -131,9 +131,11 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             return;
         }
 
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Wait till the actual deployment starts at {deployStartDatetime:yyyy-MM-dd HH:mm:ss}.", logName);
         // Wait till the start datetime of the deployment.
         // TODO: Pass cancellation token from somewhere? MainWorker/MainService? I don't know.
         await TaskHelpers.WaitAsync(deployStartDatetime - DateTime.Now, default);
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "The automatic deployment has started.", logName);
         
         var gitHubBaseUrl = $"https://api.github.com/repos/{gitHubOrganization}/{gitHubRepository}";
         
@@ -155,6 +157,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         
         var productionDatabaseConnection = scope.ServiceProvider.GetService<IDatabaseConnection>();
         var branchQueueService = scope.ServiceProvider.GetRequiredService<IBranchQueueService>();
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Initializing the branch queue service.", logName);
         await ((IActionsService)branchQueueService).InitializeAsync(new ConfigurationModel()
         {
             ConnectionString = gclSettings.ConnectionString
@@ -180,6 +183,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         
         // Prepare the branch merge based on the template and start the merge process.
         wtsSettings.AutoProjectDeploy.BranchQueue.AutomaticDeployBranchQueueId = await PrepareBranchMergeAsync(productionDatabaseConnection, deployStartDatetime, mergeBranchSettings);
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Starting the branch merge.", logName);
         var branchResult = await ((IActionsService)branchQueueService).Execute(wtsSettings.AutoProjectDeploy.BranchQueue, [], logName);
         
         // Make a backup of Wiser history after the merge. If the table does already exist, it will be dropped and recreated.
@@ -192,6 +196,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             return;
         }
         
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "The branch merge has been completed successfully.", logName);
+        
         var publishResult = await PublishWiserCommitsAsync();
 
         if (publishResult != HttpStatusCode.NoContent)
@@ -199,6 +205,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be completed, because the Wiser commits could not be published. The website is still in maintenance mode and manual actions are required.");
             return;
         }
+        
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "The Wiser commits have been published successfully.", logName);
         
         // Merge staging into main on GitHub
         var currentUtcTime = DateTime.UtcNow;
@@ -212,12 +220,19 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
 
         if (gitHubMergeResult == HttpStatusCode.Created)
         {
+        
+            await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "The staging branch has been merged into the main branch on GitHub.", logName);
+            
             if (!await CheckIfGithubWorkflowSucceededAsync(currentUtcTime, DateTime.Now.AddMinutes(15), new TimeSpan(0, 1, 0), gitHubBaseUrl, gitHubAccessToken))
             {
                 await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be completed, because the GitHub workflow failed to merge the staging branch into the main branch.", logName);
                 await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be completed, because the GitHub workflow failed to merge the staging branch into the main branch. The website is still in maintenance mode and manual actions are required.");
                 return;
             }
+        }
+        else
+        {
+            await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "There were no commits to merge from staging to main. The GitHub deployment workflow is skipped.", logName);
         }
 
         await SetConfigurationsPauseStateAsync(configurationsToPause, wiserDashboardService, allServices, false);
@@ -229,6 +244,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             return;
         }
         
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "The automatic deployment has been completed successfully.", logName);
         await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment succeeded", "The automatic deployment has been completed successfully. The website is now live and available for visitors.");
     }
 
@@ -249,6 +265,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         // Check if configurations need to be paused and wait till that moment.
         if (configurationsToPause.Any())
         {
+            await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Checking if configurations need to be paused before the deployment.", logName);
+            
             // If there are configurations that need to be paused, but the pause datetime is in the past, we should stop.
             if (DateTime.TryParse(branchSettings.GetDetailValue(ConfigurationsPauseDatetimeProperty), out var configurationsPauseDatetime) && configurationsPauseDatetime < currentDateTime)
             {
@@ -273,6 +291,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
                 return false;
             }
 
+            await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Wait till the the configurations need to be paused at {configurationsPauseDatetime:yyyy-MM-dd HH:mm:ss}.", logName);
             // Wait till the configurations need to be paused.
             // TODO: Pass cancellation token from somewhere? MainWorker/MainService? I don't know.
             await TaskHelpers.WaitAsync(timeToWaitToPauseConfigurations, default);
@@ -294,6 +313,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     {
         if (configurationsToPause.Any())
         {
+            await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Setting the configurations to the {(pause ? "paused" : "active")} state. Services to pause according to the {WiserTableNames.WtsServices} IDs: {String.Join(',', configurationsToPause)}", logName);
+            
             // Resume configurations/services that have been paused for the deployment.
             foreach (var configurationId in configurationsToPause)
             {
@@ -306,6 +327,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
 
                 await wiserDashboardService.UpdateServiceAsync(service.Configuration, service.TimeId, paused: pause, state: pause ? "paused" : "active");
             }
+            
+            await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"The configurations have been set to the {(pause ? "paused" : "active")} state.", logName);
         }
     }
 
@@ -318,6 +341,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <returns></returns>
     private async Task<bool> DispatchGitHubWorkflowEventAsync(string gitHubBaseUrl, string gitHubAccessToken, string workflowName)
     {
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Dispatching the event to start the GitHub workflow '{workflowName}'.", logName);
         var currentUtcTime = DateTime.UtcNow;
         var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{gitHubBaseUrl}/actions/workflows/{workflowName}.yml/dispatches");
         httpRequest.Headers.Add("Authorization", $"Bearer {gitHubAccessToken}");
@@ -329,6 +353,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         });
         
         await httpClientService.Client.SendAsync(httpRequest);
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"The event to start the GitHub workflow '{workflowName}' has been dispatched.", logName);
 
         return await CheckIfGithubWorkflowSucceededAsync(currentUtcTime, DateTime.Now.AddMinutes(15), new TimeSpan(0, 1, 0), gitHubBaseUrl, gitHubAccessToken);
     }
@@ -342,6 +367,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <exception cref="NotImplementedException"></exception>
     private async Task<MergeBranchSettingsModel> GetMergeBranchSettingsAsync(IDatabaseConnection databaseConnection, int branchMergeTemplate)
     {
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Getting the merge branch settings.", logName);
+
         databaseConnection.AddParameter("BranchMergeTemplate", branchMergeTemplate);
         var query = $"SELECT data FROM {WiserTableNames.WiserBranchesQueue} WHERE id = @BranchMergeTemplate;";
         
@@ -369,6 +396,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <param name="backupTableSuffix">The suffix for the backup table.</param>
     private async Task BackupWiserHistoryAsync(IDatabaseConnection databaseConnection, string backupTableSuffix)
     {
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Making a backup of the Wiser history table with suffix '{backupTableSuffix}'.", logName);
+        
         var query = $"""
                      DROP TABLE IF EXISTS _{WiserTableNames.WiserHistory}_{backupTableSuffix};
                      CREATE TABLE _{WiserTableNames.WiserHistory}_{backupTableSuffix} AS TABLE {WiserTableNames.WiserHistory};
@@ -376,6 +405,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
                      """;
         
         await databaseConnection.ExecuteAsync(query);
+        
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"The backup of the Wiser history table with suffix '{backupTableSuffix}' has been made.", logName);
     }
 
     /// <summary>
@@ -386,6 +417,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <param name="mergeBranchSettings">The settings for the merge, based on the original template.</param>
     private async Task<int> PrepareBranchMergeAsync(IDatabaseConnection databaseConnection, DateTime deployStartDatetime, MergeBranchSettingsModel mergeBranchSettings)
     {
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Preparing the branch merge based on branch template ID {mergeBranchSettings.Id}.", logName);
         databaseConnection.AddParameter("name", $"Auto-deployment - {deployStartDatetime:yyyy-MM-dd HH:mm:ss}");
         databaseConnection.AddParameter("branchId", mergeBranchSettings.Id);
         databaseConnection.AddParameter("data", JsonConvert.SerializeObject(mergeBranchSettings));
@@ -398,7 +430,11 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
                      """;
         
         var dataTable = await databaseConnection.GetAsync(query);
-        return Convert.ToInt32(dataTable.Rows[0]["id"]);
+        var result = Convert.ToInt32(dataTable.Rows[0]["id"]);
+        
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"The branch merge has been prepared under ID {result}.", logName);
+        
+        return result;
     }
 
     /// <summary>
@@ -418,6 +454,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         // Check if the GitHub actions succeeded.
         while (DateTime.Now <= checkTillMachineTime)
         {
+            await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Checking if the GitHub actions have succeeded between UTC {checkFromUtcTime:HH:mm:ss} and server time {checkTillMachineTime:HH:mm:ss}.", logName);
             var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"{gitHubBaseUrl}/actions/runs?branch=main&created={checkFromUtcTime:yyyy-MM-ddTHH:mm:ssZ}..{checkFromUtcTime.AddDays(1):yyyy-MM-ddTHH:mm:ssZ}");
             httpRequest.Headers.Add("Authorization", $"Bearer {gitHubAccessToken}");
             httpRequest.Headers.Add("Accept", "application/vnd.github+json");
@@ -454,6 +491,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <returns>Returns the status code from the Wiser API.</returns>
     private async Task<HttpStatusCode> PublishWiserCommitsAsync()
     {
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Retrieving access token for the Wiser API.", logName);
         var accessToken = await wiserService.GetAccessTokenAsync();
         var wiserApiBaseUrl = $"{wtsSettings.Wiser.WiserApiUrl}{(wtsSettings.Wiser.WiserApiUrl.EndsWith('/') ? "" : "/")}api/v3/version-control";
         
@@ -473,6 +511,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             commitIds = commitsToPublish
         });
         
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Publishing the following Wiser commits to the production environment: {String.Join(',', commitsToPublish)}", logName);
         var response = await httpClientService.Client.SendAsync(httpRequest);
         if (!response.IsSuccessStatusCode)
         {
@@ -491,6 +530,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <returns>Returns a list with all commit IDs that need to be published.</returns>
     private async Task<(List<int> commitIds, HttpStatusCode statusCode)> GetWiserCommitsToPublishAsync(string accessToken, string wiserApiBaseUrl)
     {
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Retrieving the commits from Wiser that need to be published.", logName);
+        
         var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"{wiserApiBaseUrl}/not-completed-commits");
         httpRequest.Headers.Add("Authorization", $"Bearer {accessToken}");
         httpRequest.Headers.Add("Accept", "application/json");
@@ -516,6 +557,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <returns>Returns the <see cref="HttpStatusCode"/> from the GitHub API.</returns>
     private async Task<HttpStatusCode> MergeGitHubBranchAsync(string gitHubBaseUrl, string gitHubAccessToken)
     {
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Merging the staging branch into the main branch on GitHub.", logName);
+        
         var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{gitHubBaseUrl}/merges");
         httpRequest.Headers.Add("Authorization", $"Bearer {gitHubAccessToken}");
         httpRequest.Headers.Add("Accept", "application/json");
@@ -552,8 +595,11 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         {
             if (recipients.Length == 0)
             {
+                await logService.LogWarning(logger, LogScopes.RunBody, LogSettings, "No email addresses provided to send the email to.", logName);
                 return;
             }
+            
+            await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Sending an email with the subject '{subject}'.", logName);
             
             var communicationsService = scope.ServiceProvider.GetRequiredService<IGclCommunicationsService>();
             var receivers = recipients.Select(email => new CommunicationReceiverModel() {Address = email}).ToList();
