@@ -18,7 +18,7 @@
         <PackageReference Include="GeeksCoreLibrary" Version="4.2.29" />
         <PackageReference Include="Microsoft.Extensions.Hosting" Version="7.0.1" />
         <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="7.0.1" />
-        <PackageReference Include="Serilog.AspNetCore" Version="7.0.0" />
+        <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
         <PackageReference Include="SlackNet.AspNetCore" Version="0.13.2" />
     </ItemGroup>
 
