@@ -55,6 +55,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     private const string DeployStartDatetimeProperty = "deploy_start_datetime";
 
     private static readonly TimeSpan MaximumThreadSleepTime = new TimeSpan(6, 0, 0);
+    private static readonly int DefaultGitHubWorkflowTimeout = 15;
+    private static readonly TimeSpan DefaultGitHubWorkflowCheckInterval = new TimeSpan(0, 1, 0);
 
     /// <inheritdoc />
     public LogSettings LogSettings { get; set; }
@@ -80,7 +82,6 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     {
         var emailsForStatusUpdates = Array.Empty<string>();
         
-        // TODO: I found the "CreateAsyncScope" randomly. Normally we use "CreateScope" instead. But after reading the descriptions of the two, I think "CreateAsyncScope" is the better one. Not sure though, so check if that's actually true and if it actually works.
         await using var scope = serviceProvider.CreateAsyncScope();
         
         try
@@ -223,7 +224,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         
             await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "The staging branch has been merged into the main branch on GitHub.", logName);
             
-            if (!await CheckIfGithubWorkflowSucceededAsync(currentUtcTime, DateTime.Now.AddMinutes(15), new TimeSpan(0, 1, 0), gitHubBaseUrl, gitHubAccessToken))
+            if (!await CheckIfGithubWorkflowSucceededAsync(currentUtcTime, DateTime.Now.AddMinutes(DefaultGitHubWorkflowTimeout), DefaultGitHubWorkflowCheckInterval, gitHubBaseUrl, gitHubAccessToken))
             {
                 await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be completed, because the GitHub workflow failed to merge the staging branch into the main branch.", logName);
                 await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be completed, because the GitHub workflow failed to merge the staging branch into the main branch. The website is still in maintenance mode and manual actions are required.");
@@ -359,7 +360,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         await httpClientService.Client.SendAsync(httpRequest);
         await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"The event to start the GitHub workflow '{workflowName}' has been dispatched.", logName);
 
-        return await CheckIfGithubWorkflowSucceededAsync(currentUtcTime, DateTime.Now.AddMinutes(15), new TimeSpan(0, 1, 0), gitHubBaseUrl, gitHubAccessToken);
+        return await CheckIfGithubWorkflowSucceededAsync(currentUtcTime, DateTime.Now.AddMinutes(DefaultGitHubWorkflowTimeout), DefaultGitHubWorkflowCheckInterval, gitHubBaseUrl, gitHubAccessToken);
     }
     
     /// <summary>
