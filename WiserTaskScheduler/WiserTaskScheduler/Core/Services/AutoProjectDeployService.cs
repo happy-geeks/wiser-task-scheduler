@@ -263,41 +263,43 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     private async Task<bool> PauseConfigurationsAsync(WiserItemModel branchSettings, IServiceScope scope, List<int> configurationsToPause, IWiserDashboardService wiserDashboardService, DateTime currentDateTime, DateTime deployStartDatetime, string[] emailsForStatusUpdates, List<Service> allServices)
     {
         // Check if configurations need to be paused and wait till that moment.
-        if (configurationsToPause.Any())
+        if (!configurationsToPause.Any())
         {
-            await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Checking if configurations need to be paused before the deployment.", logName);
-            
-            // If there are configurations that need to be paused, but the pause datetime is in the past, we should stop.
-            if (DateTime.TryParse(branchSettings.GetDetailValue(ConfigurationsPauseDatetimeProperty), out var configurationsPauseDatetime) && configurationsPauseDatetime < currentDateTime)
-            {
-                await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be executed, could not pause the configurations on the provided time since it is in the past.", logName);
-                await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, could not pause the configurations on the provided time since it is in the past.");
-                return false;
-            }
-
-            // Pausing configurations should always be done first, otherwise there's no point in pausing them.
-            // So if the pause datetime is later than the deployment start datetime, we should stop.
-            if (configurationsPauseDatetime > deployStartDatetime)
-            {
-                await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be executed, because the settings are invalid (the configurations pause datetime is set later than the deployment start datetime).", logName);
-                await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, because the settings are invalid (the configurations pause datetime is set later than the deployment start datetime).");
-                return false;
-            }
-
-            // This is to prevent the thread from sleeping for too long.
-            var timeToWaitToPauseConfigurations = configurationsPauseDatetime - currentDateTime;
-            if (timeToWaitToPauseConfigurations > MaximumThreadSleepTime)
-            {
-                return false;
-            }
-
-            await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Wait till the the configurations need to be paused at {configurationsPauseDatetime:yyyy-MM-dd HH:mm:ss}.", logName);
-            // Wait till the configurations need to be paused.
-            // TODO: Pass cancellation token from somewhere? MainWorker/MainService? I don't know.
-            await TaskHelpers.WaitAsync(timeToWaitToPauseConfigurations, default);
-
-            await SetConfigurationsPauseStateAsync(configurationsToPause, wiserDashboardService, allServices, true);
+            return true;
         }
+        
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Checking if configurations need to be paused before the deployment.", logName);
+            
+        // If there are configurations that need to be paused, but the pause datetime is in the past, we should stop.
+        if (DateTime.TryParse(branchSettings.GetDetailValue(ConfigurationsPauseDatetimeProperty), out var configurationsPauseDatetime) && configurationsPauseDatetime < currentDateTime)
+        {
+            await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be executed, could not pause the configurations on the provided time since it is in the past.", logName);
+            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, could not pause the configurations on the provided time since it is in the past.");
+            return false;
+        }
+
+        // Pausing configurations should always be done first, otherwise there's no point in pausing them.
+        // So if the pause datetime is later than the deployment start datetime, we should stop.
+        if (configurationsPauseDatetime > deployStartDatetime)
+        {
+            await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be executed, because the settings are invalid (the configurations pause datetime is set later than the deployment start datetime).", logName);
+            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, because the settings are invalid (the configurations pause datetime is set later than the deployment start datetime).");
+            return false;
+        }
+
+        // This is to prevent the thread from sleeping for too long.
+        var timeToWaitToPauseConfigurations = configurationsPauseDatetime - currentDateTime;
+        if (timeToWaitToPauseConfigurations > MaximumThreadSleepTime)
+        {
+            return false;
+        }
+
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Wait till the the configurations need to be paused at {configurationsPauseDatetime:yyyy-MM-dd HH:mm:ss}.", logName);
+        // Wait till the configurations need to be paused.
+        // TODO: Pass cancellation token from somewhere? MainWorker/MainService? I don't know.
+        await TaskHelpers.WaitAsync(timeToWaitToPauseConfigurations, default);
+
+        await SetConfigurationsPauseStateAsync(configurationsToPause, wiserDashboardService, allServices, true);
 
         return true;
     }
@@ -311,25 +313,27 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <param name="pause">If the configurations need to be paused or set back to active.</param>
     private async Task SetConfigurationsPauseStateAsync(List<int> configurationsToPause, IWiserDashboardService wiserDashboardService, List<Service> allServices, bool pause)
     {
-        if (configurationsToPause.Any())
+        if (!configurationsToPause.Any())
         {
-            await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Setting the configurations to the {(pause ? "paused" : "active")} state. Services to pause according to the {WiserTableNames.WtsServices} IDs: {String.Join(',', configurationsToPause)}", logName);
-            
-            // Resume configurations/services that have been paused for the deployment.
-            foreach (var configurationId in configurationsToPause)
-            {
-                var service = allServices.SingleOrDefault(s => s.Id == configurationId);
-                if (service == null)
-                {
-                    await logService.LogWarning(logger, LogScopes.RunBody, LogSettings, $"The service with ID {configurationId} is set to be paused before automatic project deploy, but this service could not be found.", logName);
-                    continue;
-                }
-
-                await wiserDashboardService.UpdateServiceAsync(service.Configuration, service.TimeId, paused: pause, state: pause ? "paused" : "active");
-            }
-            
-            await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"The configurations have been set to the {(pause ? "paused" : "active")} state.", logName);
+            return;
         }
+    
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Setting the configurations to the {(pause ? "paused" : "active")} state. Services to pause according to the {WiserTableNames.WtsServices} IDs: {String.Join(',', configurationsToPause)}", logName);
+        
+        // Resume configurations/services that have been paused for the deployment.
+        foreach (var configurationId in configurationsToPause)
+        {
+            var service = allServices.SingleOrDefault(s => s.Id == configurationId);
+            if (service == null)
+            {
+                await logService.LogWarning(logger, LogScopes.RunBody, LogSettings, $"The service with ID {configurationId} is set to be paused before automatic project deploy, but this service could not be found.", logName);
+                continue;
+            }
+
+            await wiserDashboardService.UpdateServiceAsync(service.Configuration, service.TimeId, paused: pause, state: pause ? "paused" : "active");
+        }
+        
+        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"The configurations have been set to the {(pause ? "paused" : "active")} state.", logName);
     }
 
     /// <summary>
