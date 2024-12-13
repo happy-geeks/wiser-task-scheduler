@@ -128,7 +128,9 @@ namespace WiserTaskScheduler.Core.Services
                         queryStringBuilder["redirect_uri"] = redirectUrl.Uri.ToString();
                         authorizationUrl.Query = queryStringBuilder.ToString()!;
                         await communicationsService.SendEmailAsync(oAuthApi.EmailAddressForAuthentication, "WTS OAuth2.0 Authentication", $"Please authenticate your account by clicking the following link: {authorizationUrl.Uri}");
-                        failState = OAuthState.NewToken;
+
+                        // Return null, as the user needs to authenticate first.
+                        return null;
                     }
                     else if (String.IsNullOrWhiteSpace(oAuthApi.AccessToken) || String.IsNullOrWhiteSpace(oAuthApi.RefreshToken))
                     {
