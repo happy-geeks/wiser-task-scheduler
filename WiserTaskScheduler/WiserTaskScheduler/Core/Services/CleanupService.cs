@@ -136,26 +136,46 @@ namespace WiserTaskScheduler.Core.Services
             databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStoreRenderTimes));
             var optimizeRenderLogTables = new List<string>();
 
-            if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserTemplateRenderLog))
+            try
             {
-                var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserTemplateRenderLog} WHERE end < ?cleanupDate", cleanUp: true);
-                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserTemplateRenderLog}'.", logName);
-                optimizeRenderLogTables.Add(WiserTableNames.WiserTemplateRenderLog);
+                if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserTemplateRenderLog))
+                {
+                    var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserTemplateRenderLog} WHERE end < ?cleanupDate", cleanUp: true);
+                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserTemplateRenderLog}'.", logName);
+                    optimizeRenderLogTables.Add(WiserTableNames.WiserTemplateRenderLog);
+                }        
+            }
+            catch (Exception e)
+            {
+                await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during cleanup: {e}", logName);
             }
 
-            if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserDynamicContentRenderLog))
+            try
             {
-                var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserDynamicContentRenderLog} WHERE end < ?cleanupDate", cleanUp: true);
-                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserDynamicContentRenderLog}'.", logName);
-                optimizeRenderLogTables.Add(WiserTableNames.WiserDynamicContentRenderLog);
+                if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserDynamicContentRenderLog))
+                {
+                    var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserDynamicContentRenderLog} WHERE end < ?cleanupDate", cleanUp: true);
+                    await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserDynamicContentRenderLog}'.", logName);
+                    optimizeRenderLogTables.Add(WiserTableNames.WiserDynamicContentRenderLog);
+                }     
+            }
+            catch (Exception e)
+            {
+                await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during cleanup: {e}", logName);
             }
 
-            if (cleanupServiceSettings.OptimizeRenderTimesTableAfterCleanup && optimizeRenderLogTables.Any())
+            try
             {
-                await databaseHelpersService.OptimizeTablesAsync(optimizeRenderLogTables.ToArray());
+                if (cleanupServiceSettings.OptimizeRenderTimesTableAfterCleanup && optimizeRenderLogTables.Any())
+                {
+                    await databaseHelpersService.OptimizeTablesAsync(optimizeRenderLogTables.ToArray());
+                }  
+            } catch (Exception e)
+            {
+                await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during cleanup: {e}", logName);
             }
         }
-        
+
         /// <summary>
         /// Cleanup wts services in the database older than the set number of days in the WTS services.
         /// </summary>
@@ -163,17 +183,25 @@ namespace WiserTaskScheduler.Core.Services
         /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
         private async Task CleanupWtsServicesAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
         {
-            databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStoreWtsServices));
-
-            // Use the next_run column to determine if a service is older than the cleanup date to prevent paused and longer run schemes from being deleted.
-            var query = $"DELETE FROM {WiserTableNames.WtsServices} WHERE next_run < ?cleanupDate";
-            var rowsDeleted = await databaseConnection.ExecuteAsync(query, cleanUp: true);
-            
-            await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WtsServices}'.", logName);
-
-            if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
+            try
             {
-                await databaseHelpersService.OptimizeTablesAsync(WiserTableNames.WtsServices);
+                databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStoreWtsServices));
+
+                // Use the next_run column to determine if a service is older than the cleanup date to prevent paused and longer run schemes from being deleted.
+                var query = $"DELETE FROM {WiserTableNames.WtsServices} WHERE next_run < ?cleanupDate";
+                var rowsDeleted = await databaseConnection.ExecuteAsync(query, cleanUp: true);
+
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WtsServices}'.", logName);
+
+                if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
+                {
+                    await databaseHelpersService.OptimizeTablesAsync(WiserTableNames.WtsServices);
+                }
+            }
+            catch (Exception e)
+            {
+                await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during cleanup: {e}", logName);
+
             }
         }
     }
