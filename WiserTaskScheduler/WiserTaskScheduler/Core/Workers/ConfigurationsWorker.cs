@@ -1,4 +1,5 @@
-﻿using System.Threading.Tasks;
+﻿using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
@@ -45,7 +46,7 @@ namespace WiserTaskScheduler.Core.Workers
         }
 
         /// <inheritdoc />
-        protected override async Task ExecuteActionAsync()
+        protected override async Task ExecuteActionAsync(CancellationToken stoppingToken)
         {
             await configurationsService.ExecuteAsync();
         }

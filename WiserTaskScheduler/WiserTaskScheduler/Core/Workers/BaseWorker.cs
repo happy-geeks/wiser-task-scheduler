@@ -142,7 +142,7 @@ namespace WiserTaskScheduler.Core.Workers
                             var runStartTime = DateTime.Now;
                             stopWatch.Start();
 
-                            await ExecuteActionAsync();
+                            await ExecuteActionAsync(stoppingToken);
 
                             stopWatch.Stop();
 
@@ -232,7 +232,8 @@ namespace WiserTaskScheduler.Core.Workers
         /// <summary>
         /// Execute the action of the derived worker.
         /// </summary>
+        /// <param name="stoppingToken">The <see cref="CancellationToken"/> used for the current background service to indicate if it is being stopped.</param>
         /// <returns></returns>
-        protected abstract Task ExecuteActionAsync();
+        protected abstract Task ExecuteActionAsync(CancellationToken stoppingToken);
     }
 }

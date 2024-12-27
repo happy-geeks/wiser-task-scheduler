@@ -46,7 +46,7 @@ namespace WiserTaskScheduler.Core.Workers
         }
 
         /// <inheritdoc />
-        protected override async Task ExecuteActionAsync()
+        protected override async Task ExecuteActionAsync(CancellationToken stoppingToken)
         {
             await mainService.ManageConfigurations();
         }

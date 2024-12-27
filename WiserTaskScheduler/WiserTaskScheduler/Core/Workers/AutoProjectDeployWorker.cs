@@ -1,4 +1,5 @@
-﻿using System.Threading.Tasks;
+﻿using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
@@ -21,8 +22,8 @@ public class AutoProjectDeployWorker : BaseWorker
     }
 
     /// <inheritdoc />
-    protected override async Task ExecuteActionAsync()
+    protected override async Task ExecuteActionAsync(CancellationToken stoppingToken)
     {
-        await autoProjectDeployService.ManageAutoProjectDeployAsync();
+        await autoProjectDeployService.ManageAutoProjectDeployAsync(stoppingToken);
     }
 }
