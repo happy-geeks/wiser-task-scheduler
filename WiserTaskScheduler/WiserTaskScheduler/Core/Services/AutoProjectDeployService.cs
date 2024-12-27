@@ -60,6 +60,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     private static readonly TimeSpan DefaultGitHubWorkflowCheckInterval = new TimeSpan(0, 1, 0);
 
     private List<KeyValuePair<string, TimeSpan>> stepTimes = new List<KeyValuePair<string, TimeSpan>>();
+    private DateTime[] lastBranchSettingsUpdateTimes = new DateTime[2];
 
     /// <inheritdoc />
     public LogSettings LogSettings { get; set; }
@@ -94,6 +95,10 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             var branchSettings = await wiserItemsService.GetItemDetailsAsync(uniqueId: DefaultBranchSettingsId, entityType: BranchSettingsEntityType, skipPermissionsCheck: true);
             emailsForStatusUpdates = branchSettings.GetDetailValue(EmailForStatusUpdatesProperty)?.Split(';');
             
+            // Use the last update time to prevent setting errors from being triggered multiple times.
+            lastBranchSettingsUpdateTimes[0] = lastBranchSettingsUpdateTimes[1];
+            lastBranchSettingsUpdateTimes[1] = branchSettings.ChangedOn;
+            
             await RunAutoProjectDeployAsync(scope, branchSettings);
         }
         catch (Exception exception)
@@ -114,7 +119,6 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         var allServices = await wiserDashboardService.GetServicesAsync(false);
 
         // Get the settings from the database.
-        var branchName = branchSettings.GetDetailValue(BranchNameProperty);
         var branchMergeTemplate = branchSettings.GetDetailValue<int>(BranchMergeTemplateProperty);
         var emailsForStatusUpdates = branchSettings.GetDetailValue(EmailForStatusUpdatesProperty)?.Split(';');
         var gitHubAccessToken = branchSettings.GetDetailValue(GitHubAccessTokenProperty)?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
@@ -126,6 +130,18 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
 
         // If the start date is in the past, we should stop.
         if (!DateTime.TryParse(branchSettings.GetDetailValue(DeployStartDatetimeProperty), out var deployStartDatetime) || deployStartDatetime < currentDateTime)
+        {
+            return;
+        }
+        
+        // Validate the settings to determine if the automatic deployment can be executed.
+        if (!await ValidateSettingsAsync(scope, branchSettings, gitHubAccessTokenExpires, configurationsToPause, currentDateTime, deployStartDatetime, emailsForStatusUpdates, branchMergeTemplate))
+        {
+            return;
+        }
+
+        // If the time to pause or update is to far in the future we should stop and wait till a better moment. Once passed this point the provided settings are locked in.
+        if ((configurationsToPause.Any() && DateTime.TryParse(branchSettings.GetDetailValue(ConfigurationsPauseDatetimeProperty), out var configurationsPauseDatetime) && configurationsPauseDatetime - currentDateTime > MaximumThreadSleepTime) || deployStartDatetime - currentDateTime > MaximumThreadSleepTime)
         {
             return;
         }
@@ -283,6 +299,72 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     }
 
     /// <summary>
+    /// Validate the settings to determine if the automatic deployment can be executed.
+    /// </summary>
+    /// <param name="scope">A <see cref="IServiceScope"/> to use to request services.</param>
+    /// <param name="branchSettings">The settings for the deployment.</param>
+    /// <param name="gitHubAccessTokenExpires"></param>
+    /// <param name="configurationsToPause">The configurations that need to be paused during deployment.</param>
+    /// <param name="currentDateTime">The current date time to compare settings with.</param>
+    /// <param name="deployStartDatetime">The time the deployment needs to start to validate the pause time.</param>
+    /// <param name="emailsForStatusUpdates">The email addresses that need to receive an email when something went wrong.</param>
+    /// <param name="branchMergeTemplate">The ID of the branch template that needs to be used for the merge.</param>
+    /// <returns>Returns true if all checks have passed successfully.</returns>
+    private async Task<bool> ValidateSettingsAsync(IServiceScope scope, WiserItemModel branchSettings, DateTime gitHubAccessTokenExpires, List<int> configurationsToPause, DateTime currentDateTime, DateTime deployStartDatetime, string[] emailsForStatusUpdates, int branchMergeTemplate)
+    {
+        var errors = new List<string>();
+        
+        if (deployStartDatetime > gitHubAccessTokenExpires)
+        {
+            errors.Add("The GitHub access token will be expired before the deploy can start.");
+        }
+
+        if (configurationsToPause.Any())
+        {
+            // If there are configurations that need to be paused, but the pause datetime is in the past, we should stop.
+            if (DateTime.TryParse(branchSettings.GetDetailValue(ConfigurationsPauseDatetimeProperty), out var configurationsPauseDatetime) && configurationsPauseDatetime < currentDateTime)
+            {
+                errors.Add("The configurations pause datetime is set in the past.");
+            }
+
+            // Pausing configurations should always be done first, otherwise there's no point in pausing them.
+            // So if the pause datetime is later than the deployment start datetime, we should stop.
+            if (configurationsPauseDatetime > deployStartDatetime)
+            {
+                errors.Add("The configurations pause datetime is set later than the deployment start datetime.");
+            }
+        }
+        
+        // Check if the selected branch template is for the correct branch.
+        var productionDatabaseConnection = scope.ServiceProvider.GetService<IDatabaseConnection>();
+        var mergeBranchSettings = await GetMergeBranchSettingsAsync(productionDatabaseConnection, branchMergeTemplate);
+        if (mergeBranchSettings == null)
+        {
+            errors.Add("The merge branch settings could not be retrieved.");
+        }
+        
+        var branchName = branchSettings.GetDetailValue(BranchNameProperty);
+        if (!mergeBranchSettings?.DatabaseName.EndsWith(branchName, StringComparison.OrdinalIgnoreCase) ?? true)
+        {
+            errors.Add("The selected branch template is not compatible with the provided branch to merge.");
+        }
+
+        if (!errors.Any())
+        {
+            return true;
+        }
+
+        // Only log the errors if the settings have changed since the last check.
+        if (lastBranchSettingsUpdateTimes[0] != lastBranchSettingsUpdateTimes[1])
+        {
+            await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, $"The automatic deployment can not be executed due to incorrect settings.{Environment.NewLine}\t{String.Join($"{Environment.NewLine}\t", errors)}", logName);
+            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment incorrect configured", $"The automatic deployment can not be executed due to incorrect settings.<br/><ul><li>{String.Join("</li><li>", errors)}</li></ul>");
+        }
+        
+        return false;
+    }
+
+    /// <summary>
     /// Pause configurations if needed before the deployment.
     /// </summary>
     /// <param name="branchSettings">The settings for the deployment.</param>
@@ -302,36 +384,11 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             return true;
         }
         
-        await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Checking if configurations need to be paused before the deployment.", logName);
-            
-        // If there are configurations that need to be paused, but the pause datetime is in the past, we should stop.
-        if (DateTime.TryParse(branchSettings.GetDetailValue(ConfigurationsPauseDatetimeProperty), out var configurationsPauseDatetime) && configurationsPauseDatetime < currentDateTime)
-        {
-            await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be executed, could not pause the configurations on the provided time since it is in the past.", logName);
-            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, could not pause the configurations on the provided time since it is in the past.");
-            return false;
-        }
-
-        // Pausing configurations should always be done first, otherwise there's no point in pausing them.
-        // So if the pause datetime is later than the deployment start datetime, we should stop.
-        if (configurationsPauseDatetime > deployStartDatetime)
-        {
-            await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be executed, because the settings are invalid (the configurations pause datetime is set later than the deployment start datetime).", logName);
-            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, because the settings are invalid (the configurations pause datetime is set later than the deployment start datetime).");
-            return false;
-        }
-
-        // This is to prevent the thread from sleeping for too long.
-        var timeToWaitToPauseConfigurations = configurationsPauseDatetime - currentDateTime;
-        if (timeToWaitToPauseConfigurations > MaximumThreadSleepTime)
-        {
-            return false;
-        }
-
+        var configurationsPauseDatetime = DateTime.Parse(branchSettings.GetDetailValue(ConfigurationsPauseDatetimeProperty));
         await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Wait till the the configurations need to be paused at {configurationsPauseDatetime:yyyy-MM-dd HH:mm:ss}.", logName);
         // Wait till the configurations need to be paused.
         // TODO: Pass cancellation token from somewhere? MainWorker/MainService? I don't know.
-        await TaskHelpers.WaitAsync(timeToWaitToPauseConfigurations, default);
+        await TaskHelpers.WaitAsync(configurationsPauseDatetime - currentDateTime, default);
 
         await SetConfigurationsPauseStateAsync(configurationsToPause, wiserDashboardService, allServices, true);
 
@@ -684,7 +741,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
 
             if (stepTimes.Any())
             {
-                body += $"{Environment.NewLine}The following steps took place during the automatic deployment:{Environment.NewLine}{String.Join(Environment.NewLine, stepTimes.Select(x => $"- {x.Key}: {x.Value}"))}";
+                body += $"<br/><br/>The following steps took place during the automatic deployment:<br/><table><tr><th>Action:</th><th>Time:</th></tr>{String.Join("", stepTimes.Select(x => $"<tr><td>{x.Key}</td><td>{x.Value}</td></tr>"))}</table>";
             }
             
             var communicationsService = scope.ServiceProvider.GetRequiredService<IGclCommunicationsService>();

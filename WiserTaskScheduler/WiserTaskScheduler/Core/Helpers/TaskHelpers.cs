@@ -14,7 +14,6 @@ public class TaskHelpers
     /// <returns>A task that you can await.</returns>
     public static async Task WaitAsync(TimeSpan timeToWait, CancellationToken stoppingToken)
     {
-        // TODO: This method is still untested. It should be tested to see if it works as expected.
         var remainingTime = timeToWait;
 
         while (remainingTime.TotalMilliseconds > 0)
