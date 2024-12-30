@@ -58,10 +58,10 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
 
     private static readonly TimeSpan MaximumThreadSleepTime = new TimeSpan(6, 0, 0);
     private static readonly int DefaultGitHubWorkflowTimeout = 15;
-    private static readonly TimeSpan DefaultGitHubWorkflowCheckInterval = new TimeSpan(0, 1, 0);
+    private static readonly TimeSpan DefaultGitHubWorkflowCheckInterval = new TimeSpan(0, 0, 15);
 
-    private List<KeyValuePair<string, TimeSpan>> stepTimes = new List<KeyValuePair<string, TimeSpan>>();
-    private DateTime[] lastBranchSettingsUpdateTimes = new DateTime[2];
+    private readonly List<KeyValuePair<string, TimeSpan>> stepTimes = new List<KeyValuePair<string, TimeSpan>>();
+    private readonly DateTime[] lastBranchSettingsUpdateTimes = new DateTime[2];
 
     /// <inheritdoc />
     public LogSettings LogSettings { get; set; }
@@ -149,10 +149,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         }
 
         // Pause configurations/services that need to be paused before the deployment. Any errors are logged and notified about inside the method.
-        if (!await PauseConfigurationsAsync(branchSettings, scope, configurationsToPause, wiserDashboardService, currentDateTime, deployStartDatetime, emailsForStatusUpdates, allServices, stoppingToken))
-        {
-            return;
-        }
+        await PauseConfigurationsAsync(branchSettings, configurationsToPause, wiserDashboardService, currentDateTime, allServices, stoppingToken);
 
         await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Wait till the actual deployment starts at {deployStartDatetime:yyyy-MM-dd HH:mm:ss}.", logName);
         // Wait till the start datetime of the deployment.
@@ -172,7 +169,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             {
                 deployStopWatch.Stop();
                 stepTimes.Add(new KeyValuePair<string, TimeSpan>("Total deployment", deployStopWatch.Elapsed));
-                await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be executed, because the GitHub workflow failed to disable the website and could not enable it again.", logName);
+                await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be executed, because the GitHub workflow failed to completely disable the website and could not enable it again.", logName);
                 await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, because the GitHub workflow failed to disable the website and could not enable it again. The website may still be in maintenance mode and manual actions are required.");
                 return;
             }
@@ -369,21 +366,17 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// Pause configurations if needed before the deployment.
     /// </summary>
     /// <param name="branchSettings">The settings for the deployment.</param>
-    /// <param name="scope">A <see cref="IServiceScope"/> to use to request services.</param>
     /// <param name="configurationsToPause">The configurations that need to be paused during deployment.</param>
     /// <param name="wiserDashboardService">The <see cref="IWiserDashboardService"/> to process changes to the configurations state.</param>
     /// <param name="currentDateTime">The current date time to compare settings with.</param>
-    /// <param name="deployStartDatetime">The time the deployment needs to start to validate the pause time.</param>
-    /// <param name="emailsForStatusUpdates">The email addresses that need to receive an email when something went wrong.</param>
     /// <param name="allServices">The WTS services running for this project.</param>
     /// <param name="stoppingToken">The <see cref="CancellationToken"/> used for the current background service to indicate if it is being stopped.</param>
-    /// <returns>Returns true if nothing went wrong to indicate the deployment flow can continue.</returns>
-    private async Task<bool> PauseConfigurationsAsync(WiserItemModel branchSettings, IServiceScope scope, List<int> configurationsToPause, IWiserDashboardService wiserDashboardService, DateTime currentDateTime, DateTime deployStartDatetime, string[] emailsForStatusUpdates, List<Service> allServices, CancellationToken stoppingToken)
+    private async Task PauseConfigurationsAsync(WiserItemModel branchSettings, List<int> configurationsToPause, IWiserDashboardService wiserDashboardService, DateTime currentDateTime, List<Service> allServices, CancellationToken stoppingToken)
     {
         // Check if configurations need to be paused and wait till that moment.
         if (!configurationsToPause.Any())
         {
-            return true;
+            return;
         }
         
         var configurationsPauseDatetime = DateTime.Parse(branchSettings.GetDetailValue(ConfigurationsPauseDatetimeProperty));
@@ -392,8 +385,6 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         await TaskHelpers.WaitAsync(configurationsPauseDatetime - currentDateTime, stoppingToken);
 
         await SetConfigurationsPauseStateAsync(configurationsToPause, wiserDashboardService, allServices, true);
-
-        return true;
     }
 
     /// <summary>
@@ -440,7 +431,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <param name="gitHubAccessToken">The access token to use for the GitHub API.</param>
     /// <param name="workflowName">The name of the workflow to dispatch the event for.</param>
     /// <param name="stoppingToken">The <see cref="CancellationToken"/> used for the current background service to indicate if it is being stopped.</param>
-    /// <returns></returns>
+    /// <returns>Returns true if the GitHub actions started after the dispatch have been successfully completed.</returns>
     private async Task<bool> DispatchGitHubWorkflowEventAsync(string gitHubBaseUrl, string gitHubAccessToken, string workflowName, CancellationToken stoppingToken)
     {
         var stopWatch = new Stopwatch();
@@ -478,7 +469,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Getting the merge branch settings.", logName);
 
         databaseConnection.AddParameter("BranchMergeTemplate", branchMergeTemplate);
-        var query = $"SELECT data FROM {WiserTableNames.WiserBranchesQueue} WHERE id = @BranchMergeTemplate;";
+        var query = $"SELECT data FROM {WiserTableNames.WiserBranchesQueue} WHERE id = ?BranchMergeTemplate;";
         
         var dataTable = await databaseConnection.GetAsync(query);
         if (dataTable.Rows.Count == 0 || dataTable.Rows[0]["data"] == DBNull.Value)
@@ -578,7 +569,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             httpRequest.Headers.Add("Accept", "application/vnd.github+json");
             httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
             
-            var response = await httpClientService.Client.SendAsync(httpRequest);
+            var response = await httpClientService.Client.SendAsync(httpRequest, stoppingToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -588,7 +579,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
                 return false;
             }
             
-            var body = await response.Content.ReadAsStringAsync();
+            var body = await response.Content.ReadAsStringAsync(stoppingToken);
             var result = JToken.Parse(body);
             var workflowRuns = result["workflow_runs"] as JArray;
 
