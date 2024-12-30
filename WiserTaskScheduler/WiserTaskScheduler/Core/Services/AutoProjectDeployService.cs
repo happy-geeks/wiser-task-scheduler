@@ -235,7 +235,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         
         await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "The branch merge has been completed successfully.", logName);
         
-        var publishResult = await PublishWiserCommitsAsync();
+        var publishResult = await PublishWiserCommitsAsync(stoppingToken);
 
         if (publishResult != HttpStatusCode.NoContent)
         {
@@ -448,7 +448,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             @ref = "main"
         });
         
-        await httpClientService.Client.SendAsync(httpRequest);
+        await httpClientService.Client.SendAsync(httpRequest, stoppingToken);
         await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"The event to start the GitHub workflow '{workflowName}' has been dispatched.", logName);
 
         stopWatch.Stop();
@@ -603,8 +603,9 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// <summary>
     /// Publishes the Wiser commits to the production environment.
     /// </summary>
+    /// <param name="stoppingToken">The <see cref="CancellationToken"/> used for the current background service to indicate if it is being stopped.</param>
     /// <returns>Returns the status code from the Wiser API.</returns>
-    private async Task<HttpStatusCode> PublishWiserCommitsAsync()
+    private async Task<HttpStatusCode> PublishWiserCommitsAsync(CancellationToken stoppingToken)
     {
         var stopWatch = new Stopwatch();
         stopWatch.Start();
@@ -613,7 +614,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         var accessToken = await wiserService.GetAccessTokenAsync();
         var wiserApiBaseUrl = $"{wtsSettings.Wiser.WiserApiUrl}{(wtsSettings.Wiser.WiserApiUrl.EndsWith('/') ? "" : "/")}api/v3/version-control";
         
-        var (commitsToPublish, retrievedCommitsStatusCode) = await GetWiserCommitsToPublishAsync(accessToken, wiserApiBaseUrl);
+        var (commitsToPublish, retrievedCommitsStatusCode) = await GetWiserCommitsToPublishAsync(accessToken, wiserApiBaseUrl, stoppingToken);
         
         stopWatch.Stop();
         stepTimes.Add(new KeyValuePair<string, TimeSpan>("Retrieve Wiser commits to publish", stopWatch.Elapsed));
@@ -636,10 +637,10 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         });
         
         await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Publishing the following Wiser commits to the production environment: {String.Join(',', commitsToPublish)}", logName);
-        var response = await httpClientService.Client.SendAsync(httpRequest);
+        var response = await httpClientService.Client.SendAsync(httpRequest, stoppingToken);
         if (!response.IsSuccessStatusCode)
         {
-            var body = await response.Content.ReadAsStringAsync();
+            var body = await response.Content.ReadAsStringAsync(stoppingToken);
             await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, $"Failed to publish the Wiser commits to the production environment, server returned status '{response.StatusCode}' with reason '{response.ReasonPhrase}'. The following body was returned:{Environment.NewLine}{body}", logName);
         }
 
@@ -653,8 +654,9 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// </summary>
     /// <param name="accessToken">The access token for the Wiser API.</param>
     /// <param name="wiserApiBaseUrl">The base URL to the Wiser API.</param>
+    /// <param name="stoppingToken">The <see cref="CancellationToken"/> used for the current background service to indicate if it is being stopped.</param>
     /// <returns>Returns a list with all commit IDs that need to be published.</returns>
-    private async Task<(List<int> commitIds, HttpStatusCode statusCode)> GetWiserCommitsToPublishAsync(string accessToken, string wiserApiBaseUrl)
+    private async Task<(List<int> commitIds, HttpStatusCode statusCode)> GetWiserCommitsToPublishAsync(string accessToken, string wiserApiBaseUrl, CancellationToken stoppingToken)
     {
         await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Retrieving the commits from Wiser that need to be published.", logName);
         
@@ -663,8 +665,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         httpRequest.Headers.Add("Accept", "application/json");
         httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
         
-        var response = await httpClientService.Client.SendAsync(httpRequest);
-        var body = await response.Content.ReadAsStringAsync();
+        var response = await httpClientService.Client.SendAsync(httpRequest, stoppingToken);
+        var body = await response.Content.ReadAsStringAsync(stoppingToken);
 
         if (!response.IsSuccessStatusCode)
         {
