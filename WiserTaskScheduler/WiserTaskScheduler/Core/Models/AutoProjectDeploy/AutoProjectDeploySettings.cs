@@ -24,12 +24,4 @@ public class AutoProjectDeploySettings
         Delay = new TimeSpan(0, 5, 0),
         RunImmediately = true
     };
-    
-    /// <summary>
-    /// Gets or sets the log settings for the auto project deploy service.
-    /// </summary>
-    public LogSettings LogSettings { get; set; } = new LogSettings
-    {
-        LogMinimumLevel = LogLevel.None
-    };
 }
