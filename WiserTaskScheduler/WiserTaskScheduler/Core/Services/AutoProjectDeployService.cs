@@ -159,6 +159,17 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         var deployStopWatch = new Stopwatch();
         deployStopWatch.Start();
         
+        var productionDatabaseConnection = scope.ServiceProvider.GetService<IDatabaseConnection>();
+        var mergeBranchSettings = await GetMergeBranchSettingsAsync(productionDatabaseConnection, branchMergeTemplate);
+        if (mergeBranchSettings == null)
+        {
+            deployStopWatch.Stop();
+            stepTimes.Add(new KeyValuePair<string, TimeSpan>("Total deployment", deployStopWatch.Elapsed));
+            await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not start, because the merge branch settings could not be retrieved.", logName);
+            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", $"The automatic deployment could not be started, because the merge branch settings could not be retrieved. The website was not disabled and is still online, a new attempt needs to be configured.{(configurationsToPause.Any() ? " The configurations are still paused." : "")}");
+            return;
+        }
+        
         var gitHubBaseUrl = $"https://api.github.com/repos/{gitHubOrganization}/{gitHubRepository}";
         
         // Disable the website according to the GitHub workflow to start the deployment.
@@ -170,34 +181,23 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
                 deployStopWatch.Stop();
                 stepTimes.Add(new KeyValuePair<string, TimeSpan>("Total deployment", deployStopWatch.Elapsed));
                 await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be executed, because the GitHub workflow failed to completely disable the website and could not enable it again.", logName);
-                await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, because the GitHub workflow failed to disable the website and could not enable it again. The website may still be in maintenance mode and manual actions are required.");
+                await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", $"The automatic deployment could not be executed, because the GitHub workflow failed to disable the website and could not enable it again. The website may still be in maintenance mode and manual actions are required.{(configurationsToPause.Any() ? " The configurations are still paused." : "")}");
                 return;
             }
             
             deployStopWatch.Stop();
             stepTimes.Add(new KeyValuePair<string, TimeSpan>("Total deployment", deployStopWatch.Elapsed));
             await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be executed, because the GitHub workflow failed to disable the website.", logName);
-            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, because the GitHub workflow failed to disable the website. The website has been enabled again, a new attempt needs to be configured.");
+            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", $"The automatic deployment could not be executed, because the GitHub workflow failed to disable the website. The website has been enabled again, a new attempt needs to be configured.{(configurationsToPause.Any() ? " The configurations are still paused." : "")}");
             return;
         }
         
-        var productionDatabaseConnection = scope.ServiceProvider.GetService<IDatabaseConnection>();
         var branchQueueService = scope.ServiceProvider.GetRequiredService<IBranchQueueService>();
         await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Initializing the branch queue service.", logName);
         await ((IActionsService)branchQueueService).InitializeAsync(new ConfigurationModel()
         {
             ConnectionString = gclSettings.ConnectionString
         }, null);
-        
-        var mergeBranchSettings = await GetMergeBranchSettingsAsync(productionDatabaseConnection, branchMergeTemplate);
-        if (mergeBranchSettings == null)
-        {
-            deployStopWatch.Stop();
-            stepTimes.Add(new KeyValuePair<string, TimeSpan>("Total deployment", deployStopWatch.Elapsed));
-            await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, "The automatic deployment could not be executed, because the merge branch settings could not be retrieved.", logName);
-            await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment failed", "The automatic deployment could not be executed, because the merge branch settings could not be retrieved. The website is still in maintenance mode and manual actions are required.");
-            return;
-        }
         
         mergeBranchSettings.StartOn = deployStartDatetime;
         var connectionStringBuilder = branchQueueService.GetConnectionStringBuilderForBranch(mergeBranchSettings, mergeBranchSettings.DatabaseName);
