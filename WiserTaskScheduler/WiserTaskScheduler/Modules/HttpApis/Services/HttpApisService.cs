@@ -80,11 +80,11 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                     {"Results", jArray}
                 };
             }
-            
+
             if (String.IsNullOrWhiteSpace(httpApi.UseResultSet))
             {
                 await logService.LogError(logger, LogScopes.StartAndStop, httpApi.LogSettings, $"The HTTP API in configuration '{configurationServiceName}', time ID '{httpApi.TimeId}', order '{httpApi.Order}' is set to not be a single request but no result set has been provided. If the information is not dynamic set action to single request, otherwise provide a result set to use.", configurationServiceName, httpApi.TimeId, httpApi.Order);
-                
+
                 return new JObject
                 {
                     {"Results", jArray}
@@ -168,16 +168,34 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                 }
             }
 
+            var resultSet = new JObject
+            {
+                {"Url", url}
+            };
+
             if (!String.IsNullOrWhiteSpace(httpApi.OAuth))
             {
-                var token = await oAuthService.GetAccessTokenAsync(httpApi.OAuth);
-                if (token != null)
+                var (oauthState, authorizationHeaderValue, _, _) = await oAuthService.GetAccessTokenAsync(httpApi.OAuth);
+                switch (oauthState)
                 {
-                    request.Headers.Add("Authorization", token);
-                }
-                else
-                {
-                    await logService.LogWarning(logger, LogScopes.RunBody, httpApi.LogSettings, $"OAuth '{httpApi.OAuth}' not found for configuration '{configurationServiceName}' with time ID '{httpApi.TimeId}' and order '{httpApi.Order}'. Add the '{httpApi.OAuth}' to the OAuth configuration or remove usage.", configurationServiceName, httpApi.TimeId, httpApi.Order, extraValuesToObfuscate);
+                    case OAuthState.SuccessfullyRequestedNewToken:
+                    case OAuthState.UsingAlreadyExistingToken:
+                        request.Headers.Add("Authorization", authorizationHeaderValue);
+                        break;
+                    case OAuthState.AuthenticationFailed:
+                    case OAuthState.RefreshTokenFailed:
+                    case OAuthState.NotEnoughInformation:
+                        await logService.LogWarning(logger, LogScopes.RunBody, httpApi.LogSettings, $"OAuth '{httpApi.OAuth}' authentication failed ({oauthState.ToString()}) for configuration '{configurationServiceName}' with time ID '{httpApi.TimeId}' and order '{httpApi.Order}'.", configurationServiceName, httpApi.TimeId, httpApi.Order, extraValuesToObfuscate);
+                        break;
+                    case OAuthState.WaitingForManualAuthentication:
+                        // If we're waiting for manual authentication, return an unauthorized response and don't attempt to execute the API request.
+                        resultSet.Add("StatusCode", ((int) HttpStatusCode.Unauthorized).ToString());
+                        resultSet.Add("Body", "");
+                        resultSet.Add("BodyPlainText", "");
+                        resultSet.Add("UsedResultSet", null);
+                        return resultSet;
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(oauthState), oauthState.ToString(), null);
                 }
             }
 
@@ -189,7 +207,7 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                     extraValuesToObfuscate.Add(value);
                 }
             }
-            
+
             // If an x-api-key header has been added through custom headers add it to the list of extra values to obfuscate.
             if (request.Headers.Contains("X-API-Key"))
             {
@@ -198,7 +216,7 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                     extraValuesToObfuscate.Add(value);
                 }
             }
-            
+
             await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Headers: {request.Headers}", configurationServiceName, httpApi.TimeId, httpApi.Order, extraValuesToObfuscate);
 
             if (httpApi.Body != null)
@@ -212,7 +230,6 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
                 };
             }
 
-            
             var httpHandler = new HttpClientHandler();
 
             if (httpApi.IgnoreSSLValidationErrors)
@@ -227,8 +244,9 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
             {
                 client.Timeout = TimeSpan.FromSeconds(httpApi.Timeout);
             }
-            
+
             using var response = await client.SendAsync(request);
+            resultSet.Add("StatusCode", ((int) response.StatusCode).ToString());
 
             // If the request was unauthorized retry the request if it has an OAuth API name set and it hasn't retried before.
             if (response.StatusCode == HttpStatusCode.Unauthorized && !String.IsNullOrWhiteSpace(httpApi.OAuth) && retryOAuthUnauthorizedResponse)
@@ -241,12 +259,6 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
             }
 
             retryOAuthUnauthorizedResponse = true;
-
-            var resultSet = new JObject
-            {
-                {"Url", url},
-                {"StatusCode", ((int) response.StatusCode).ToString()}
-            };
 
             // Add all headers to the result set.
             ExtractHeadersIntoResultSet(resultSet, response.Headers);
@@ -263,7 +275,7 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
             {
                 contentType = (string) resultSet["Content-Type"]?[0];
             }
-            
+
             // Make sure contentType is not null.
             contentType ??= String.Empty;
 
@@ -292,7 +304,7 @@ namespace WiserTaskScheduler.Modules.HttpApis.Services
 
             // Always add the body as plain text.
             resultSet.Add("BodyPlainText", responseBody);
-            
+
             var useResultSetKeyParts = useResultSet.Split('.');
             var usedResultSet = String.IsNullOrWhiteSpace(useResultSet) ? null : ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? useResultSetKeyParts[0] : useResultSet, ReplacementHelper.EmptyRows, resultSets);
             resultSet.Add("UsedResultSet", usedResultSet);

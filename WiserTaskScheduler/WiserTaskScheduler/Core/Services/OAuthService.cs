@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
@@ -20,7 +21,6 @@ using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models.OAuth;
-using OauthConstants = GeeksCoreLibrary.Modules.OAuth.Models.Constants;
 
 namespace WiserTaskScheduler.Core.Services
 {
@@ -63,14 +63,15 @@ namespace WiserTaskScheduler.Core.Services
             // Check if there is already information stored in the database to use.
             foreach (var oAuth in configuration.OAuths)
             {
-                oAuth.AccessToken = (await objectsService.GetSystemObjectValueAsync($"WTS_{oAuth.ApiName}_AccessToken"))?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
-                oAuth.TokenType = await objectsService.GetSystemObjectValueAsync($"WTS_{oAuth.ApiName}_TokenType");
-                oAuth.RefreshToken = (await objectsService.GetSystemObjectValueAsync($"WTS_{oAuth.ApiName}_RefreshToken"))?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
-                oAuth.AuthCode = (await objectsService.GetSystemObjectValueAsync($"WTS_{oAuth.ApiName}_{OauthConstants.AuthorizationCodeKey}"))?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
-                var expireTime = await objectsService.GetSystemObjectValueAsync($"WTS_{oAuth.ApiName}_ExpireTime");
+                oAuth.AccessToken = (await objectsService.GetSystemObjectValueAsync($"WTS_{oAuth.ApiName}_{nameof(oAuth.AccessToken)}"))?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
+                oAuth.TokenType = await objectsService.GetSystemObjectValueAsync($"WTS_{oAuth.ApiName}_{nameof(oAuth.TokenType)}");
+                oAuth.RefreshToken = (await objectsService.GetSystemObjectValueAsync($"WTS_{oAuth.ApiName}_{nameof(oAuth.RefreshToken)}"))?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
+                oAuth.AuthorizationCode = (await objectsService.GetSystemObjectValueAsync($"WTS_{oAuth.ApiName}_{nameof(oAuth.AuthorizationCode)}"))?.DecryptWithAes(gclSettings.DefaultEncryptionKey);
+                oAuth.AuthorizationCodeMailSent = String.Equals("true", await objectsService.GetSystemObjectValueAsync($"WTS_{oAuth.ApiName}_{nameof(oAuth.AuthorizationCodeMailSent)}"), StringComparison.OrdinalIgnoreCase);
+                var expireTime = await objectsService.GetSystemObjectValueAsync($"WTS_{oAuth.ApiName}_{nameof(oAuth.ExpireTime)}");
 
                 // Try to parse the DateTime. If it fails, then set it to DateTime.MinValue to prevent errors.
-                if (!String.IsNullOrWhiteSpace(expireTime) && DateTime.TryParse(expireTime, CultureInfo.InvariantCulture, DateTimeStyles.None, out var expireTimeParsed))
+                if (!String.IsNullOrWhiteSpace(expireTime) && DateTime.TryParse(expireTime, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var expireTimeParsed))
                 {
                     oAuth.ExpireTime = expireTimeParsed;
                 }
@@ -84,58 +85,36 @@ namespace WiserTaskScheduler.Core.Services
         }
 
         /// <inheritdoc />
-        public async Task<string> GetAccessTokenAsync(string apiName, bool retryAfterWrongRefreshToken = true)
+        public async Task<(OAuthState State, string AuthorizationHeaderValue, JToken ResponseBody, HttpStatusCode ResponseStatusCode)> GetAccessTokenAsync(string apiName, bool retryAfterWrongRefreshToken = true)
         {
+            (OAuthState State, string AuthorizationHeaderValue, JToken ResponseBody, HttpStatusCode ResponseStatusCode) result = (OAuthState.NotEnoughInformation, null, null, HttpStatusCode.Unauthorized);
             using var scope = serviceProvider.CreateScope();
             var communicationsService = scope.ServiceProvider.GetRequiredService<ICommunicationsService>();
 
-            var oAuthApi = configuration.OAuths.SingleOrDefault(oAuth => oAuth.ApiName.Equals(apiName));
+            var oAuthApi = configuration.OAuths.SingleOrDefault(oAuth => String.Equals(oAuth.ApiName, apiName, StringComparison.OrdinalIgnoreCase));
             if (oAuthApi == null)
             {
-                return null;
+                return result;
             }
-
-            // Check if a new access token needs to be requested and request it.
-            OAuthState result;
 
             // Lock to prevent multiple requests at once.
             await OauthApiLock.WaitAsync();
 
+            // Check if a new access token needs to be requested and request it.
             try
             {
-                if (!String.IsNullOrWhiteSpace(oAuthApi.AccessToken) && oAuthApi.ExpireTime > DateTime.Now)
+                if (!String.IsNullOrWhiteSpace(oAuthApi.AccessToken) && oAuthApi.ExpireTime > DateTime.UtcNow)
                 {
-                    result = OAuthState.CurrentToken;
+                    result.State = OAuthState.UsingAlreadyExistingToken;
                 }
                 else
                 {
                     var formData = new List<KeyValuePair<string, string>>();
 
                     // Setup correct authentication.
-                    OAuthState failState;
-                    if (String.IsNullOrWhiteSpace(oAuthApi.AuthCode))
+                    if (String.IsNullOrWhiteSpace(oAuthApi.AccessToken) || String.IsNullOrWhiteSpace(oAuthApi.RefreshToken))
                     {
-                        var redirectUrl = new UriBuilder(oAuthApi.RedirectBaseUri) { Path = "oauth/handle-callback" };
-                        var queryStringBuilder = HttpUtility.ParseQueryString(redirectUrl.Query);
-                        queryStringBuilder["apiName"] = apiName;
-                        redirectUrl.Query = queryStringBuilder.ToString()!;
-
-                        var authorizationUrl = new UriBuilder(oAuthApi.AuthorizationUrl);
-                        queryStringBuilder = HttpUtility.ParseQueryString(authorizationUrl.Query);
-                        queryStringBuilder["response_type"] = "code";
-                        queryStringBuilder["client_id"] = oAuthApi.ClientId;
-                        queryStringBuilder["scope"] = oAuthApi.Scope;
-                        queryStringBuilder["redirect_uri"] = redirectUrl.Uri.ToString();
-                        authorizationUrl.Query = queryStringBuilder.ToString()!;
-                        await communicationsService.SendEmailAsync(oAuthApi.EmailAddressForAuthentication, "WTS OAuth2.0 Authentication", $"Please authenticate your account by clicking the following link: {authorizationUrl.Uri}");
-
-                        // Return null, as the user needs to authenticate first.
-                        return null;
-                    }
-                    else if (String.IsNullOrWhiteSpace(oAuthApi.AccessToken) || String.IsNullOrWhiteSpace(oAuthApi.RefreshToken))
-                    {
-                        failState = OAuthState.FailedLogin;
-
+                        result.State = OAuthState.AuthenticationFailed;
                         if (oAuthApi.OAuthJwt == null)
                         {
                             switch (oAuthApi.GrantType)
@@ -146,10 +125,46 @@ namespace WiserTaskScheduler.Core.Services
                                     break;
 
                                 case OAuthGrantType.AuthCode:
-                                    formData.Add(new KeyValuePair<string, string>("code", oAuthApi.AuthCode));
+                                    // First build the redirect URL, we need it in both flows.
+                                    var redirectUrl = new UriBuilder(oAuthApi.RedirectBaseUri) {Path = "oauth/handle-callback"};
+                                    var queryStringBuilder = HttpUtility.ParseQueryString(redirectUrl!.Query);
+                                    queryStringBuilder["apiName"] = apiName;
+                                    redirectUrl.Query = queryStringBuilder.ToString()!;
+                                    var redirectUrlString = redirectUrl.Uri.ToString();
+
+                                    if (String.IsNullOrWhiteSpace(oAuthApi.AuthorizationCode))
+                                    {
+                                        if (oAuthApi.AuthorizationCodeMailSent)
+                                        {
+                                            // Mail has already been sent before, need to wait until the user has authenticated.
+                                            result.State = OAuthState.WaitingForManualAuthentication;
+                                            return result;
+                                        }
+
+                                        var authorizationUrl = new UriBuilder(oAuthApi.AuthorizationUrl);
+                                        queryStringBuilder = HttpUtility.ParseQueryString(authorizationUrl.Query);
+                                        queryStringBuilder["response_type"] = "code";
+                                        queryStringBuilder["client_id"] = oAuthApi.ClientId;
+                                        queryStringBuilder["state"] = apiName;
+                                        queryStringBuilder["scope"] = String.Join(" ", oAuthApi.Scopes);
+                                        queryStringBuilder["redirect_uri"] = redirectUrlString;
+                                        queryStringBuilder["access_type"] = "offline";
+                                        queryStringBuilder["prompt"] = "consent";
+                                        authorizationUrl.Query = queryStringBuilder.ToString()!;
+                                        await communicationsService.SendEmailAsync(oAuthApi.EmailAddressForAuthentication, "WTS OAuth2.0 Authentication", $"Please authenticate your account by clicking the following link: {authorizationUrl.Uri}");
+
+                                        oAuthApi.AuthorizationCodeMailSent = true;
+                                        await SaveToDatabaseAsync(oAuthApi);
+
+                                        // End the function, as the user needs to authenticate first.
+                                        result.State = OAuthState.WaitingForManualAuthentication;
+                                        return result;
+                                    }
+
+                                    formData.Add(new KeyValuePair<string, string>("code", oAuthApi.AuthorizationCode));
                                     formData.Add(new KeyValuePair<string, string>("client_id", oAuthApi.ClientId));
                                     formData.Add(new KeyValuePair<string, string>("client_secret", oAuthApi.ClientSecret));
-                                    formData.Add(new KeyValuePair<string, string>("redirect_uri", $"{oAuthApi.RedirectBaseUri}/oauth/handle-callback"));
+                                    formData.Add(new KeyValuePair<string, string>("redirect_uri", redirectUrlString));
                                     formData.Add(new KeyValuePair<string, string>("grant_type", "authorization_code"));
                                     break;
 
@@ -178,6 +193,7 @@ namespace WiserTaskScheduler.Core.Services
                                         formData.Add(new KeyValuePair<string, string>("client_id", oAuthApi.ClientId));
                                         formData.Add(new KeyValuePair<string, string>("client_secret", oAuthApi.ClientSecret));
                                     }
+
                                     break;
                                 case OAuthGrantType.NotSet:
                                     break;
@@ -190,7 +206,7 @@ namespace WiserTaskScheduler.Core.Services
                     {
                         await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.", LogName);
 
-                        failState = OAuthState.FailedRefreshToken;
+                        result.State = OAuthState.RefreshTokenFailed;
                         if (oAuthApi.OAuthJwt == null)
                         {
                             formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
@@ -271,7 +287,7 @@ namespace WiserTaskScheduler.Core.Services
 
                     request.Headers.Add("Accept", "application/json");
 
-                    if (!oAuthApi.SendClientCredentialsInBody && oAuthApi.GrantType == OAuthGrantType.ClientCredentials  || oAuthApi.GrantType == OAuthGrantType.AuthCode)
+                    if (!oAuthApi.SendClientCredentialsInBody && oAuthApi.GrantType == OAuthGrantType.ClientCredentials)
                     {
                         var authString = $"{oAuthApi.ClientId}:{oAuthApi.ClientSecret}";
                         var plainTextBytes = System.Text.Encoding.UTF8.GetBytes(authString);
@@ -283,34 +299,35 @@ namespace WiserTaskScheduler.Core.Services
 
                     using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
                     var json = await reader.ReadToEndAsync();
+                    var body = JObject.Parse(json);
+
+                    result.ResponseBody = body;
+                    result.ResponseStatusCode = response.StatusCode;
 
                     if (!response.IsSuccessStatusCode)
                     {
                         await logService.LogError(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to get access token for {oAuthApi.ApiName}. Received: {response.StatusCode}\n{json}", LogName);
-                        result = failState;
                     }
                     else
                     {
-                        var body = JObject.Parse(json);
-
                         oAuthApi.AccessToken = (string) body["access_token"];
                         oAuthApi.TokenType = (string) body["token_type"];
                         oAuthApi.RefreshToken = (string) body["refresh_token"];
 
-                        if (body["expires_in"].Type == JTokenType.Integer)
+                        if (body["expires_in"]?.Type == JTokenType.Integer)
                         {
-                            oAuthApi.ExpireTime = DateTime.Now.AddSeconds((int) body["expires_in"]);
+                            oAuthApi.ExpireTime = DateTime.UtcNow.AddSeconds((int) body["expires_in"]);
                         }
                         else
                         {
-                            oAuthApi.ExpireTime = DateTime.Now.AddSeconds(Convert.ToInt32((string) body["expires_in"]));
+                            oAuthApi.ExpireTime = DateTime.UtcNow.AddSeconds(Convert.ToInt32((string) body["expires_in"]));
                         }
 
                         oAuthApi.ExpireTime -= oAuthApi.ExpireTimeOffset;
 
-                        await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"A new access token has been retrieved for {oAuthApi.ApiName} and is valid till {oAuthApi.ExpireTime}", LogName);
+                        await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"A new access token has been retrieved for {oAuthApi.ApiName} and is valid till {oAuthApi.ExpireTime.ToLocalTime()}", LogName);
 
-                        result = OAuthState.NewToken;
+                        result.State = OAuthState.SuccessfullyRequestedNewToken;
                     }
                 }
             }
@@ -320,31 +337,35 @@ namespace WiserTaskScheduler.Core.Services
                 OauthApiLock.Release();
             }
 
-            if (result == OAuthState.FailedLogin)
+            // Finalize the result based on the state.
+            switch (result.State)
             {
-                return null;
+                case OAuthState.AuthenticationFailed:
+                case OAuthState.RefreshTokenFailed when !retryAfterWrongRefreshToken:
+                case OAuthState.WaitingForManualAuthentication:
+                case OAuthState.NotEnoughInformation:
+                    result.AuthorizationHeaderValue = null;
+                    break;
+                case OAuthState.RefreshTokenFailed:
+                    // Retry to get the token with the login credentials if the refresh token was invalid.
+                    await RequestWasUnauthorizedAsync(apiName);
+                    result = await GetAccessTokenAsync(apiName, false);
+                    break;
+                case OAuthState.UsingAlreadyExistingToken:
+                    result.AuthorizationHeaderValue = $"{oAuthApi.TokenType} {oAuthApi.AccessToken}";
+                    break;
+                case OAuthState.SuccessfullyRequestedNewToken:
+                    // Reset the authorization code if authentication was successful, because it can only be used once.
+                    oAuthApi.AuthorizationCode = null;
+
+                    await SaveToDatabaseAsync(oAuthApi);
+                    result.AuthorizationHeaderValue = $"{oAuthApi.TokenType} {oAuthApi.AccessToken}";
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(result.State), result.State.ToString(), null);
             }
 
-            if (result == OAuthState.FailedRefreshToken)
-            {
-                if (!retryAfterWrongRefreshToken)
-                {
-                    return null;
-                }
-
-                //Retry to get the token with the login credentials if the refresh token was invalid.
-                await RequestWasUnauthorizedAsync(apiName);
-                return await GetAccessTokenAsync(apiName, false);
-            }
-
-            if (result == OAuthState.CurrentToken)
-            {
-                return $"{oAuthApi.TokenType} {oAuthApi.AccessToken}";
-            }
-
-            await SaveToDatabaseAsync(oAuthApi);
-
-            return $"{oAuthApi.TokenType} {oAuthApi.AccessToken}";
+            return result;
         }
 
         /// <inheritdoc />
@@ -374,10 +395,12 @@ namespace WiserTaskScheduler.Core.Services
             using var scope = serviceProvider.CreateScope();
             var objectsService = scope.ServiceProvider.GetRequiredService<IObjectsService>();
 
-            await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_AccessToken", oAuthApi.AccessToken.EncryptWithAes(gclSettings.DefaultEncryptionKey), false);
-            await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_TokenType", oAuthApi.TokenType, false);
-            await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_RefreshToken", oAuthApi.RefreshToken.EncryptWithAes(gclSettings.DefaultEncryptionKey), false);
-            await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_ExpireTime", oAuthApi.ExpireTime.ToString(CultureInfo.InvariantCulture), false);
+            await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_{nameof(oAuthApi.AccessToken)}", String.IsNullOrWhiteSpace(oAuthApi.AccessToken) ? "" : oAuthApi.AccessToken.EncryptWithAes(gclSettings.DefaultEncryptionKey), false);
+            await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_{nameof(oAuthApi.TokenType)}", oAuthApi.TokenType, false);
+            await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_{nameof(oAuthApi.RefreshToken)}", String.IsNullOrWhiteSpace(oAuthApi.RefreshToken) ? "" : oAuthApi.RefreshToken.EncryptWithAes(gclSettings.DefaultEncryptionKey), false);
+            await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_{nameof(oAuthApi.ExpireTime)}", oAuthApi.ExpireTime.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture), false);
+            await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_{nameof(oAuthApi.AuthorizationCodeMailSent)}", oAuthApi.AuthorizationCodeMailSent.ToString(), false);
+            await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_{nameof(oAuthApi.AuthorizationCode)}", String.IsNullOrWhiteSpace(oAuthApi.AuthorizationCode) ? "" : oAuthApi.AuthorizationCode.EncryptWithAes(gclSettings.DefaultEncryptionKey), false);
         }
     }
 }

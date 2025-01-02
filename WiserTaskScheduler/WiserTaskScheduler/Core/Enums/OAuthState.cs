@@ -2,9 +2,11 @@
 {
     public enum OAuthState
     {
-        NewToken,
-        CurrentToken,
-        FailedLogin,
-        FailedRefreshToken
+        SuccessfullyRequestedNewToken,
+        UsingAlreadyExistingToken,
+        AuthenticationFailed,
+        RefreshTokenFailed,
+        WaitingForManualAuthentication,
+        NotEnoughInformation
     }
 }
