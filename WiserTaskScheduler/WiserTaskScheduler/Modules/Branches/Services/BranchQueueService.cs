@@ -2251,13 +2251,13 @@ WHERE id = ?fileId";
                                     continue;
                                 }
 
-                                sqlParameters["itemId"] = newValue;
+                                sqlParameters["fileId"] = fileId;
 
                                 await using var productionCommand = productionConnection.CreateCommand();
                                 AddParametersToCommand(sqlParameters, productionCommand);
                                 productionCommand.CommandText = $@"{queryPrefix}
 DELETE FROM `{tableName}`
-WHERE `{oldValue.ToMySqlSafeValue(false)}` = ?itemId";
+WHERE id = ?fileId";
                                 await productionCommand.ExecuteNonQueryAsync();
 
                                 break;
