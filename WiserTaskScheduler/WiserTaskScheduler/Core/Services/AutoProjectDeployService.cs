@@ -61,7 +61,9 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     private static readonly TimeSpan DefaultGitHubWorkflowCheckInterval = new TimeSpan(0, 0, 15);
 
     private readonly List<KeyValuePair<string, TimeSpan>> stepTimes = new List<KeyValuePair<string, TimeSpan>>();
-    private readonly DateTime[] lastBranchSettingsUpdateTimes = new DateTime[2];
+
+    private DateTime branchSettingsUpdateTimeLastRun;
+    private DateTime branchSettingsUpdateTimeCurrentRun;
 
     /// <inheritdoc />
     public LogSettings LogSettings { get; set; }
@@ -97,8 +99,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             emailsForStatusUpdates = branchSettings.GetDetailValue(EmailForStatusUpdatesProperty)?.Split(';');
             
             // Use the last update time to prevent setting errors from being triggered multiple times.
-            lastBranchSettingsUpdateTimes[0] = lastBranchSettingsUpdateTimes[1];
-            lastBranchSettingsUpdateTimes[1] = branchSettings.ChangedOn;
+            branchSettingsUpdateTimeLastRun = branchSettingsUpdateTimeCurrentRun;
+            branchSettingsUpdateTimeCurrentRun = branchSettings.ChangedOn;
             
             await RunAutoProjectDeployAsync(scope, branchSettings, stoppingToken);
         }
@@ -142,13 +144,13 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             return;
         }
 
-        // If the time to pause or update is to far in the future we should stop and wait till a better moment. Once passed this point the provided settings are locked in.
+        // If the time to pause or update is to far in the future we should stop and wait till a better moment. The provided settings will be locked in past this point.
         if ((configurationsToPause.Any() && DateTime.TryParse(branchSettings.GetDetailValue(ConfigurationsPauseDatetimeProperty), out var configurationsPauseDatetime) && configurationsPauseDatetime - currentDateTime > MaximumThreadSleepTime) || deployStartDatetime - currentDateTime > MaximumThreadSleepTime)
         {
             return;
         }
 
-        // Pause configurations/services that need to be paused before the deployment. Any errors are logged and notified about inside the method.
+        // Pause configurations/services that need to be paused before the deployment.
         await PauseConfigurationsAsync(branchSettings, configurationsToPause, wiserDashboardService, currentDateTime, allServices, stoppingToken);
 
         await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Wait till the actual deployment starts at {deployStartDatetime:yyyy-MM-dd HH:mm:ss}.", logName);
@@ -353,7 +355,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         }
 
         // Only log the errors if the settings have changed since the last check.
-        if (lastBranchSettingsUpdateTimes[0] != lastBranchSettingsUpdateTimes[1])
+        if (branchSettingsUpdateTimeLastRun != branchSettingsUpdateTimeCurrentRun)
         {
             await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, $"The automatic deployment can not be executed due to incorrect settings.{Environment.NewLine}\t{String.Join($"{Environment.NewLine}\t", errors)}", logName);
             await SendMailAsync(scope, emailsForStatusUpdates, $"{wtsSettings.Wiser.Subdomain}: Automatic deployment incorrect configured", $"The automatic deployment can not be executed due to incorrect settings.<br/><ul><li>{String.Join("</li><li>", errors)}</li></ul>");
@@ -478,14 +480,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         }
         
         var data = dataTable.Rows[0]["data"].ToString();
-        var result = JsonConvert.DeserializeObject<MergeBranchSettingsModel>(data!);
-        
-        // Clear template data to prepare for the merge.
-        result.TemplateId = 0;
-        result.IsTemplate = false;
-        result.TemplateName = null;
-
-        return result;
+        return JsonConvert.DeserializeObject<MergeBranchSettingsModel>(data!);
     }
 
     /// <summary>
@@ -529,7 +524,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         
         var query = $"""
                      INSERT INTO {WiserTableNames.WiserBranchesQueue} (name, branch_id, action, data, added_by, user_id, is_for_automatic_deploy)
-                     VALUES (@name, @branchId, 'merge', @data, 'Wiser Task Scheduler', 0, 1);
+                     VALUES (?name, ?branchId, 'merge', ?data, 'Wiser Task Scheduler', 0, 1);
                      
                      SELECT LAST_INSERT_ID() AS id;
                      """;
