@@ -125,47 +125,13 @@ namespace WiserTaskScheduler.Core.Services
                                     break;
 
                                 case OAuthGrantType.AuthCode:
-                                    // First build the redirect URL, we need it in both flows.
-                                    var redirectUrl = new UriBuilder(oAuthApi.RedirectBaseUri) {Path = "oauth/handle-callback"};
-                                    var queryStringBuilder = HttpUtility.ParseQueryString(redirectUrl!.Query);
-                                    queryStringBuilder["apiName"] = apiName;
-                                    redirectUrl.Query = queryStringBuilder.ToString()!;
-                                    var redirectUrlString = redirectUrl.Uri.ToString();
-
-                                    if (String.IsNullOrWhiteSpace(oAuthApi.AuthorizationCode))
+                                    result = await SetupAuthorizationCodeAuthenticationAsync(result, oAuthApi, communicationsService, formData);
+                                    if (result.State == OAuthState.WaitingForManualAuthentication)
                                     {
-                                        if (oAuthApi.AuthorizationCodeMailSent)
-                                        {
-                                            // Mail has already been sent before, need to wait until the user has authenticated.
-                                            result.State = OAuthState.WaitingForManualAuthentication;
-                                            return result;
-                                        }
-
-                                        var authorizationUrl = new UriBuilder(oAuthApi.AuthorizationUrl);
-                                        queryStringBuilder = HttpUtility.ParseQueryString(authorizationUrl.Query);
-                                        queryStringBuilder["response_type"] = "code";
-                                        queryStringBuilder["client_id"] = oAuthApi.ClientId;
-                                        queryStringBuilder["state"] = apiName;
-                                        queryStringBuilder["scope"] = String.Join(" ", oAuthApi.Scopes);
-                                        queryStringBuilder["redirect_uri"] = redirectUrlString;
-                                        queryStringBuilder["access_type"] = "offline";
-                                        queryStringBuilder["prompt"] = "consent";
-                                        authorizationUrl.Query = queryStringBuilder.ToString()!;
-                                        await communicationsService.SendEmailAsync(oAuthApi.EmailAddressForAuthentication, "WTS OAuth2.0 Authentication", $"The Wiser Task Scheduler needs a (new) authentication token for the {oAuthApi.ApiName} API. But this requires manual authentication by a person (the first time only). Please authenticate your account by clicking the following link. The WTS will handle the rest afterwards. The link is: {authorizationUrl.Uri}");
-
-                                        oAuthApi.AuthorizationCodeMailSent = true;
-                                        await SaveToDatabaseAsync(oAuthApi);
-
-                                        // End the function, as the user needs to authenticate first.
-                                        result.State = OAuthState.WaitingForManualAuthentication;
+                                        // If we're waiting for manual authentication, then we should stop the process here, because we can't continue without the authorization code.
                                         return result;
                                     }
 
-                                    formData.Add(new KeyValuePair<string, string>("code", oAuthApi.AuthorizationCode));
-                                    formData.Add(new KeyValuePair<string, string>("client_id", oAuthApi.ClientId));
-                                    formData.Add(new KeyValuePair<string, string>("client_secret", oAuthApi.ClientSecret));
-                                    formData.Add(new KeyValuePair<string, string>("redirect_uri", redirectUrlString));
-                                    formData.Add(new KeyValuePair<string, string>("grant_type", "authorization_code"));
                                     break;
 
                                 case OAuthGrantType.AuthCodeWithPKCE:
@@ -401,6 +367,62 @@ namespace WiserTaskScheduler.Core.Services
             await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_{nameof(oAuthApi.ExpireTime)}", oAuthApi.ExpireTime.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture), false);
             await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_{nameof(oAuthApi.AuthorizationCodeMailSent)}", oAuthApi.AuthorizationCodeMailSent.ToString(), false);
             await objectsService.SetSystemObjectValueAsync($"WTS_{oAuthApi.ApiName}_{nameof(oAuthApi.AuthorizationCode)}", String.IsNullOrWhiteSpace(oAuthApi.AuthorizationCode) ? "" : oAuthApi.AuthorizationCode.EncryptWithAes(gclSettings.DefaultEncryptionKey), false);
+        }
+
+        /// <summary>
+        /// Sets up / prepares the authentication for the authorization code flow.
+        /// If we don't have an authorization code, then we need to email the user to authenticate.
+        /// If we do have an authorization code, then we can use that to get the access token.
+        /// </summary>
+        /// <param name="result">The output of the <see cref="GetAccessTokenAsync"/> method.</param>
+        /// <param name="oAuthApi">The <see cref="OAuthModel"/> with the settings for the OAUTH2 authentication.</param>
+        /// <param name="communicationsService">The <see cref="ICommunicationsService"/> for sending e-mails.</param>
+        /// <param name="formData">The form data for the get token request for the OAUTH2 authentication.</param>
+        /// <returns>The current state of the OAUTH2 authentication. Please note that if this returns <see cref="OAuthState.WaitingForManualAuthentication"/>, then you should stop the <see cref="GetAccessTokenAsync"/> method from doing anything else by directly returning the result of this method.</returns>
+        private async Task<(OAuthState State, string AuthorizationHeaderValue, JToken ResponseBody, HttpStatusCode ResponseStatusCode)> SetupAuthorizationCodeAuthenticationAsync((OAuthState State, string AuthorizationHeaderValue, JToken ResponseBody, HttpStatusCode ResponseStatusCode) result, OAuthModel oAuthApi, ICommunicationsService communicationsService, List<KeyValuePair<string, string>> formData)
+        {
+            // First build the redirect URL, we need it in both flows.
+            var redirectUrl = new UriBuilder(oAuthApi.RedirectBaseUri) {Path = "oauth/handle-callback"};
+            var queryStringBuilder = HttpUtility.ParseQueryString(redirectUrl!.Query);
+            queryStringBuilder["apiName"] = oAuthApi.ApiName;
+            redirectUrl.Query = queryStringBuilder.ToString()!;
+            var redirectUrlString = redirectUrl.Uri.ToString();
+
+            if (String.IsNullOrWhiteSpace(oAuthApi.AuthorizationCode))
+            {
+                if (oAuthApi.AuthorizationCodeMailSent)
+                {
+                    // Mail has already been sent before, need to wait until the user has authenticated.
+                    result.State = OAuthState.WaitingForManualAuthentication;
+                    return result;
+                }
+
+                var authorizationUrl = new UriBuilder(oAuthApi.AuthorizationUrl);
+                queryStringBuilder = HttpUtility.ParseQueryString(authorizationUrl.Query);
+                queryStringBuilder["response_type"] = "code";
+                queryStringBuilder["client_id"] = oAuthApi.ClientId;
+                queryStringBuilder["state"] = oAuthApi.ApiName;
+                queryStringBuilder["scope"] = String.Join(" ", oAuthApi.Scopes);
+                queryStringBuilder["redirect_uri"] = redirectUrlString;
+                queryStringBuilder["access_type"] = "offline";
+                queryStringBuilder["prompt"] = "consent";
+                authorizationUrl.Query = queryStringBuilder.ToString()!;
+                await communicationsService.SendEmailAsync(oAuthApi.EmailAddressForAuthentication, "WTS OAuth2.0 Authentication", $"The Wiser Task Scheduler needs a (new) authentication token for the {oAuthApi.ApiName} API. But this requires manual authentication by a person (the first time only). Please authenticate your account by clicking the following link. The WTS will handle the rest afterwards. The link is: {authorizationUrl.Uri}");
+
+                oAuthApi.AuthorizationCodeMailSent = true;
+                await SaveToDatabaseAsync(oAuthApi);
+
+                // End the function, as the user needs to authenticate first.
+                result.State = OAuthState.WaitingForManualAuthentication;
+                return result;
+            }
+
+            formData.Add(new KeyValuePair<string, string>("code", oAuthApi.AuthorizationCode));
+            formData.Add(new KeyValuePair<string, string>("client_id", oAuthApi.ClientId));
+            formData.Add(new KeyValuePair<string, string>("client_secret", oAuthApi.ClientSecret));
+            formData.Add(new KeyValuePair<string, string>("redirect_uri", redirectUrlString));
+            formData.Add(new KeyValuePair<string, string>("grant_type", "authorization_code"));
+            return result;
         }
     }
 }
