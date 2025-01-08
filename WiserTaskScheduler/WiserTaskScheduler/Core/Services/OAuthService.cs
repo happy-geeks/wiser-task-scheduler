@@ -151,7 +151,7 @@ namespace WiserTaskScheduler.Core.Services
                                         queryStringBuilder["access_type"] = "offline";
                                         queryStringBuilder["prompt"] = "consent";
                                         authorizationUrl.Query = queryStringBuilder.ToString()!;
-                                        await communicationsService.SendEmailAsync(oAuthApi.EmailAddressForAuthentication, "WTS OAuth2.0 Authentication", $"Please authenticate your account by clicking the following link: {authorizationUrl.Uri}");
+                                        await communicationsService.SendEmailAsync(oAuthApi.EmailAddressForAuthentication, "WTS OAuth2.0 Authentication", $"The Wiser Task Scheduler needs a (new) authentication token for the {oAuthApi.ApiName} API. But this requires manual authentication by a person (the first time only). Please authenticate your account by clicking the following link. The WTS will handle the rest afterwards. The link is: {authorizationUrl.Uri}");
 
                                         oAuthApi.AuthorizationCodeMailSent = true;
                                         await SaveToDatabaseAsync(oAuthApi);
