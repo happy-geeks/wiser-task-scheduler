@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Net.Mime;
 using System.Threading;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
@@ -55,6 +57,10 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     private const string ConfigurationsToPauseProperty = "configurations_to_pause";
     private const string ConfigurationsPauseDatetimeProperty = "configurations_pause_datetime";
     private const string DeployStartDatetimeProperty = "deploy_start_datetime";
+
+    private const string RequestUserAgent = "Wiser Task Scheduler";
+    private const string GitHubApiUrl = "https://api.github.com/repos/";
+    private const string GitHubRequestAcceptType = "application/vnd.github+json";
 
     private static readonly TimeSpan MaximumThreadSleepTime = new TimeSpan(6, 0, 0);
     private static readonly int DefaultGitHubWorkflowTimeout = 15;
@@ -172,7 +178,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             return;
         }
         
-        var gitHubBaseUrl = $"https://api.github.com/repos/{gitHubOrganization}/{gitHubRepository}";
+        var gitHubBaseUrl = $"{GitHubApiUrl}{gitHubOrganization}/{gitHubRepository}";
         
         // Disable the website according to the GitHub workflow to start the deployment.
         if (!await DispatchGitHubWorkflowEventAsync(gitHubBaseUrl, gitHubAccessToken, "disable-website", stoppingToken))
@@ -314,9 +320,10 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     {
         var errors = new List<string>();
         
-        if (deployStartDatetime > gitHubAccessTokenExpires)
+        // Check if the GitHub access token is still valid for at least 30 minutes after the deploy starts. Deployments can take longer, this limit is only to lower the risk of the token expiring during the deployment.
+        if (deployStartDatetime > gitHubAccessTokenExpires.Subtract(TimeSpan.FromMinutes(30)))
         {
-            errors.Add("The GitHub access token will be expired before the deploy can start.");
+            errors.Add("The GitHub access token will be expired before the deploy can start or will expire within 30 minutes after starting the deployment.");
         }
 
         if (configurationsToPause.Any())
@@ -443,8 +450,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         var currentUtcTime = DateTime.UtcNow;
         var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{gitHubBaseUrl}/actions/workflows/{workflowName}.yml/dispatches");
         httpRequest.Headers.Add("Authorization", $"Bearer {gitHubAccessToken}");
-        httpRequest.Headers.Add("Accept", "application/vnd.github+json");
-        httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
+        httpRequest.Headers.Add("Accept", GitHubRequestAcceptType);
+        httpRequest.Headers.Add("User-Agent", RequestUserAgent);
         httpRequest.Content = JsonContent.Create(new
         {
             @ref = "main"
@@ -474,12 +481,12 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         var query = $"SELECT data FROM {WiserTableNames.WiserBranchesQueue} WHERE id = ?BranchMergeTemplate;";
         
         var dataTable = await databaseConnection.GetAsync(query);
-        if (dataTable.Rows.Count == 0 || dataTable.Rows[0]["data"] == DBNull.Value)
+        var data = dataTable.Rows.Count == 0 ? null : dataTable.Rows[0].Field<string>("data");
+        if (String.IsNullOrEmpty(data))
         {
             return null;
         }
         
-        var data = dataTable.Rows[0]["data"].ToString();
         return JsonConvert.DeserializeObject<MergeBranchSettingsModel>(data!);
     }
 
@@ -497,7 +504,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         
         var query = $"""
                      DROP TABLE IF EXISTS _{WiserTableNames.WiserHistory}_{backupTableSuffix};
-                     CREATE TABLE _{WiserTableNames.WiserHistory}_{backupTableSuffix} AS TABLE {WiserTableNames.WiserHistory};
+                     CREATE TABLE _{WiserTableNames.WiserHistory}_{backupTableSuffix} LIKE {WiserTableNames.WiserHistory};
                      INSERT INTO _{WiserTableNames.WiserHistory}_{backupTableSuffix} SELECT * FROM {WiserTableNames.WiserHistory};
                      """;
         
@@ -561,8 +568,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, $"Checking if the GitHub actions have succeeded between UTC {checkFromUtcTime:HH:mm:ss} and server time {checkTillMachineTime:HH:mm:ss}.", logName);
             var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"{gitHubBaseUrl}/actions/runs?branch=main&created={checkFromUtcTime:yyyy-MM-ddTHH:mm:ssZ}..{checkFromUtcTime.AddDays(1):yyyy-MM-ddTHH:mm:ssZ}");
             httpRequest.Headers.Add("Authorization", $"Bearer {gitHubAccessToken}");
-            httpRequest.Headers.Add("Accept", "application/vnd.github+json");
-            httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
+            httpRequest.Headers.Add("Accept", GitHubRequestAcceptType);
+            httpRequest.Headers.Add("User-Agent", RequestUserAgent);
             
             var response = await httpClientService.Client.SendAsync(httpRequest, stoppingToken);
 
@@ -575,10 +582,11 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             }
             
             var body = await response.Content.ReadAsStringAsync(stoppingToken);
+            // The full structure of the response from GitHub can be found on https://docs.github.com/en/rest/actions/workflow-runs?apiVersion=2022-11-28#list-workflow-runs-for-a-repository.
             var result = JToken.Parse(body);
             var workflowRuns = result["workflow_runs"] as JArray;
 
-            // Wait till all the runs are completed. If no runs are found yet the Github API might still be processing it.
+            // Wait till all the runs are completed. If no runs are found yet the GitHub API might still be processing it.
             if (workflowRuns == null || !workflowRuns.Any() || workflowRuns.All(wr => wr["status"].Value<string>() != "completed"))
             {
                 await Task.Delay(interval, stoppingToken);
@@ -623,8 +631,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         
         var httpRequest = new HttpRequestMessage(HttpMethod.Put, $"{wiserApiBaseUrl}/deploy");
         httpRequest.Headers.Add("Authorization", $"Bearer {accessToken}");
-        httpRequest.Headers.Add("Accept", "application/json");
-        httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
+        httpRequest.Headers.Add("Accept", MediaTypeNames.Application.Json);
+        httpRequest.Headers.Add("User-Agent", RequestUserAgent);
         httpRequest.Content = JsonContent.Create(new
         {
             environment = "Live",
@@ -657,8 +665,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         
         var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"{wiserApiBaseUrl}/not-completed-commits");
         httpRequest.Headers.Add("Authorization", $"Bearer {accessToken}");
-        httpRequest.Headers.Add("Accept", "application/json");
-        httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
+        httpRequest.Headers.Add("Accept", MediaTypeNames.Application.Json);
+        httpRequest.Headers.Add("User-Agent", RequestUserAgent);
         
         var response = await httpClientService.Client.SendAsync(httpRequest, stoppingToken);
         var body = await response.Content.ReadAsStringAsync(stoppingToken);
@@ -687,8 +695,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         
         var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{gitHubBaseUrl}/merges");
         httpRequest.Headers.Add("Authorization", $"Bearer {gitHubAccessToken}");
-        httpRequest.Headers.Add("Accept", "application/json");
-        httpRequest.Headers.Add("User-Agent", "Wiser Task Scheduler");
+        httpRequest.Headers.Add("Accept", MediaTypeNames.Application.Json);
+        httpRequest.Headers.Add("User-Agent", RequestUserAgent);
 
         httpRequest.Content = JsonContent.Create(new
         {
