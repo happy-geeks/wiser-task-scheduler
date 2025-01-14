@@ -118,7 +118,23 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     }
     
     /// <summary>
-    /// Run the automatic project deployment.
+    /// Run the automatic project deployment. The flow is as follows:
+    /// 1. Validate the settings to determine if the automatic deployment can be executed.
+    /// 2. Pause configurations if needed before the deployment.
+    /// 3. Wait till the start datetime of the deployment.
+    /// 4. Prepare the branch merge based on the provided template.
+    /// 5. Disable the website according to the GitHub workflow to start the deployment.
+    /// 6. Make a backup of the Wiser history table before the merge.
+    /// 7. Start the branch merge.
+    /// 8. Make a backup of the Wiser history table after the merge.
+    /// 9. Publish the Wiser commits to the production environment.
+    /// 10. Merge staging into main on GitHub.
+    /// 11. Check if the deployment workflow on GitHub succeeded.
+    /// 12. Unpause configurations if needed after the deployment.
+    /// 13. Enable the website according to the GitHub workflow to finish the deployment.
+    /// 14. Notify the user(s) that the automatic deployment has been completed.
+    ///
+    /// If any of the steps fail, the automatic deployment will stop and the user(s) will be notified.
     /// </summary>
     /// <param name="scope">A <see cref="IServiceScope"/> to use to request services.</param>
     /// <param name="branchSettings">The settings for the deployment.</param>
@@ -306,10 +322,12 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
 
     /// <summary>
     /// Validate the settings to determine if the automatic deployment can be executed.
+    /// If at least one check fails, the method will log the errors and return false.
+    /// A mail will be sent to the provided email addresses with the errors, only if the settings have changed since the last check.
     /// </summary>
     /// <param name="scope">A <see cref="IServiceScope"/> to use to request services.</param>
     /// <param name="branchSettings">The settings for the deployment.</param>
-    /// <param name="gitHubAccessTokenExpires"></param>
+    /// <param name="gitHubAccessTokenExpires">The datetime when the GitHub access token expires.</param>
     /// <param name="configurationsToPause">The configurations that need to be paused during deployment.</param>
     /// <param name="currentDateTime">The current date time to compare settings with.</param>
     /// <param name="deployStartDatetime">The time the deployment needs to start to validate the pause time.</param>
@@ -372,7 +390,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     }
 
     /// <summary>
-    /// Pause configurations if needed before the deployment.
+    /// If any WTS configurations need to be paused, this method will wait till the pause datetime and then pause the configurations.
     /// </summary>
     /// <param name="branchSettings">The settings for the deployment.</param>
     /// <param name="configurationsToPause">The configurations that need to be paused during deployment.</param>
@@ -434,7 +452,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     }
 
     /// <summary>
-    /// Dispatch an event to start a GitHub workflow.
+    /// Dispatch an event to start a GitHub workflow and wait till the workflow has been completed.
+    /// If the workflow has not been successfully completed or takes longer than the timeout, the method will return false.
     /// </summary>
     /// <param name="gitHubBaseUrl">The base URL to use for API calls to the GitHub API.</param>
     /// <param name="gitHubAccessToken">The access token to use for the GitHub API.</param>
@@ -470,7 +489,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     /// Gets the merge branch settings from the database based on the selected template.
     /// </summary>
     /// <param name="databaseConnection">The database connection to use.</param>
-    /// <param name="branchMergeTemplate"></param>
+    /// <param name="branchMergeTemplate">The ID of the template to base the merge settings on.</param>
     /// <returns></returns>
     /// <exception cref="NotImplementedException"></exception>
     private async Task<MergeBranchSettingsModel> GetMergeBranchSettingsAsync(IDatabaseConnection databaseConnection, int branchMergeTemplate)
@@ -491,7 +510,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     }
 
     /// <summary>
-    /// Makes a backup of the Wiser history table.
+    /// Makes a backup of the Wiser history table with the provided suffix.
+    /// This allows the state of the table to be inspected after the merge for debugging purposes.
     /// </summary>
     /// <param name="databaseConnection">The database connection for the database where the backup needs to be made.</param>
     /// <param name="backupTableSuffix">The suffix for the backup table.</param>
@@ -517,7 +537,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     }
 
     /// <summary>
-    /// Prepares the branch merge based on the provided template.
+    /// Adds a new entry in the <see cref="WiserTableNames.WiserBranchesQueue"/> table with the merge action based on the provided template.
+    /// The new entry gets marked for automatic deployment to ensure the normal queue does not pick it up.
     /// </summary>
     /// <param name="databaseConnection">The database connection where the merge needs to be prepared, e.g. the production database.</param>
     /// <param name="deployStartDatetime">The date and time the automatic deployment started.</param>
@@ -545,7 +566,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     }
 
     /// <summary>
-    /// Checks if the GitHub workflow succeeded.
+    /// Polls the GitHub API to check if workflows that have been triggered have been completed within the provided time frame.
+    /// If the workflows have failed or the check has taken longer than the provided timeout, the method will return false.
     /// </summary>
     /// <param name="checkFromUtcTime">The time in UTC from when to request workflows.</param>
     /// <param name="checkTillMachineTime">The time until the check needs to be executed before considering it a fail. This is local machine time.</param>
@@ -604,7 +626,8 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     }
     
     /// <summary>
-    /// Publishes the Wiser commits to the production environment.
+    /// Publishes all Wiser commits that are on acceptance to the production environment.
+    /// The flow will fail if at least 1 commit could not be published, e.g. a commit has not yet been approved.
     /// </summary>
     /// <param name="stoppingToken">The <see cref="CancellationToken"/> used for the current background service to indicate if it is being stopped.</param>
     /// <returns>Returns the status code from the Wiser API.</returns>
