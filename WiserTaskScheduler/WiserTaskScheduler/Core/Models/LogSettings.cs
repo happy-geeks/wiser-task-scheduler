@@ -26,7 +26,7 @@ public class LogSettings
     /// Gets or sets if the body of the run needs to be logged.
     /// </summary>
     public bool LogRunBody { get; set; } = true;
-        
+
     /// <summary>
     /// Gets or sets what level of Errors get sent to slack.
     /// </summary>

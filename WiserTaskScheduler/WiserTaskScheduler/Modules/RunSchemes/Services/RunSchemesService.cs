@@ -79,7 +79,7 @@ public class RunSchemesService : IRunSchemesService, IScopedService, ISingletonS
     private DateTime CalculateNextWeeklyDateTime(RunSchemeModel runScheme)
     {
         var nextDateTime = new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, runScheme.Hour.Hours, runScheme.Hour.Minutes, runScheme.Hour.Seconds);
-        var dayOfWeek = (DayOfWeek)(runScheme.DayOfWeek % 7);
+        var dayOfWeek = (DayOfWeek) (runScheme.DayOfWeek % 7);
 
         while (nextDateTime.DayOfWeek != dayOfWeek || nextDateTime < DateTime.Now)
         {
@@ -127,7 +127,7 @@ public class RunSchemesService : IRunSchemesService, IScopedService, ISingletonS
             return nextDateTime;
         }
 
-        while(daysToSkip.Contains(nextDateTime.DayOfWeek) || runScheme.SkipWeekend && nextDateTime.DayOfWeek == DayOfWeek.Friday && nextDateTime.Hour >= 16)
+        while (daysToSkip.Contains(nextDateTime.DayOfWeek) || (runScheme.SkipWeekend && nextDateTime.DayOfWeek == DayOfWeek.Friday && nextDateTime.Hour >= 16))
         {
             nextDateTime = nextDateTime.AddDays(1);
         }
@@ -202,7 +202,7 @@ public class RunSchemesService : IRunSchemesService, IScopedService, ISingletonS
 
         foreach (var day in runScheme.SkipDays)
         {
-            daysToSkip.Add((DayOfWeek)(day % 7));
+            daysToSkip.Add((DayOfWeek) (day % 7));
         }
 
         if (!runScheme.SkipWeekend)

@@ -33,7 +33,7 @@ public class DocumentStoreReadService(IServiceProvider serviceProvider, ILogServ
     /// <inheritdoc />
     public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
     {
-        var documentStoreReadItem = (DocumentStoreReadModel)action;
+        var documentStoreReadItem = (DocumentStoreReadModel) action;
 
         var processedItems = 0;
         var successfulItems = 0;
@@ -44,9 +44,9 @@ public class DocumentStoreReadService(IServiceProvider serviceProvider, ILogServ
             await logService.LogError(logger, LogScopes.RunStartAndStop, documentStoreReadItem.LogSettings, "Can't process items because no entity name has been provided.", configurationServiceName, documentStoreReadItem.TimeId, documentStoreReadItem.Order);
             return new JObject
             {
-                { "ItemsProcessed", processedItems },
-                { "ItemsSuccessful", successfulItems },
-                { "ItemsFailed", failedItems }
+                {"ItemsProcessed", processedItems},
+                {"ItemsSuccessful", successfulItems},
+                {"ItemsFailed", failedItems}
             };
         }
 
@@ -59,15 +59,15 @@ public class DocumentStoreReadService(IServiceProvider serviceProvider, ILogServ
         var entityTypeSettings = await wiserItemsService.GetEntityTypeSettingsAsync(documentStoreReadItem.EntityName);
 
         var dataTable = await databaseConnection.GetAsync($"""
-            SELECT id
-            FROM {prefix}{WiserTableNames.WiserItem}
-            WHERE entity_type = ?entityType
-            AND json IS NOT NULL
-            AND (
-	            json_last_processed_date IS NULL
-	            OR json_last_processed_date < changed_on
-            )
-""");
+                                                                       SELECT id
+                                                                       FROM {prefix}{WiserTableNames.WiserItem}
+                                                                       WHERE entity_type = ?entityType
+                                                                       AND json IS NOT NULL
+                                                                       AND (
+                                                           	            json_last_processed_date IS NULL
+                                                           	            OR json_last_processed_date < changed_on
+                                                                       )
+                                                           """);
 
         foreach (DataRow row in dataTable.Rows)
         {
@@ -109,9 +109,9 @@ public class DocumentStoreReadService(IServiceProvider serviceProvider, ILogServ
 
         return new JObject
         {
-            { "ItemsProcessed", processedItems },
-            { "ItemsSuccessful", successfulItems },
-            { "ItemsFailed", failedItems }
+            {"ItemsProcessed", processedItems},
+            {"ItemsSuccessful", successfulItems},
+            {"ItemsFailed", failedItems}
         };
     }
 }

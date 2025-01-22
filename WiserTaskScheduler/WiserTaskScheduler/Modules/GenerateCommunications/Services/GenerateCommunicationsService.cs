@@ -44,7 +44,7 @@ public class GenerateCommunicationsService(IServiceProvider serviceProvider, IBo
     /// <inheritdoc />
     public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
     {
-        var generateCommunication = (GenerateCommunicationModel)action;
+        var generateCommunication = (GenerateCommunicationModel) action;
         await logService.LogInformation(logger, LogScopes.RunStartAndStop, generateCommunication.LogSettings, $"Generating communications of type '{generateCommunication.CommunicationType}' in time id: {generateCommunication.TimeId}, order: {generateCommunication.Order}", configurationServiceName, generateCommunication.TimeId, generateCommunication.Order);
 
         using var scope = serviceProvider.CreateScope();
@@ -83,7 +83,7 @@ public class GenerateCommunicationsService(IServiceProvider serviceProvider, IBo
             var indexRows = new List<int> {i};
             try
             {
-                jArray.Add(await GenerateCommunicationAsync(generateCommunication, $"{generateCommunication.UseResultSet}[{i}]", resultSets, databaseConnection, communicationsService, indexRows, configurationServiceName, forcedIndex: i));
+                jArray.Add(await GenerateCommunicationAsync(generateCommunication, $"{generateCommunication.UseResultSet}[{i}]", resultSets, databaseConnection, communicationsService, indexRows, configurationServiceName, i));
             }
             catch (Exception e)
             {

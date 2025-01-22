@@ -158,7 +158,7 @@ public class ParentUpdateService(IOptions<WtsSettings> wtsSettings, IServiceProv
 
         var combinedCleanUpQuery = $"{parentsCleanUpQuery} {resetIncrementQuery}";
 
-        targetDatabases.Add(new ParentUpdateDatabaseStrings(databaseConnection.ConnectedDatabase, listTablesQuery, combinedCleanUpQuery, optimizeQuery ));
+        targetDatabases.Add(new ParentUpdateDatabaseStrings(databaseConnection.ConnectedDatabase, listTablesQuery, combinedCleanUpQuery, optimizeQuery));
 
         if (parentsUpdateServiceSettings.AdditionalDatabases == null)
         {

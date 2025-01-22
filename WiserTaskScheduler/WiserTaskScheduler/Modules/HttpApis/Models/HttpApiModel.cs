@@ -33,7 +33,7 @@ public class HttpApiModel : ActionModel
     /// If false the using result set needs to be set to an array.
     /// </summary>
     public bool SingleRequest { get; set; } = true;
-        
+
     /// <summary>
     /// If True the connection will 'ignore' ssl validation errors
     /// </summary>

@@ -13,5 +13,5 @@ public enum CpuUsageDetectionTypes
     /// <summary>
     /// This option picks the array counter option which uses an counter.
     /// </summary>
-    Counter,
+    Counter
 }

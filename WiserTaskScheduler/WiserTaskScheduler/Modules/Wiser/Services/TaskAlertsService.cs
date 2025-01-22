@@ -62,12 +62,12 @@ public class TaskAlertsService(
             PublishedEnvironment = Environments.Live,
             Details =
             [
-                new() {Key = DateField, Value = DateTime.Now.ToString("yyyy-MM-dd")},
-                new() {Key = ContentField, Value = message},
-                new() {Key = UserIdField, Value = receiverId},
-                new() {Key = UsernameField, Value = receiverName},
-                new() {Key = SenderNameField, Value = senderName},
-                new() {Key = SenderIdField, Value = senderId}
+                new WiserItemDetailModel {Key = DateField, Value = DateTime.Now.ToString("yyyy-MM-dd")},
+                new WiserItemDetailModel {Key = ContentField, Value = message},
+                new WiserItemDetailModel {Key = UserIdField, Value = receiverId},
+                new WiserItemDetailModel {Key = UsernameField, Value = receiverName},
+                new WiserItemDetailModel {Key = SenderNameField, Value = senderName},
+                new WiserItemDetailModel {Key = SenderIdField, Value = senderId}
             ]
         };
 

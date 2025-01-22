@@ -25,12 +25,12 @@ public interface IBaseWorkerDependencyAggregate
     /// Gets the <see cref="IRunSchemesService"/>.
     /// </summary>
     IRunSchemesService RunSchemesService { get; }
-        
+
     /// <summary>
     /// Gets the <see cref="IWiserDashboardService"/>.
     /// </summary>
     IWiserDashboardService WiserDashboardService { get; }
-        
+
     /// <summary>
     /// Gets the <see cref="IErrorNotificationService"/>.
     /// </summary>

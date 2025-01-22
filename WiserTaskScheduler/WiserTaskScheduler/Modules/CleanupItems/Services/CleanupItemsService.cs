@@ -164,9 +164,7 @@ public class CleanupItemsService(IServiceProvider serviceProvider, ILogService l
             };
         }
 
-        var ids = (from DataRow row in itemsDataTable.Rows
-                   select row.Field<ulong>("id")).ToList();
-
+        var ids = itemsDataTable.Rows.Cast<DataRow>().Select(row => row.Field<ulong>("id")).ToList();
         var success = true;
 
         try
@@ -185,7 +183,7 @@ public class CleanupItemsService(IServiceProvider serviceProvider, ILogService l
                     .Where(linkSetting => !linkSetting.UseItemParentId
                                           && (linkSetting.DestinationEntityType.Equals(cleanupItem.EntityName, StringComparison.InvariantCultureIgnoreCase)
                                               || linkSetting.SourceEntityType.Equals(cleanupItem.EntityName, StringComparison.InvariantCultureIgnoreCase))
-                                          );
+                    );
 
                 // Add all link tables, including prefixed ones.
                 foreach (var link in links)
@@ -195,9 +193,9 @@ public class CleanupItemsService(IServiceProvider serviceProvider, ILogService l
                 }
             }
         }
-        catch (Exception e)
+        catch (Exception exception)
         {
-            await logService.LogError(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Failed cleanup for items of entity '{cleanupItem.EntityName}' due to exception:\n{e}", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
+            await logService.LogError(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Failed cleanup for items of entity '{cleanupItem.EntityName}' due to exception:\n{exception}", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
             success = false;
         }
 
@@ -218,7 +216,7 @@ public class CleanupItemsService(IServiceProvider serviceProvider, ILogService l
     /// <param name="entityName">The name of the entity that the link needs to be for.</param>
     /// <param name="destinationInsteadOfConnectedItem">True to check if entity is destination, false to check if entity is connected item.</param>
     /// <returns>Returns a list with the types.</returns>
-    private async Task<List<int>> GetDedicatedLinkTypes(IDatabaseConnection databaseConnection, string entityName, bool destinationInsteadOfConnectedItem)
+    private static async Task<List<int>> GetDedicatedLinkTypes(IDatabaseConnection databaseConnection, string entityName, bool destinationInsteadOfConnectedItem)
     {
         databaseConnection.AddParameter("entityName", entityName);
 
@@ -238,8 +236,7 @@ public class CleanupItemsService(IServiceProvider serviceProvider, ILogService l
             return dedicatedLinkTypes;
         }
 
-        dedicatedLinkTypes.AddRange(from DataRow row in dataTable.Rows
-                                    select row.Field<int>("type"));
+        dedicatedLinkTypes.AddRange(dataTable.Rows.Cast<DataRow>().Select(row => row.Field<int>("type")));
 
         return dedicatedLinkTypes;
     }

@@ -14,7 +14,7 @@ public class MergePdfsModel
     /// </summary>
     [Required]
     public string WiserItemId { get; set; }
-        
+
     /// <summary>
     /// Gets or sets the property name of the PDF file stored with the Wiser item.
     /// </summary>

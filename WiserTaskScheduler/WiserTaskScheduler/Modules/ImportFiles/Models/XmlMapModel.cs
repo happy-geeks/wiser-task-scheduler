@@ -3,7 +3,7 @@ using System.Xml.Serialization;
 namespace WiserTaskScheduler.Modules.ImportFiles.Models;
 
 [XmlType("XmlMap")]
-public class XmlMapModel 
+public class XmlMapModel
 {
     /// <summary>
     /// Gets or sets the xpath expression to the variable that needs to be imported.

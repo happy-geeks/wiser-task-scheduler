@@ -6,7 +6,7 @@ namespace WiserTaskScheduler.Core.Interfaces;
 /// <summary>
 /// A service for a configuration.
 /// </summary>
-public interface  IConfigurationsService
+public interface IConfigurationsService
 {
     /// <summary>
     /// Gets or sets the log settings that needs to be used.

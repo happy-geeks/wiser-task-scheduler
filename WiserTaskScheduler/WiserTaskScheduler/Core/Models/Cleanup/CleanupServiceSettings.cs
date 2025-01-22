@@ -20,12 +20,12 @@ public class CleanupServiceSettings
     /// Gets or sets if the logs table needs to be optimized after it has been cleaned.
     /// </summary>
     public bool OptimizeLogsTableAfterCleanup { get; set; } = true;
-        
+
     /// <summary>
     /// Gets or sets the number of days render times need to be kept.
     /// </summary>
     public int NumberOfDaysToStoreRenderTimes { get; set; } = 14;
-        
+
     /// <summary>
     /// Gets or sets if the render times tables needs to be optimized after they have been cleaned.
     /// </summary>
@@ -38,12 +38,12 @@ public class CleanupServiceSettings
     {
         Type = RunSchemeTypes.Daily
     };
-        
+
     /// <summary>
     /// Gets or sets the number of days wts services need to be kept.
     /// </summary>
     public int NumberOfDaysToStoreWtsServices { get; set; } = 30;
-		
+
     /// <summary>
     /// Gets or sets the timeout value of the request
     /// value is in seconds

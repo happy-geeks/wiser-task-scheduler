@@ -61,9 +61,9 @@ public class BodyService(IServiceProvider serviceProvider) : IBodyService, IScop
 
                 continue;
             }
-                
+
             var body = bodyPart.Text;
-                
+
             // If an item-id is set, get the template from the database.
             if (bodyPart.WiserTemplateItemId > 0)
             {
@@ -79,7 +79,7 @@ public class BodyService(IServiceProvider serviceProvider) : IBodyService, IScop
             {
                 var keyParts = bodyPart.UseResultSet.Split('.');
                 var remainingKey = keyParts.Length > 1 ? bodyPart.UseResultSet[(keyParts[0].Length + 1)..] : "";
-                var tuple = ReplacementHelper.PrepareText(body, (JObject)resultSets[keyParts[0]], remainingKey, hashSettings);
+                var tuple = ReplacementHelper.PrepareText(body, (JObject) resultSets[keyParts[0]], remainingKey, hashSettings);
                 body = tuple.Item1;
                 var parameterKeys = tuple.Item2;
 
@@ -131,7 +131,7 @@ public class BodyService(IServiceProvider serviceProvider) : IBodyService, IScop
 
         var bodyCollection = new StringBuilder();
 
-        var rows = new List<int> { 0, 0 };
+        var rows = new List<int> {0, 0};
         var keyWithSecondLayer = parameterKeys.FirstOrDefault(parameterKey => parameterKey.Key.Contains("[j]"))?.Key;
 
         var startIndex = forcedIndex >= 0 ? forcedIndex : 0;
@@ -154,7 +154,7 @@ public class BodyService(IServiceProvider serviceProvider) : IBodyService, IScop
             for (var j = 0; j < secondLayerArray.Count; j++)
             {
                 rows[1] = j;
-                var bodyWithValues = ReplacementHelper.ReplaceText(body, rows, parameterKeys, (JObject)usingResultSet[i], hashSettings);
+                var bodyWithValues = ReplacementHelper.ReplaceText(body, rows, parameterKeys, (JObject) usingResultSet[i], hashSettings);
                 bodyCollection.Append($"{(i > startIndex || j > 0 ? separator : "")}{bodyWithValues}");
             }
         }

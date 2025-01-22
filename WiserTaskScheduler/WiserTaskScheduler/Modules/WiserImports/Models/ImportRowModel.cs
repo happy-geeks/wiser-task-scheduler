@@ -24,7 +24,7 @@ public class ImportRowModel
     /// Gets or sets the ID of the user that created the import.
     /// </summary>
     public ulong UserId { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the name of the user that created the import.
     /// </summary>

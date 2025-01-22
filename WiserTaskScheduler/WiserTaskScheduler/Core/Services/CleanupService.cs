@@ -189,7 +189,6 @@ public class CleanupService(IOptions<WtsSettings> wtsSettings, IServiceProvider 
         catch (Exception exception)
         {
             await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during cleanup: {exception}", logName);
-
         }
     }
 }

@@ -19,12 +19,12 @@ public class GenerateCommunicationModel : ActionModel
     /// Gets or sets a value to be used to identify the communication in the created result set.
     /// </summary>
     public string Identifier { get; set; } = String.Empty;
-    
+
     /// <summary>
     /// Gets or sets the name of the receiver. Semi-colon separated list of names when multiple receivers.
     /// </summary>
     public string ReceiverName { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the receiver. Semi-colon separated list when multiple receivers.
     /// </summary>
@@ -40,22 +40,22 @@ public class GenerateCommunicationModel : ActionModel
     /// Gets or sets the name of the sender.
     /// </summary>
     public string SenderName { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the sender.
     /// </summary>
     public string Sender { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the reply to information such as an email.
     /// </summary>
     public string ReplyTo { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the subject of the email.
     /// </summary>
     public string Subject { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the body of the communication.
     /// </summary>
@@ -65,7 +65,7 @@ public class GenerateCommunicationModel : ActionModel
     /// Gets or sets if the communication is a single communication or a batch. When it is a batch it expects an array for the result set.
     /// </summary>
     public bool SingleCommunication { get; set; } = true;
-    
+
     /// <summary>
     /// Gets or sets if the queue needs to be skipped and the communication needs to be sent immediately. (Note that if it fails to send it will not be retried.)
     /// </summary>

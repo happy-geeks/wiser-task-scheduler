@@ -16,7 +16,7 @@ public class ParentsUpdateServiceSettings
         Type = RunSchemeTypes.Continuous,
         Delay = TimeSpan.FromSeconds(60)
     };
-        
+
     /// <summary>
     /// Gets or sets the array of databases that need to receive a parent update as well
     /// note: these databases need to be in the same cluster

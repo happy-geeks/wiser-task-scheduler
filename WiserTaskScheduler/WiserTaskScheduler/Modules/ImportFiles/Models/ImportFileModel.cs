@@ -12,17 +12,17 @@ public class ImportFileModel : ActionModel
     /// Gets or sets the full path to the file.
     /// </summary>
     public string FilePath { get; set; }
-        
+
     /// <summary>
     /// Gets or sets the file type to be imported.
     /// </summary>
     public FileTypes FileType { get; set; } = FileTypes.CSV;
-        
+
     /// <summary>
     /// Gets or sets the search pattern to find files in a folder if FilePath is a folder.
     /// </summary>
     public string SearchPattern { get; set; } = "*.*";
-        
+
     /// <summary>
     /// Get or sets the folder to move the file to after it has been processed. If empty, the file will not be moved.
     /// </summary>

@@ -128,7 +128,7 @@ public class MainService(
 
         try
         {
-            configuration = (OAuthConfigurationModel)serializer.Deserialize(reader);
+            configuration = (OAuthConfigurationModel) serializer.Deserialize(reader);
         }
         catch (InvalidOperationException e)
         {
@@ -351,7 +351,7 @@ public class MainService(
         {
             var serializer = new XmlSerializer(typeof(ConfigurationModel));
             using var reader = new StringReader(serializedConfiguration);
-            configuration = (ConfigurationModel)serializer.Deserialize(reader);
+            configuration = (ConfigurationModel) serializer.Deserialize(reader);
         }
         else
         {
@@ -409,6 +409,7 @@ public class MainService(
         {
             activeConfigurations[configuration.ServiceName].WorkerPerTimeId.TryAdd(runScheme.TimeId, worker);
         }
+
         await worker.StartAsync(CancellationToken.None);
         if (worker.ExecuteTask != null)
         {

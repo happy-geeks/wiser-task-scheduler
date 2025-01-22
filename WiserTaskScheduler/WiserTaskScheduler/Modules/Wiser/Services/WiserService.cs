@@ -28,6 +28,7 @@ public class WiserService(IOptions<WtsSettings> wtsSettings, ILogService logServ
     [Browsable(false)]
     [EditorBrowsable(EditorBrowsableState.Never)]
     private string accessToken = "";
+
     private DateTime accessTokenExpireTime = DateTime.MinValue;
     private string refreshToken = "";
 

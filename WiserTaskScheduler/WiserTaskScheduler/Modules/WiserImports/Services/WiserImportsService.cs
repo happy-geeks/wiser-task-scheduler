@@ -162,6 +162,7 @@ public class WiserImportsService(IServiceProvider serviceProvider, ILogService l
             {
                 subject = DefaultSubject;
             }
+
             if (String.IsNullOrWhiteSpace(content))
             {
                 content = DefaultContent;
@@ -415,7 +416,7 @@ public class WiserImportsService(IServiceProvider serviceProvider, ILogService l
             foreach (var destination in destinationLink.Value)
             {
                 var destinationItemId = destination.Key;
-                var linkSettings = await wiserItemsService.GetLinkTypeSettingsAsync(linkType, sourceEntityType: entityType);
+                var linkSettings = await wiserItemsService.GetLinkTypeSettingsAsync(linkType, entityType);
                 var linkPrefix = wiserItemsService.GetTablePrefixForLink(linkSettings);
 
                 try
@@ -455,7 +456,7 @@ public class WiserImportsService(IServiceProvider serviceProvider, ILogService l
             foreach (var parent in parentItem.Value)
             {
                 var parentItemId = parent.Key;
-                var linkSettings = await wiserItemsService.GetLinkTypeSettingsAsync(linkType, sourceEntityType: entityType);
+                var linkSettings = await wiserItemsService.GetLinkTypeSettingsAsync(linkType, entityType);
 
                 try
                 {

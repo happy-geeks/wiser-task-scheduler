@@ -6,6 +6,7 @@ public enum CopyTypes
     /// Fully skip the given table.
     /// </summary>
     Nothing,
+
     /// <summary>
     /// Copy the structure of the table but not its data.
     /// </summary>

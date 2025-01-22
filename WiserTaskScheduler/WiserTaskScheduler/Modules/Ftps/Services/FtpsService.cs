@@ -259,6 +259,7 @@ public class FtpsService(IBodyService bodyService, IFtpHandlerFactory ftpHandler
                     await logService.LogError(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Failed to move file from '{fromPath}' to '{toPath}' due to exception: {e}", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
                     result.Add("Success", false);
                 }
+
                 break;
             default:
                 throw new NotImplementedException($"FTP action '{ftpAction.Action}' is not yet implemented.");

@@ -59,7 +59,7 @@ public class ImportFilesService(ILogService logService, ILogger<ImportFilesServi
 
         for (var i = 0; i < rows.Count; i++)
         {
-            var indexRows = new List<int> { i };
+            var indexRows = new List<int> {i};
             jArray.Add(await ImportFileAsync(importFile, indexRows, resultSets, configurationServiceName, $"{importFile.UseResultSet}[{i}]"));
         }
 
@@ -118,13 +118,14 @@ public class ImportFilesService(ILogService logService, ILogger<ImportFilesServi
 
             // Directory with files to import
             var jArray = new JArray();
-            foreach(var file in Directory.GetFiles(filePath, importFile.SearchPattern, SearchOption.TopDirectoryOnly))
+            foreach (var file in Directory.GetFiles(filePath, importFile.SearchPattern, SearchOption.TopDirectoryOnly))
             {
                 var result = await ImportSingleFileAsync(importFile, file, configurationServiceName);
                 if (result.ContainsKey("Success") && !(bool) result["Success"]) // Don't add failed imports to the result set.
                 {
                     continue;
                 }
+
                 jArray.Add(result);
             }
 
@@ -150,7 +151,7 @@ public class ImportFilesService(ILogService logService, ILogger<ImportFilesServi
         {
             await logService.LogInformation(logger, LogScopes.RunBody, importFile.LogSettings, $"Importing file {filePath}.", configurationServiceName, importFile.TimeId, importFile.Order);
 
-            JObject importResult = importFile.FileType switch
+            var importResult = importFile.FileType switch
             {
                 FileTypes.CSV => await ImportCsvFileAsync(importFile, filePath, configurationServiceName),
                 FileTypes.XML => await ImportXmlFileAsync(importFile, filePath),
@@ -217,7 +218,7 @@ public class ImportFilesService(ILogService logService, ILogger<ImportFilesServi
                 {
                     firstColumnLength = columns.Count;
                 }
-                else if(columns.Count != firstColumnLength)
+                else if (columns.Count != firstColumnLength)
                 {
                     await logService.LogWarning(logger, LogScopes.RunBody, importFile.LogSettings, $"Did not import line {i} due to missing columns in file {filePath}", configurationServiceName, importFile.TimeId, importFile.Order);
                     continue;
@@ -225,7 +226,7 @@ public class ImportFilesService(ILogService logService, ILogger<ImportFilesServi
 
                 var row = new JObject
                 {
-                    {"Columns", columns }
+                    {"Columns", columns}
                 };
                 jArray.Add(row);
             }
@@ -274,7 +275,7 @@ public class ImportFilesService(ILogService logService, ILogger<ImportFilesServi
         return new JObject
         {
             {"Success", true},
-            {"Fields",  fieldArray},
+            {"Fields", fieldArray},
             {"Results", jArray}
         };
     }
@@ -332,7 +333,7 @@ public class ImportFilesService(ILogService logService, ILogger<ImportFilesServi
                 // Array indexers in XPath are 1-based, so add 1 to 'i' to select the correct item.
                 var xPathExpression = xmlMap.XPathExpression.Replace("[j]", $"[{i + 1}]");
                 var xmlNode = xmlDocument.SelectSingleNode(xPathExpression);
-                ((JObject)result[i]).Add(xmlMap.ResultSetName, xmlNode?.InnerText ?? "");
+                ((JObject) result[i]).Add(xmlMap.ResultSetName, xmlNode?.InnerText ?? "");
             }
         }
 

@@ -11,10 +11,9 @@ public class DocumentStoreReadModel : ActionModel
     /// Leave empty if not targeting a specific entity
     /// </summary>
     public string EntityName { get; set; }
-    
+
     /// <summary>
     /// Gets or sets what published Environment the item needs to be set as
     /// </summary>
     public int? PublishedEnvironmentToSet { get; set; } = null;
-    
 }

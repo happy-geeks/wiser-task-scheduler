@@ -10,7 +10,7 @@ public class SlackMessageModel : ActionModel
     /// Gets or sets the Message 
     /// </summary>
     public string Message { get; set; }
-        
+
     /// <summary>
     /// Gets or sets the recipient the chat message is to be send to
     /// </summary>

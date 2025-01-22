@@ -18,7 +18,7 @@ public interface IErrorNotificationService
     /// <param name="configurationName">The name of the configuration that is trying to send the notification to be used in the logs when the method fails.</param>
     /// <returns></returns>
     Task NotifyOfErrorByEmailAsync(string emails, string subject, string content, LogSettings logSettings, LogScopes logScope, string configurationName);
-    
+
     /// <summary>
     /// Send an email to notify people about an error.
     /// </summary>

@@ -19,7 +19,7 @@ public class CleanupItemModel : ActionModel
     /// </summary>
     [XmlIgnore]
     public TimeSpan TimeToStore { get; set; }
-        
+
     /// <summary>
     /// Gets or sets <see cref="TimeToStore"/> from a XML file.
     /// </summary>
@@ -56,7 +56,7 @@ public class CleanupItemModel : ActionModel
     /// Gets or sets if the history needs to be saved.
     /// </summary>
     public bool SaveHistory { get; set; } = true;
-        
+
     /// <summary>
     /// Gets or sets if the cleaned tables need to be optimized afterwards.
     /// </summary>

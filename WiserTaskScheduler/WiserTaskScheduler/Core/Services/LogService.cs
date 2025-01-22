@@ -140,7 +140,7 @@ public class LogService(IServiceProvider serviceProvider, ISlackChatService slac
                         var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes($"{configurationName}{timeId}{order}{message}"));
                         var messageHash = String.Join("", hash.Select(b => b.ToString("x2")));
 
-                        await slackChatService.SendChannelMessageAsync(slackMessage, [message],  messageHash: messageHash);
+                        await slackChatService.SendChannelMessageAsync(slackMessage, [message], messageHash: messageHash);
                     }
                 }
                 catch
@@ -188,7 +188,7 @@ public class LogService(IServiceProvider serviceProvider, ISlackChatService slac
             return text;
         }
 
-        foreach(var credential in settings.Credentials)
+        foreach (var credential in settings.Credentials)
         {
             text = text.Replace(credential.Value, "*****");
         }

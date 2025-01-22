@@ -176,10 +176,10 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
                 {
                     var claims = new Dictionary<string, object>
                     {
-                        { "exp", DateTimeOffset.Now.AddSeconds(oAuthApi.OAuthJwt.ExpirationTime).ToUnixTimeSeconds() },
-                        { "iss", oAuthApi.OAuthJwt.Issuer },
-                        { "sub", oAuthApi.OAuthJwt.Subject },
-                        { "aud", oAuthApi.OAuthJwt.Audience }
+                        {"exp", DateTimeOffset.Now.AddSeconds(oAuthApi.OAuthJwt.ExpirationTime).ToUnixTimeSeconds()},
+                        {"iss", oAuthApi.OAuthJwt.Issuer},
+                        {"sub", oAuthApi.OAuthJwt.Subject},
+                        {"aud", oAuthApi.OAuthJwt.Audience}
                     };
 
                     // Add the custom claims.

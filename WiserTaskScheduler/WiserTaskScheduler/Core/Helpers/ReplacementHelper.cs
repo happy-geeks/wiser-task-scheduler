@@ -35,6 +35,7 @@ public static class ReplacementHelper
         {
             result = originalString;
         }
+
         var parameterKeys = new List<ParameterKeyModel>();
         var insertedParameters = new List<KeyValuePair<string, string>>();
 

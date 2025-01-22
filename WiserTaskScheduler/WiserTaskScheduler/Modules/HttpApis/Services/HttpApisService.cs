@@ -124,7 +124,7 @@ public class HttpApisService(IOAuthService oAuthService, IBodyService bodyServic
             var tuple = ReplacementHelper.PrepareText(url, usingResultSet, remainingKey, httpApi.HashSettings, htmlEncode: true);
             url = tuple.Item1;
             var parameterKeys = tuple.Item2;
-            url = ReplacementHelper.ReplaceText(url, rows, parameterKeys, usingResultSet, httpApi.HashSettings, htmlEncode: true);
+            url = ReplacementHelper.ReplaceText(url, rows, parameterKeys, usingResultSet, httpApi.HashSettings, true);
         }
 
         await logService.LogInformation(logger, LogScopes.RunBody, httpApi.LogSettings, $"Url: {url}, method: {httpApi.Method}", configurationServiceName, httpApi.TimeId, httpApi.Order, extraValuesToObfuscate);
@@ -266,7 +266,7 @@ public class HttpApisService(IOAuthService oAuthService, IBodyService bodyServic
             {
                 resultSet.Add("Body", JObject.Parse(responseBody));
             }
-            else if(responseBody.StartsWith("["))
+            else if (responseBody.StartsWith("["))
             {
                 resultSet.Add("Body", JArray.Parse(responseBody));
             }

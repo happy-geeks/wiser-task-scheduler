@@ -12,7 +12,7 @@ namespace WiserTaskScheduler.Core.Workers;
 public class ConfigurationsWorker : BaseWorker
 {
     private readonly IConfigurationsService configurationsService;
-        
+
     public ConfigurationModel Configuration { get; private set; }
     public bool HasAction => configurationsService.HasAction;
 

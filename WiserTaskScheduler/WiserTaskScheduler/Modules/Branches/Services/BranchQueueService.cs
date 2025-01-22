@@ -147,7 +147,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
         if (branchActionBaseModel.DatabasePort is > 0)
         {
-            connectionStringBuilder.Port = (uint)branchActionBaseModel.DatabasePort.Value;
+            connectionStringBuilder.Port = (uint) branchActionBaseModel.DatabasePort.Value;
         }
 
         if (!String.IsNullOrWhiteSpace(branchActionBaseModel.DatabaseUsername))
@@ -228,7 +228,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 ConvertZeroDateTime = true
             };
 
-            var branchConnectionStringBuilder = GetConnectionStringBuilderForBranch(settings, "", allowLoadLocalInfile: true);
+            var branchConnectionStringBuilder = GetConnectionStringBuilderForBranch(settings, "", true);
 
             // If the branch database is on the same server as the production database, we can use a quicker and more efficient way of copying data.
             var branchIsOnSameServerAsProduction = String.Equals(productionConnectionStringBuilder.Server, branchConnectionStringBuilder.Server, StringComparison.OrdinalIgnoreCase);
@@ -566,6 +566,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                     {
                                         entityTypesDone.Add(entity.EntityType);
                                     }
+
                                     break;
                                 }
 
@@ -659,7 +660,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                                                    SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
                                                                    JOIN `{branchDatabase}`.`{prefix}{WiserTableNames.WiserItem}` AS item ON item.id = file.item_id
                                                                    """);
-
                         }
                         else
                         {
@@ -718,7 +718,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                                                                SELECT file.* FROM `{originalDatabase}`.`{tableName}` AS file
                                                                                JOIN `{branchDatabase}`.`{linkPrefix}{WiserTableNames.WiserItemLink}` AS link ON link.id = file.itemlink_id
                                                                                """);
-
                                     }
                                     else
                                     {
@@ -853,6 +852,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         {
                             sortColumn = String.Join(", ", columns.Select(c => $"{c} ASC"));
                         }
+
                         query = $"SELECT {String.Join(", ", columns)} FROM `{originalDatabase}`.`{tableName}` ORDER BY {sortColumn} LIMIT {counter * BatchSize}, {BatchSize}";
                         var items = await databaseConnection.GetAsync(query);
                         if (items.Rows.Count == 0)
@@ -1345,6 +1345,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         break;
                     }
                 }
+
                 var objectCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == idForComparison && String.Equals(i.TableName, tableName, StringComparison.OrdinalIgnoreCase));
                 if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
                 {
@@ -1423,6 +1424,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                             oldDestinationItemId = destinationItemId;
                                             break;
                                     }
+
                                     break;
                                 }
                             }
@@ -1650,6 +1652,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 tablesToLock.Add($"{linkData.Value.SourceTablePrefix}{WiserTableNames.WiserItem}");
                                 tablesToLock.Add($"{linkData.Value.SourceTablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix}");
                             }
+
                             if (!tablesToLock.Contains($"{linkData.Value.DestinationTablePrefix}{WiserTableNames.WiserItem}"))
                             {
                                 tablesToLock.Add($"{linkData.Value.DestinationTablePrefix}{WiserTableNames.WiserItem}");
@@ -1966,14 +1969,14 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "ADD_LINK":
                         {
                             // Check if the link type is in the list of changes.
-                            if (linkTypeSettings is not { Create: true })
+                            if (linkTypeSettings is not {Create: true})
                             {
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                 continue;
                             }
 
-                            if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
+                            if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
                             {
                                 // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
                                 historyItemsSynchronised.Add(historyId);
@@ -2037,14 +2040,14 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "CHANGE_LINK":
                         {
                             // Check if the link type is in the list of changes.
-                            if (linkTypeSettings is not { Update: true })
+                            if (linkTypeSettings is not {Update: true})
                             {
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                 continue;
                             }
 
-                            if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
+                            if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
                             {
                                 // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
                                 historyItemsSynchronised.Add(historyId);
@@ -2074,14 +2077,14 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "REMOVE_LINK":
                         {
                             // Check if the link type is in the list of changes.
-                            if (linkTypeSettings is not { Delete: true })
+                            if (linkTypeSettings is not {Delete: true})
                             {
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                 continue;
                             }
 
-                            if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
+                            if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
                             {
                                 // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
                                 historyItemsSynchronised.Add(historyId);
@@ -2116,7 +2119,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 continue;
                             }
 
-                            if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch  is {AlsoDeleted: true, AlsoUndeleted: false})
+                            if (linkSourceItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false} || linkDestinationItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
                             {
                                 // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
                                 historyItemsSynchronised.Add(historyId);
@@ -2762,12 +2765,11 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                                ORDER BY file.id ASC
                                                LIMIT 1
                                                """);
-
     }
 
     private static async Task<BranchMergeLinkCacheModel> GetLinkDataAsync(ulong? linkId, Dictionary<string, object> sqlParameters, string tableName, MySqlConnection branchConnection, List<BranchMergeLinkCacheModel> linksCache)
     {
-        var result = new BranchMergeLinkCacheModel { Id = linkId ?? 0 };
+        var result = new BranchMergeLinkCacheModel {Id = linkId ?? 0};
         if (!linkId.HasValue)
         {
             return result;
@@ -3033,6 +3035,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 sourceEntityTypeSettings = await wiserItemsService.GetEntityTypeSettingsAsync(linkTypeSettings.SourceEntityType);
                 allEntityTypeSettings.Add(linkTypeSettings.SourceEntityType, sourceEntityTypeSettings);
             }
+
             if (!allEntityTypeSettings.TryGetValue(linkTypeSettings.SourceEntityType, out var destinationEntityTypeSettings))
             {
                 destinationEntityTypeSettings = await wiserItemsService.GetEntityTypeSettingsAsync(linkTypeSettings.DestinationEntityType);

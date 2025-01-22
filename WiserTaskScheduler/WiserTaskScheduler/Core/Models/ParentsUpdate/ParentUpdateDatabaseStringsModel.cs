@@ -20,7 +20,7 @@ public class ParentUpdateDatabaseStrings(string databaseName, string listQuery, 
     /// Gets or sets cleanup query used to clear the table of updates after its done.
     /// </summary>
     public string CleanUpQuery { get; set; } = cleanupQuery;
-        
+
     /// <summary>
     /// Gets or sets optimize query used to optimize the table 
     /// </summary>

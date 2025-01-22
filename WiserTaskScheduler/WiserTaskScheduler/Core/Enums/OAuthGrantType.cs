@@ -2,11 +2,11 @@
 
 public enum OAuthGrantType
 {
-	NotSet,
-	AuthCode,
-	AuthCodeWithPKCE,
-	Implicit,
-	PasswordCredentials,
-	ClientCredentials,
-	RefreshToken
+    NotSet,
+    AuthCode,
+    AuthCodeWithPKCE,
+    Implicit,
+    PasswordCredentials,
+    ClientCredentials,
+    RefreshToken
 }

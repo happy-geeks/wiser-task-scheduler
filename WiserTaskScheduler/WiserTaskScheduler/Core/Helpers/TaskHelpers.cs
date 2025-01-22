@@ -23,7 +23,7 @@ public class TaskHelpers
             {
                 timeToWaitNow = new TimeSpan(0, 0, 0, 0, Int32.MaxValue);
             }
-            
+
             remainingTime -= timeToWaitNow;
             await Task.Delay(timeToWaitNow, stoppingToken);
         }

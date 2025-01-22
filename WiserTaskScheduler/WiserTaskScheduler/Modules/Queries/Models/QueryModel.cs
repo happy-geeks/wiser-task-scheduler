@@ -25,7 +25,7 @@ public class QueryModel : ActionModel
     /// Gets or sets the information for character encoding to use.
     /// </summary>
     public CharacterEncodingModel CharacterEncoding { get; set; } = new();
-        
+
     /// <summary>
     /// Gets or sets if the queries in this action needs to be performed within a transaction.
     /// </summary>

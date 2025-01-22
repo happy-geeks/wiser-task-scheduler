@@ -48,7 +48,7 @@ public class FtpModel : ActionModel
     /// Gets or sets the location to get the file from. If left null or empty during upload the body will be used to create the file during the action.
     /// </summary>
     public string From { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the body to use for the file.
     /// </summary>

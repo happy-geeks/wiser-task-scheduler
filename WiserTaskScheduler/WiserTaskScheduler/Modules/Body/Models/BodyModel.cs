@@ -19,7 +19,7 @@ public class BodyModel
     /// Generate PDF from HTML and save the PDF
     /// </summary>
     public bool GeneratePdf { get; set; } = false;
-        
+
     /// <summary>
     /// Get or sets the PDF's that have to be merged.
     /// </summary>

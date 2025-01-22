@@ -63,7 +63,7 @@ public class GenerateFileService(IBodyService bodyService, ILogService logServic
             throw new ResultSetException($"Failed to find an array at key '{generateFile.UseResultSet}' in result sets to loop over for generating multiple files.");
         }
 
-        var indexRows = new List<int> { 0 };
+        var indexRows = new List<int> {0};
         for (var i = 0; i < rows.Count; i++)
         {
             indexRows[0] = i;
@@ -110,9 +110,9 @@ public class GenerateFileService(IBodyService bodyService, ILogService logServic
 
             fileLocation = ReplacementHelper.ReplaceText(fileLocationTuple.Item1, rows, fileLocationTuple.Item2, usingResultSet, generateFile.HashSettings);
             fileName = ReplacementHelper.ReplaceText(fileNameTuple.Item1, rows, fileNameTuple.Item2, usingResultSet, generateFile.HashSettings);
-            itemId =  ReplacementHelper.ReplaceText(itemIdTuple.Item1, rows, itemIdTuple.Item2, usingResultSet, generateFile.HashSettings);
-            itemLinkId =  ReplacementHelper.ReplaceText(itemLinkIdTuple.Item1, rows, itemLinkIdTuple.Item2, usingResultSet, generateFile.HashSettings);
-            propertyName =  ReplacementHelper.ReplaceText(propertyNameTuple.Item1, rows, propertyNameTuple.Item2, usingResultSet, generateFile.HashSettings);
+            itemId = ReplacementHelper.ReplaceText(itemIdTuple.Item1, rows, itemIdTuple.Item2, usingResultSet, generateFile.HashSettings);
+            itemLinkId = ReplacementHelper.ReplaceText(itemLinkIdTuple.Item1, rows, itemLinkIdTuple.Item2, usingResultSet, generateFile.HashSettings);
+            propertyName = ReplacementHelper.ReplaceText(propertyNameTuple.Item1, rows, propertyNameTuple.Item2, usingResultSet, generateFile.HashSettings);
 
             // Build dictionary of PDFs to merge, replace variables in itemId and propertyName
             if (generateFile.Body.MergePdfs != null)
@@ -226,7 +226,7 @@ public class GenerateFileService(IBodyService bodyService, ILogService logServic
                     ItemLinkId = Convert.ToUInt64(String.IsNullOrEmpty(itemLinkId) ? "0" : itemLinkId),
                     PropertyName = propertyName,
                     FileName = fileName,
-                    Content = (pdfFile == null) ? Encoding.UTF8.GetBytes(body) : pdfFile.FileContents,
+                    Content = pdfFile == null ? Encoding.UTF8.GetBytes(body) : pdfFile.FileContents,
                     ContentType = generateFile.Body.ContentType,
                     AddedOn = DateTime.UtcNow,
                     AddedBy = "WiserTaskScheduler"

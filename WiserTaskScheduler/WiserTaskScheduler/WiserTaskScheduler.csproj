@@ -1,33 +1,33 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Worker">
 
-  <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
-    <UserSecretsId>dotnet-WiserTaskScheduler-48EC2706-BD2A-44EC-8019-D81A72ED7B23</UserSecretsId>
-	<OutputType>exe</OutputType>
-    <PublishSingleFile>false</PublishSingleFile>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <PlatformTarget>x64</PlatformTarget>
-    <LangVersion>default</LangVersion>
-	<Version>1.4.0</Version>
-    <AssemblyVersion>1.4.0.0</AssemblyVersion>
-	<FileVersion>1.4.0.0</FileVersion>
-  </PropertyGroup>
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <UserSecretsId>dotnet-WiserTaskScheduler-48EC2706-BD2A-44EC-8019-D81A72ED7B23</UserSecretsId>
+        <OutputType>exe</OutputType>
+        <PublishSingleFile>false</PublishSingleFile>
+        <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+        <PlatformTarget>x64</PlatformTarget>
+        <LangVersion>default</LangVersion>
+        <Version>1.4.0</Version>
+        <AssemblyVersion>1.4.0.0</AssemblyVersion>
+        <FileVersion>1.4.0.0</FileVersion>
+    </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="GeeksCoreLibrary" Version="5.0.2501.3" />
-    <PackageReference Include="jose-jwt" Version="5.1.0" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.1" />
-    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
-    <PackageReference Include="Serilog.Sinks.MySQL" Version="5.0.0" />
-	<PackageReference Include="System.Diagnostics.PerformanceCounter" Version="9.0.1" />
-    <PackageReference Include="SlackNet.AspNetCore" Version="0.15.4" />
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
-  </ItemGroup>
+    <ItemGroup>
+        <PackageReference Include="GeeksCoreLibrary" Version="5.0.2501.3"/>
+        <PackageReference Include="jose-jwt" Version="5.1.0"/>
+        <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.1"/>
+        <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.1"/>
+        <PackageReference Include="Serilog.AspNetCore" Version="9.0.0"/>
+        <PackageReference Include="Serilog.Sinks.MySQL" Version="5.0.0"/>
+        <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="9.0.1"/>
+        <PackageReference Include="SlackNet.AspNetCore" Version="0.15.4"/>
+        <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0"/>
+    </ItemGroup>
 
-  <ItemGroup>
-    <Content Include="..\.dockerignore">
-      <Link>.dockerignore</Link>
-    </Content>
-  </ItemGroup>
+    <ItemGroup>
+        <Content Include="..\.dockerignore">
+            <Link>.dockerignore</Link>
+        </Content>
+    </ItemGroup>
 </Project>

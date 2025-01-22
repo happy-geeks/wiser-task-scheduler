@@ -208,7 +208,7 @@ public class AutoProjectDeployService(
 
         var branchQueueService = scope.ServiceProvider.GetRequiredService<IBranchQueueService>();
         await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Initializing the branch queue service.", logName);
-        await ((IActionsService)branchQueueService).InitializeAsync(new ConfigurationModel
+        await ((IActionsService) branchQueueService).InitializeAsync(new ConfigurationModel
         {
             ConnectionString = gclSettings.ConnectionString
         }, null);
@@ -230,7 +230,7 @@ public class AutoProjectDeployService(
         stopWatch.Start();
 
         await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Starting the branch merge.", logName);
-        var branchResult = await ((IActionsService)branchQueueService).Execute(wtsSettings.AutoProjectDeploy.BranchQueue, [], logName);
+        var branchResult = await ((IActionsService) branchQueueService).Execute(wtsSettings.AutoProjectDeploy.BranchQueue, [], logName);
 
         stopWatch.Stop();
         stepTimes.Add(new KeyValuePair<string, TimeSpan>("Branch merge", stopWatch.Elapsed));
@@ -238,7 +238,7 @@ public class AutoProjectDeployService(
         // Make a backup of Wiser history after the merge. If the table does already exist, it will be dropped and recreated.
         await BackupWiserHistoryAsync(branchDatabaseConnection, "after_merge");
 
-        if (!(bool)branchResult.SelectToken("Results[0].Success"))
+        if (!(bool) branchResult.SelectToken("Results[0].Success"))
         {
             deployStopWatch.Stop();
             stepTimes.Add(new KeyValuePair<string, TimeSpan>("Total deployment", deployStopWatch.Elapsed));
@@ -543,7 +543,7 @@ public class AutoProjectDeployService(
         var query = $"""
                      INSERT INTO {WiserTableNames.WiserBranchesQueue} (name, branch_id, action, data, added_by, user_id, is_for_automatic_deploy)
                      VALUES (?name, ?branchId, 'merge', ?data, 'Wiser Task Scheduler', 0, 1);
-                     
+
                      SELECT LAST_INSERT_ID() AS id;
                      """;
 
@@ -689,8 +689,9 @@ public class AutoProjectDeployService(
             await logService.LogCritical(logger, LogScopes.RunBody, LogSettings, $"Failed to get the commits from Wiser that need to be published, server returned status '{response.StatusCode}' with reason '{response.ReasonPhrase}'. The following body was returned:{Environment.NewLine}{body}", logName);
             return (null, response.StatusCode);
         }
+
         var result = JArray.Parse(body);
-        return (result.Where(x => (bool) x["isAcceptance"]).Select(x => (int)x["id"]).ToList(), response.StatusCode);
+        return (result.Where(x => (bool) x["isAcceptance"]).Select(x => (int) x["id"]).ToList(), response.StatusCode);
     }
 
     /// <summary>

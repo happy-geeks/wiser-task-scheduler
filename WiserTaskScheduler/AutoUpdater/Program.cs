@@ -1,7 +1,6 @@
 using AutoUpdater.Interfaces;
 using AutoUpdater.Models;
 using AutoUpdater.Services;
-using AutoUpdater.Slack.modules;
 using AutoUpdater.Workers;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
@@ -10,10 +9,7 @@ using Serilog;
 using SlackNet.AspNetCore;
 
 var host = Host.CreateDefaultBuilder(args)
-    .UseWindowsService(options =>
-    {
-        options.ServiceName = "WTS Auto Updater";
-    })
+    .UseWindowsService(options => { options.ServiceName = "WTS Auto Updater"; })
     .ConfigureAppConfiguration((hostingContext, config) =>
     {
         config.SetBasePath(AppContext.BaseDirectory);
@@ -41,14 +37,14 @@ var host = Host.CreateDefaultBuilder(args)
 
         var slackSettings = hostContext.Configuration.GetSection("Updater").GetSection("SlackSettings");
         services.Configure<SlackSettings>(slackSettings);
-        
+
         services.AddHostedService<UpdateWorker>();
 
         services.AddSingleton<ISlackChatService, SlackChatService>();
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddHttpContextAccessor();
         services.AddGclServices(hostContext.Configuration, false, false, false);
-        
+
         // If there is a bot token provided for Slack add the service. 
         var slackBotToken = slackSettings.GetValue<string>("BotToken");
         if (!String.IsNullOrWhiteSpace(slackBotToken))

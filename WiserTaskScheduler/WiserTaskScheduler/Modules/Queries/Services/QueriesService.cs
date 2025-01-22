@@ -45,7 +45,7 @@ public class QueriesService(ILogService logService, ILogger<QueriesService> logg
     /// <inheritdoc />
     public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
     {
-        var query = (QueryModel)action;
+        var query = (QueryModel) action;
         await logService.LogInformation(logger, LogScopes.RunStartAndStop, query.LogSettings, $"Executing query in time id: {query.TimeId}, order: {query.Order}", configurationServiceName, query.TimeId, query.Order);
 
         using var scope = serviceProvider.CreateScope();
@@ -110,7 +110,7 @@ public class QueriesService(ILogService logService, ILogger<QueriesService> logg
 
         var keyParts = query.UseResultSet.Split('.');
         var remainingKey = keyParts.Length > 1 ? query.UseResultSet[(keyParts[0].Length + 1)..] : "";
-        var tuple = ReplacementHelper.PrepareText(query.Query, (JObject)resultSets[keyParts[0]], remainingKey, query.HashSettings, insertValues: false);
+        var tuple = ReplacementHelper.PrepareText(query.Query, (JObject) resultSets[keyParts[0]], remainingKey, query.HashSettings, false);
         var queryString = tuple.Item1;
         var parameterKeys = tuple.Item2;
         var insertedParameters = tuple.Item3;
@@ -155,9 +155,7 @@ public class QueriesService(ILogService logService, ILogger<QueriesService> logg
                 {
                     secondLayerArray = ResultSetHelper.GetCorrectObject<JArray>($"{query.UseResultSet}[i].{secondLayerKey}", rows, resultSets);
                 }
-                catch (ResultSetException)
-                {
-                }
+                catch (ResultSetException) { }
 
                 if (secondLayerArray == null)
                 {
@@ -203,7 +201,7 @@ public class QueriesService(ILogService logService, ILogger<QueriesService> logg
 
         foreach (var parameterKey in parameterKeys)
         {
-            var value = ReplacementHelper.GetValue(parameterKey.Key, rows, (JObject)usingResultSet[rows[0]], false);
+            var value = ReplacementHelper.GetValue(parameterKey.Key, rows, (JObject) usingResultSet[rows[0]], false);
 
             if (parameterKey.Hash)
             {
@@ -237,7 +235,6 @@ public class QueriesService(ILogService logService, ILogger<QueriesService> logg
 
         if (dataTable != null && dataTable.Rows.Count > 0)
         {
-
             foreach (DataRow row in dataTable.Rows)
             {
                 var jObject = new JObject();

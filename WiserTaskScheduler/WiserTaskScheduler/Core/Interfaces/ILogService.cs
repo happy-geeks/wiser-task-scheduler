@@ -15,14 +15,14 @@ public interface ILogService
     /// <param name="timeId">The time ID of the service.</param>
     /// <returns>Returns the highest log level that has been logged since last reset.</returns>
     LogLevel GetLogLevelOfService(string configurationName, int timeId);
-        
+
     /// <summary>
     /// Clear the log level of the specified service.
     /// </summary>
     /// <param name="configurationName">The name of the configuration the service is in.</param>
     /// <param name="timeId">The time ID of the service.</param>
     void ClearLogLevelOfService(string configurationName, int timeId);
-        
+
     /// <summary>
     /// Log as debug message.
     /// </summary>

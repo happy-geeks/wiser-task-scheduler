@@ -6,7 +6,7 @@ public class ParameterKeyModel
     /// Gets or sets the key for the parameter.
     /// </summary>
     public string Key { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the key to use for replacements.
     /// </summary>

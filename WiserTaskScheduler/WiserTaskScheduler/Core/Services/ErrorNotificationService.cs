@@ -95,7 +95,7 @@ public class ErrorNotificationService(IServiceProvider serviceProvider, ILogServ
         }
         catch (Exception exception)
         {
-            await logService.LogError(logger, logScope, logSettings, $"Failed to send an error notification to emails '{string.Join(';', emails)}'.{Environment.NewLine}Exception: {exception}", configurationName);
+            await logService.LogError(logger, logScope, logSettings, $"Failed to send an error notification to emails '{String.Join(';', emails)}'.{Environment.NewLine}Exception: {exception}", configurationName);
         }
     }
 }

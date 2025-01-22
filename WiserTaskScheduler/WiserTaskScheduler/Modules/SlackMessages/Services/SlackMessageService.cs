@@ -36,7 +36,7 @@ public class SlackMessageService(ISlackChatService slackChatService) : ISlackMes
             var remainingKey = keyParts.Length > 1 ? useResultSet[(keyParts[0].Length + 1)..] : "";
             var toPathTuple = ReplacementHelper.PrepareText(slackMessage.Message, usingResultSet, remainingKey, slackMessage.HashSettings);
 
-            msg = ReplacementHelper.ReplaceText(toPathTuple.Item1,  ReplacementHelper.EmptyRows, toPathTuple.Item2, usingResultSet, slackMessage.HashSettings);
+            msg = ReplacementHelper.ReplaceText(toPathTuple.Item1, ReplacementHelper.EmptyRows, toPathTuple.Item2, usingResultSet, slackMessage.HashSettings);
         }
 
         await slackChatService.SendChannelMessageAsync(msg, [], slackMessage.Recipient);

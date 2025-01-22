@@ -21,7 +21,7 @@ public class VersionModel
     /// The revision part of the version.
     /// </summary>
     public int Revision { get; set; }
-    
+
     public Version Version => new(ToString());
 
     /// <summary>

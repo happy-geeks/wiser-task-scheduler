@@ -53,7 +53,7 @@ public class ServerMonitorsService(IServiceProvider serviceProvider, ILogService
     /// <inheritdoc />
     public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
     {
-        var monitorItem = (ServerMonitorModel)action;
+        var monitorItem = (ServerMonitorModel) action;
         using var scope = serviceProvider.CreateScope();
         await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
 
@@ -321,11 +321,12 @@ public class ServerMonitorsService(IServiceProvider serviceProvider, ILogService
             firstValueUsed = true;
             cpuCounter.NextValue();
         }
+
         var count = 0;
         var realvalue = cpuCounter.NextValue();
 
         //gets 60 percent of the size of the array.
-        var arrayCountThreshold = (int)(monitorItem.CpuArrayCountSize * 0.6);
+        var arrayCountThreshold = (int) (monitorItem.CpuArrayCountSize * 0.6);
         //Puts the value into the array.
         cpuValues[cpuIndex] = realvalue;
         //if the index for the array is at the end make it start at the beginning again.
@@ -397,6 +398,7 @@ public class ServerMonitorsService(IServiceProvider serviceProvider, ILogService
             firstValueUsed = true;
             cpuCounter.NextValue();
         }
+
         var realvalue = cpuCounter.NextValue();
 
         //Set the email settings correctly.
@@ -407,7 +409,7 @@ public class ServerMonitorsService(IServiceProvider serviceProvider, ILogService
 
         //Checks if the value is above the threshold and if so then adds 1 to the counter.
         //If the value is below the threshold then reset the counter to 0.
-        if(realvalue < threshold)
+        if (realvalue < threshold)
         {
             emailCpuSent = false;
             aboveThresholdTimer = 0;
@@ -483,10 +485,11 @@ public class ServerMonitorsService(IServiceProvider serviceProvider, ILogService
             sendSum += dataSentCounter.NextValue();
             receiveSum += dataReceivedCounter.NextValue();
         }
+
         var dataSent = sendSum;
         var dataReceived = receiveSum;
 
-        var utilization = (8 * (dataSent + dataReceived)) / (bandwidth * numberOfIterations) * 100;
+        var utilization = 8 * (dataSent + dataReceived) / (bandwidth * numberOfIterations) * 100;
         await logService.LogInformation(logger, LogScopes.RunStartAndStop, monitorItem.LogSettings, $"Network utilization: {utilization}", configurationServiceName, monitorItem.TimeId, monitorItem.Order);
 
         //Set the email settings correctly.
