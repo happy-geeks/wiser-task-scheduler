@@ -5,12 +5,12 @@ using AutoUpdater.Slack.modules;
 using AutoUpdater.Workers;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
-using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration.Json;
 using Serilog;
 using SlackNet.AspNetCore;
 
-IHost host = Host.CreateDefaultBuilder(args)
-    .UseWindowsService((options) =>
+var host = Host.CreateDefaultBuilder(args)
+    .UseWindowsService(options =>
     {
         options.ServiceName = "WTS Auto Updater";
     })
@@ -18,7 +18,7 @@ IHost host = Host.CreateDefaultBuilder(args)
     {
         config.SetBasePath(AppContext.BaseDirectory);
         config.Sources
-            .OfType<Microsoft.Extensions.Configuration.Json.JsonConfigurationSource>()
+            .OfType<JsonConfigurationSource>()
             .Where(x => x.Path == "appsettings.json");
 
         // We need to build here already, so that we can read the base directory for secrets.

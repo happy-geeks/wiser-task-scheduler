@@ -1,12 +1,11 @@
-﻿namespace WiserTaskScheduler.Core.Enums
+﻿namespace WiserTaskScheduler.Core.Enums;
+
+public enum OAuthState
 {
-    public enum OAuthState
-    {
-        SuccessfullyRequestedNewToken,
-        UsingAlreadyExistingToken,
-        AuthenticationFailed,
-        RefreshTokenFailed,
-        WaitingForManualAuthentication,
-        NotEnoughInformation
-    }
+    SuccessfullyRequestedNewToken,
+    UsingAlreadyExistingToken,
+    AuthenticationFailed,
+    RefreshTokenFailed,
+    WaitingForManualAuthentication,
+    NotEnoughInformation
 }

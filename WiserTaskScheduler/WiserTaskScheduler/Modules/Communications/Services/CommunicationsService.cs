@@ -13,38 +13,28 @@ using GeeksCoreLibrary.Modules.Communication.Extensions;
 using GeeksCoreLibrary.Modules.Communication.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.DataSelector.Interfaces;
+using GeeksCoreLibrary.Modules.DataSelector.Models;
 using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json.Linq;
-using IGclCommunicationsService = GeeksCoreLibrary.Modules.Communication.Interfaces.ICommunicationsService;
-using GeeksCoreLibrary.Modules.DataSelector.Models;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Modules.Communications.Interfaces;
 using WiserTaskScheduler.Modules.Communications.Models;
+using IGclCommunicationsService = GeeksCoreLibrary.Modules.Communication.Interfaces.ICommunicationsService;
 
 namespace WiserTaskScheduler.Modules.Communications.Services;
 
-public class CommunicationsService : ICommunicationsService, IActionsService, IScopedService
+public class CommunicationsService(IServiceProvider serviceProvider, ILogService logService, ILogger<CommunicationsService> logger)	: ICommunicationsService, IActionsService, IScopedService
 {
-    private readonly IServiceProvider serviceProvider;
-    private readonly ILogService logService;
-    private readonly ILogger<CommunicationsService> logger;
-
-    private const string EmailSubjectForCommunicationError = "Error while sending communication";
+	private const string EmailSubjectForCommunicationError = "Error while sending communication";
 
     private DateTime lastErrorSent = DateTime.MinValue;
     private string connectionString;
-
-    public CommunicationsService(IServiceProvider serviceProvider, ILogService logService, ILogger<CommunicationsService> logger)
-    {
-        this.serviceProvider = serviceProvider;
-        this.logService = logService;
-        this.logger = logger;
-    }
+    private static readonly char[] Separator = [',', ';'];
 
     /// <inheritdoc />
     public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
@@ -70,17 +60,13 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 
 	    await GenerateCommunicationsAsync(communication, databaseConnection, gclCommunicationsService, dataSelectorsService, stringReplacementsService, configurationServiceName);
 
-	    switch (communication.Type)
+	    return communication.Type switch
 	    {
-	        case CommunicationTypes.Email:
-	            return await ProcessMailsAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName);
-	        case CommunicationTypes.Sms:
-		        return await ProcessSmsAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName);
-	        case CommunicationTypes.WhatsApp:
-	            return await ProcessWhatsAppAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName);
-	        default:
-	            throw new ArgumentOutOfRangeException(nameof(communication.Type), communication.Type.ToString());
-	    }
+		    CommunicationTypes.Email => await ProcessMailsAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName),
+		    CommunicationTypes.Sms => await ProcessSmsAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName),
+		    CommunicationTypes.WhatsApp => await ProcessWhatsAppAsync(communication, databaseConnection, gclCommunicationsService, configurationServiceName),
+		    _ => throw new ArgumentOutOfRangeException(nameof(communication.Type), communication.Type.ToString(), null)
+	    };
     }
 
     /// <summary>
@@ -160,7 +146,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 						    nextDateTimeToProcess = new DateTime(nextDateTimeToProcess.Year, nextDateTimeToProcess.Month, Math.Min(DateTime.DaysInMonth(currentDate.Year, currentDate.Month), communicationSetting.TriggerDayOfMonth));
 						    break;
 					    default:
-						    throw new ArgumentOutOfRangeException(nameof(communicationSetting.TriggerPeriodType), communicationSetting.TriggerPeriodType.ToString());
+						    throw new ArgumentOutOfRangeException(nameof(communicationSetting.TriggerPeriodType), communicationSetting.TriggerPeriodType.ToString(), null);
 				    }
 
 				    // Don't send the communication if the next date and time is in the future.
@@ -171,7 +157,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 
 				    break;
 			    default:
-				    throw new ArgumentOutOfRangeException(nameof(communicationSetting.SendTriggerType), communicationSetting.SendTriggerType.ToString());
+				    throw new ArgumentOutOfRangeException(nameof(communicationSetting.SendTriggerType), communicationSetting.SendTriggerType.ToString(), null);
 		    }
 
 		    var receivers = new Dictionary<string, JToken>();
@@ -227,7 +213,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 
 		    if (!receivers.Any())
 		    {
-			    await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, $"There are no receivers for the communication with ID communication. No communication has been generated.", configurationServiceName, communication.TimeId, communication.Order);
+			    await logService.LogError(logger, LogScopes.RunBody, communication.LogSettings, "There are no receivers for the communication with ID communication. No communication has been generated.", configurationServiceName, communication.TimeId, communication.Order);
 			    continue;
 		    }
 
@@ -293,7 +279,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
                         await gclCommunicationsService.SendWhatsAppAsync(receiver.Key, content);
 						break;
 				    default:
-					    throw new ArgumentOutOfRangeException(nameof(communication.Type), communication.Type.ToString());
+					    throw new ArgumentOutOfRangeException(nameof(communication.Type), communication.Type.ToString(), null);
 			    }
 		    }
 
@@ -319,7 +305,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 	    if (!emails.Any())
 	    {
 		    await logService.LogInformation(logger, LogScopes.RunStartAndStop, communication.LogSettings, "No emails found to be send.", configurationServiceName, communication.TimeId, communication.Order);
-		    return new JObject()
+		    return new JObject
 		    {
 			    {"Type", "Email"},
 			    {"Processed", 0},
@@ -403,7 +389,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    }
 	    }
 
-	    return new JObject()
+	    return new JObject
 	    {
 		    {"Type", "Email"},
 		    {"Processed", processed},
@@ -419,7 +405,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 	    if (!smsList.Any())
 	    {
 		    await logService.LogInformation(logger, LogScopes.RunStartAndStop, communication.LogSettings, "No text messages found to be send.", configurationServiceName, communication.TimeId, communication.Order);
-		    return new JObject()
+		    return new JObject
 		    {
 			    {"Type", "Sms"},
 			    {"Processed", 0},
@@ -467,7 +453,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
 		    await databaseConnection.InsertOrUpdateRecordBasedOnParametersAsync(WiserTableNames.WiserCommunicationGenerated, sms.Id);
 	    }
 
-	    return new JObject()
+	    return new JObject
 	    {
 		    {"Type", "Sms"},
 		    {"Processed", processed},
@@ -482,7 +468,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
         if (!whatsAppList.Any())
         {
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, communication.LogSettings, "No text messages found to be send.", configurationServiceName, communication.TimeId, communication.Order);
-            return new JObject()
+            return new JObject
             {
                 {"Type", "WhatsApp"},
                 {"Processed", 0},
@@ -530,7 +516,7 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
             await databaseConnection.InsertOrUpdateRecordBasedOnParametersAsync(WiserTableNames.WiserCommunicationGenerated, whatsApp.Id);
         }
 
-        return new JObject()
+        return new JObject
         {
             {"Type", "WhatsApp"},
             {"Processed", processed},
@@ -553,34 +539,36 @@ public class CommunicationsService : ICommunicationsService, IActionsService, IS
         databaseConnection.AddParameter("maxDelayInHours", communication.MaxDelayInHours);
         databaseConnection.AddParameter("maxNumberOfCommunicationAttempts", communication.MaxNumberOfCommunicationAttempts);
 
-        var dataTable = await databaseConnection.GetAsync($@"SELECT
-	id,
-	communication_id,
-	receiver,
-	receiver_name,
-	cc,
-	bcc,
-	reply_to,
-	reply_to_name,
-	sender,
-	sender_name,
-	subject,
-	content,
-	uploaded_file,
-	uploaded_filename,
-	attachment_urls,
-	wiser_item_files,
-	communicationtype,
-	send_date,
-	attempt_count,
-	last_attempt
-FROM {WiserTableNames.WiserCommunicationGenerated}
-WHERE
-	communicationtype = ?communicationType
-	AND send_date <= ?now
-	AND IF(?maxDelayInHours > 0, DATE_ADD(send_date, INTERVAL ?maxDelayInHours HOUR), '2199-01-01 00:00:00') >= ?now
-	AND processed_date IS NULL
-	AND attempt_count < ?maxNumberOfCommunicationAttempts");
+        var dataTable = await databaseConnection.GetAsync($"""
+                                                           SELECT
+                                                           	id,
+                                                           	communication_id,
+                                                           	receiver,
+                                                           	receiver_name,
+                                                           	cc,
+                                                           	bcc,
+                                                           	reply_to,
+                                                           	reply_to_name,
+                                                           	sender,
+                                                           	sender_name,
+                                                           	subject,
+                                                           	content,
+                                                           	uploaded_file,
+                                                           	uploaded_filename,
+                                                           	attachment_urls,
+                                                           	wiser_item_files,
+                                                           	communicationtype,
+                                                           	send_date,
+                                                           	attempt_count,
+                                                           	last_attempt
+                                                           FROM {WiserTableNames.WiserCommunicationGenerated}
+                                                           WHERE
+                                                           	communicationtype = ?communicationType
+                                                           	AND send_date <= ?now
+                                                           	AND IF(?maxDelayInHours > 0, DATE_ADD(send_date, INTERVAL ?maxDelayInHours HOUR), '2199-01-01 00:00:00') >= ?now
+                                                           	AND processed_date IS NULL
+                                                           	AND attempt_count < ?maxNumberOfCommunicationAttempts
+                                                           """);
 
         var communications = new List<SingleCommunicationModel>();
 
@@ -611,8 +599,8 @@ WHERE
         var rawReceiverNames = row.Field<string>("receiver_name");
         if (!String.IsNullOrWhiteSpace(rawReceiverAddresses))
         {
-	        var addresses = rawReceiverAddresses.Split(new[] {',', ';'});
-	        var names = String.IsNullOrWhiteSpace(rawReceiverNames) ? new string[addresses.Length] : rawReceiverNames.Split(new[] {',', ';'});
+	        var addresses = rawReceiverAddresses.Split(Separator);
+	        var names = String.IsNullOrWhiteSpace(rawReceiverNames) ? new string[addresses.Length] : rawReceiverNames.Split(Separator);
 
 	        for (var i = 0; i < addresses.Length; i++)
 	        {
@@ -621,7 +609,7 @@ WHERE
 			        continue;
 		        }
 
-		        receiverAddresses.Add(new CommunicationReceiverModel()
+		        receiverAddresses.Add(new CommunicationReceiverModel
 		        {
 			        Address = addresses[i],
 			        DisplayName = names[i]
@@ -633,31 +621,31 @@ WHERE
         var rawBccValue = row.Field<string>("bcc");
         if (!String.IsNullOrWhiteSpace(rawBccValue))
         {
-	        bccAddresses.AddRange(rawBccValue.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries));
+	        bccAddresses.AddRange(rawBccValue.Split(Separator, StringSplitOptions.RemoveEmptyEntries));
         }
 
         var ccAddresses = new List<string>();
         var rawCcValue = row.Field<string>("cc");
         if (!String.IsNullOrWhiteSpace(rawCcValue))
         {
-	        ccAddresses.AddRange(rawCcValue.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries));
+	        ccAddresses.AddRange(rawCcValue.Split(Separator, StringSplitOptions.RemoveEmptyEntries));
         }
 
         var attachmentUrls = new List<string>();
         var rawAttachmentUrls = row.Field<string>("attachment_urls");
         if (!String.IsNullOrWhiteSpace(rawAttachmentUrls))
         {
-	        attachmentUrls.AddRange(rawAttachmentUrls.Split(new[] {',', ';'}, StringSplitOptions.RemoveEmptyEntries));
+	        attachmentUrls.AddRange(rawAttachmentUrls.Split(Separator, StringSplitOptions.RemoveEmptyEntries));
         }
 
         var wiserItemFiles = new List<ulong>();
         var rawWiserItemFiles = row.Field<string>("wiser_item_files");
         if (!String.IsNullOrWhiteSpace(rawWiserItemFiles))
         {
-	        wiserItemFiles.AddRange(rawWiserItemFiles.Split(new[] {',', ';'}, StringSplitOptions.RemoveEmptyEntries).Select(UInt64.Parse).ToList());
+	        wiserItemFiles.AddRange(rawWiserItemFiles.Split(Separator, StringSplitOptions.RemoveEmptyEntries).Select(UInt64.Parse).ToList());
         }
 
-        var singleCommunication = new SingleCommunicationModel()
+        var singleCommunication = new SingleCommunicationModel
         {
 	        Id = Convert.ToInt32(row["id"]),
 	        CommunicationId = Convert.ToInt32(row["communication_id"]),

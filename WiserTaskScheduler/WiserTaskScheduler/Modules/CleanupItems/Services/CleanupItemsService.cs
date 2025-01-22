@@ -20,21 +20,10 @@ using WiserTaskScheduler.Modules.CleanupItems.Models;
 
 namespace WiserTaskScheduler.Modules.CleanupItems.Services;
 
-public class CleanupItemsService : ICleanupItemsService, IActionsService, IScopedService
+public class CleanupItemsService(IServiceProvider serviceProvider, ILogService logService, ILogger<CleanupItemsService> logger) : ICleanupItemsService, IActionsService, IScopedService
 {
-    private readonly IServiceProvider serviceProvider;
-    private readonly ILogService logService;
-    private readonly ILogger<CleanupItemsService> logger;
-
     private string connectionString;
     private HashSet<string> tablesToOptimize;
-
-    public CleanupItemsService(IServiceProvider serviceProvider, ILogService logService, ILogger<CleanupItemsService> logger)
-    {
-        this.serviceProvider = serviceProvider;
-        this.logService = logService;
-        this.logger = logger;
-    }
 
     /// <inheritdoc />
     // ReSharper disable once ParameterHidesMember
@@ -59,18 +48,18 @@ public class CleanupItemsService : ICleanupItemsService, IActionsService, IScope
         var connectionStringToUse = cleanupItem.ConnectionString ?? connectionString;
         await databaseConnection.ChangeConnectionStringsAsync(connectionStringToUse, connectionStringToUse);
         databaseConnection.ClearParameters();
-        
+
         var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
         var tablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(cleanupItem.EntityName);
-        
+
         // Get the delete action of the entity to show it in the logs.
         var entitySettings = await wiserItemsService.GetEntityTypeSettingsAsync(cleanupItem.EntityName);
-        
+
         if (entitySettings.Id == 0)
         {
             await logService.LogWarning(logger, LogScopes.RunBody, cleanupItem.LogSettings, $"Entity '{cleanupItem.EntityName}' not found in '{WiserTableNames.WiserEntity}'. Please ensure the entity is correct. When the entity has been removed please remove this action (configuration: {configurationServiceName}, time ID: {cleanupItem.TimeId}, order: '{cleanupItem.Order}').", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
-            
-            return new JObject()
+
+            return new JObject
             {
                 {"Success", false},
                 {"EntityName", cleanupItem.EntityName},
@@ -78,10 +67,10 @@ public class CleanupItemsService : ICleanupItemsService, IActionsService, IScope
                 {"ItemsToCleanup", 0},
                 {"DeleteAction", "Not found!"}
             };
-        }        
-        
+        }
+
         var deleteAction = entitySettings.DeleteAction;
-        
+
         // Get all IDs from items that need to be cleaned.
         databaseConnection.AddParameter("cleanupDate", cleanupDate);
 
@@ -92,19 +81,25 @@ public class CleanupItemsService : ICleanupItemsService, IActionsService, IScope
         if (cleanupItem.OnlyWhenNotConnectedItem)
         {
             joins.Append($"LEFT JOIN {WiserTableNames.WiserItemLink} AS itemLink ON itemLink.item_id = item.id {(cleanupItem.OnlyWhenNotDestinationItem ? "OR itemLink.destination_item_id = item.id" : "")}");
-            
-            wheres.Append(@"AND item.parent_item_id = 0
-AND itemLink.id IS NULL");
+
+            wheres.Append("""
+                          AND item.parent_item_id = 0
+                          AND itemLink.id IS NULL
+                          """);
 
             // Add checks for dedicated link tables if the item is set as connected item entity.
             var dedicatedLinkTypes = await GetDedicatedLinkTypes(databaseConnection, cleanupItem.EntityName, false);
             for (var i = 0; i < dedicatedLinkTypes.Count; i++)
             {
-                joins.Append($@"
-LEFT JOIN {dedicatedLinkTypes[i]}_{WiserTableNames.WiserItemLink} AS connectedItemLink{i} ON connectedItemLink{i}.item_id = item.id");
+                joins.Append($"""
 
-                wheres.Append($@"
-AND connectedItemLink{i}.id IS NULL");
+                              LEFT JOIN {dedicatedLinkTypes[i]}_{WiserTableNames.WiserItemLink} AS connectedItemLink{i} ON connectedItemLink{i}.item_id = item.id
+                              """);
+
+                wheres.Append($"""
+
+                               AND connectedItemLink{i}.id IS NULL
+                               """);
             }
         }
 
@@ -114,34 +109,44 @@ AND connectedItemLink{i}.id IS NULL");
             if (!cleanupItem.OnlyWhenNotConnectedItem)
             {
                 joins.Append($"LEFT JOIN {WiserTableNames.WiserItemLink} AS itemLink ON itemLink.destination_item_id = item.id");
-                wheres.Append(@"AND itemLink.id IS NULL");
+                wheres.Append("AND itemLink.id IS NULL");
             }
-            
-            joins.Append($@"
-LEFT JOIN {tablePrefix}wiser_item AS child ON child.parent_item_id = item.id");
-            
-            wheres.Append(@"
-AND child.id IS NULL");
-            
+
+            joins.Append($"""
+
+                          LEFT JOIN {tablePrefix}wiser_item AS child ON child.parent_item_id = item.id
+                          """);
+
+            wheres.Append("""
+
+                          AND child.id IS NULL
+                          """);
+
             // Add checks for dedicated link tables if the item is set as destination entity.
             var dedicatedLinkTypes = await GetDedicatedLinkTypes(databaseConnection, cleanupItem.EntityName, true);
             for (var i = 0; i < dedicatedLinkTypes.Count; i++)
             {
-                joins.Append($@"
-LEFT JOIN {dedicatedLinkTypes[i]}_{WiserTableNames.WiserItemLink} AS destinationItemLink{i} ON destinationItemLink{i}.item_id = item.id");
+                joins.Append($"""
 
-                wheres.Append($@"
-AND destinationItemLink{i}.id IS NULL");
+                              LEFT JOIN {dedicatedLinkTypes[i]}_{WiserTableNames.WiserItemLink} AS destinationItemLink{i} ON destinationItemLink{i}.item_id = item.id
+                              """);
+
+                wheres.Append($"""
+
+                               AND destinationItemLink{i}.id IS NULL
+                               """);
             }
         }
 
-        var query = $@"SELECT item.id
-FROM {tablePrefix}{WiserTableNames.WiserItem} AS item
-{joins}
-WHERE item.entity_type = ?entityName
-AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?cleanupDate) <= 0
-{wheres}";
-        
+        var query = $"""
+                     SELECT item.id
+                     FROM {tablePrefix}{WiserTableNames.WiserItem} AS item
+                     {joins}
+                     WHERE item.entity_type = ?entityName
+                     AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?cleanupDate) <= 0
+                     {wheres}
+                     """;
+
         databaseConnection.AddParameter("entityName", cleanupItem.EntityName);
         var itemsDataTable = await databaseConnection.GetAsync(query);
 
@@ -149,7 +154,7 @@ AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?
         {
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Finished cleanup for items of entity '{cleanupItem.EntityName}', no items found to cleanup.", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
 
-            return new JObject()
+            return new JObject
             {
                 {"Success", true},
                 {"EntityName", cleanupItem.EntityName},
@@ -163,7 +168,7 @@ AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?
                    select row.Field<ulong>("id")).ToList();
 
         var success = true;
-        
+
         try
         {
             var affectedRows = await wiserItemsService.DeleteAsync(ids, username: "WTS Cleanup", saveHistory: cleanupItem.SaveHistory, skipPermissionsCheck: true, entityType: cleanupItem.EntityName);
@@ -174,7 +179,7 @@ AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?
                 tablesToOptimize.Add($"{tablePrefix}{WiserTableNames.WiserItem}");
                 tablesToOptimize.Add($"{tablePrefix}{WiserTableNames.WiserItemDetail}");
                 tablesToOptimize.Add($"{tablePrefix}{WiserTableNames.WiserItemFile}");
-                
+
                 // Get all links that are connected to the selected entity and don't use parent ID (no links will be deleted when a parent ID is used so those links can be ignored).
                 var links = (await wiserItemsService.GetAllLinkTypeSettingsAsync())
                     .Where(linkSetting => !linkSetting.UseItemParentId
@@ -195,8 +200,8 @@ AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?
             await logService.LogError(logger, LogScopes.RunStartAndStop, cleanupItem.LogSettings, $"Failed cleanup for items of entity '{cleanupItem.EntityName}' due to exception:\n{e}", configurationServiceName, cleanupItem.TimeId, cleanupItem.Order);
             success = false;
         }
-        
-        return new JObject()
+
+        return new JObject
         {
             {"Success", success},
             {"EntityName", cleanupItem.EntityName},
@@ -216,11 +221,13 @@ AND TIMEDIFF(item.{(cleanupItem.SinceLastChange ? "changed_on" : "added_on")}, ?
     private async Task<List<int>> GetDedicatedLinkTypes(IDatabaseConnection databaseConnection, string entityName, bool destinationInsteadOfConnectedItem)
     {
         databaseConnection.AddParameter("entityName", entityName);
-        
-        var query = $@"SELECT link.type
-FROM {WiserTableNames.WiserLink} AS link
-WHERE link.use_dedicated_table = true
-AND link.{(destinationInsteadOfConnectedItem ? "destination_entity_type" : "connected_entity_type")} = ?entityName";
+
+        var query = $"""
+                     SELECT link.type
+                     FROM {WiserTableNames.WiserLink} AS link
+                     WHERE link.use_dedicated_table = true
+                     AND link.{(destinationInsteadOfConnectedItem ? "destination_entity_type" : "connected_entity_type")} = ?entityName
+                     """;
 
         var dataTable = await databaseConnection.GetAsync(query);
 

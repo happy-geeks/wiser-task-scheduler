@@ -2,23 +2,22 @@
 using System.Threading.Tasks;
 using WiserTaskScheduler.Modules.Wiser.Models;
 
-namespace WiserTaskScheduler.Modules.Wiser.Interfaces
+namespace WiserTaskScheduler.Modules.Wiser.Interfaces;
+
+/// <summary>
+/// A service to handle the communication with the Wiser API.
+/// </summary>
+public interface IWiserService
 {
     /// <summary>
-    /// A service to handle the communication with the Wiser API.
+    /// Make a request to the API to get all XML configurations.
     /// </summary>
-    public interface IWiserService
-    {
-        /// <summary>
-        /// Make a request to the API to get all XML configurations.
-        /// </summary>
-        /// <returns></returns>
-        Task<List<TemplateSettingsModel>> RequestConfigurations();
+    /// <returns></returns>
+    Task<List<TemplateSettingsModel>> RequestConfigurations();
 
-        /// <summary>
-        /// Get the access token and gets a new token if none is available or if it has expired.
-        /// </summary>
-        /// <returns>The access token to authenticate with the Wiser API.</returns>
-        Task<string> GetAccessTokenAsync();
-    }
+    /// <summary>
+    /// Get the access token and gets a new token if none is available or if it has expired.
+    /// </summary>
+    /// <returns>The access token to authenticate with the Wiser API.</returns>
+    Task<string> GetAccessTokenAsync();
 }

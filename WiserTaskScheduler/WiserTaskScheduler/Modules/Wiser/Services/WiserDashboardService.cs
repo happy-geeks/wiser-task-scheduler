@@ -3,43 +3,34 @@ using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
-using WiserTaskScheduler.Modules.Wiser.Interfaces;
-using WiserTaskScheduler.Core.Interfaces;
-using WiserTaskScheduler.Core.Enums;
-using WiserTaskScheduler.Core.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.WiserDashboard.Models;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using WiserTaskScheduler.Core.Enums;
+using WiserTaskScheduler.Core.Interfaces;
+using WiserTaskScheduler.Core.Models;
+using WiserTaskScheduler.Modules.Wiser.Interfaces;
 
 namespace WiserTaskScheduler.Modules.Wiser.Services;
 
-public class WiserDashboardService : IWiserDashboardService, ISingletonService
+public class WiserDashboardService(IServiceProvider serviceProvider, ILogService logService, ILogger<WiserDashboardService> logger) : IWiserDashboardService, ISingletonService
 {
-    private readonly IServiceProvider serviceProvider;
-    private readonly ILogService logService;
-    private readonly ILogger<WiserDashboardService> logger;
-    private readonly LogSettings logSettings;
-
-    public WiserDashboardService(IServiceProvider serviceProvider, ILogService logService, ILogger<WiserDashboardService> logger)
-    {
-        this.serviceProvider = serviceProvider;
-        this.logService = logService;
-        this.logger = logger;
-        this.logSettings = new LogSettings();
-    }
+    private readonly LogSettings logSettings = new();
 
     /// <inheritdoc />
     public async Task<Service> GetServiceAsync(string configuration, int timeId)
     {
-        var query = $@"SELECT *
-FROM {WiserTableNames.WtsServices}
-WHERE configuration = ?configuration
-AND time_id = ?timeId";
+        var query = $"""
+                     SELECT *
+                     FROM {WiserTableNames.WtsServices}
+                     WHERE configuration = ?configuration
+                     AND time_id = ?timeId
+                     """;
 
-        var parameters = new Dictionary<string, object>()
+        var parameters = new Dictionary<string, object>
         {
             {"configuration", configuration},
             {"timeId", timeId}
@@ -58,9 +49,11 @@ AND time_id = ?timeId";
     /// <inheritdoc />
     public async Task<List<Service>> GetServicesAsync(bool onlyWithExtraRun)
     {
-        var query = $@"SELECT  *
-FROM {WiserTableNames.WtsServices}
-{(onlyWithExtraRun ? "WHERE extra_run = 1" : "")}";
+        var query = $"""
+                     SELECT  *
+                     FROM {WiserTableNames.WtsServices}
+                     {(onlyWithExtraRun ? "WHERE extra_run = 1" : "")}
+                     """;
 
         var data = await ExecuteQueryAsync(query);
         return GetServicesFromData(data);
@@ -70,7 +63,7 @@ FROM {WiserTableNames.WtsServices}
     public async Task CreateServiceAsync(string configuration, int timeId)
     {
         var query = $"INSERT INTO {WiserTableNames.WtsServices} (configuration, time_id) VALUES (?configuration, ?timeId)";
-        var parameters = new Dictionary<string, object>()
+        var parameters = new Dictionary<string, object>
         {
             {"configuration", configuration},
             {"timeId", timeId}
@@ -83,7 +76,7 @@ FROM {WiserTableNames.WtsServices}
     public async Task<bool> UpdateServiceAsync(string configuration, int timeId, string action = null, string scheme = null, DateTime? lastRun = null, DateTime? nextRun = null, TimeSpan? runTime = null, string state = null, bool? paused = null, bool? extraRun = null, int templateId = -1)
     {
         var querySetParts = new List<string>();
-        var parameters = new Dictionary<string, object>()
+        var parameters = new Dictionary<string, object>
         {
             {"configuration", configuration},
             {"timeId", timeId}
@@ -227,10 +220,12 @@ FROM {WiserTableNames.WtsServices}
             databaseConnection.AddParameter("configuration", configuration);
             databaseConnection.AddParameter("timeId", timeId);
 
-            var dataTable = await databaseConnection.GetAsync($@"SELECT paused
-FROM {WiserTableNames.WtsServices}
-WHERE configuration = ?configuration
-AND time_id = ?timeId");
+            var dataTable = await databaseConnection.GetAsync($"""
+                                                               SELECT paused
+                                                               FROM {WiserTableNames.WtsServices}
+                                                               WHERE configuration = ?configuration
+                                                               AND time_id = ?timeId
+                                                               """);
 
             // If no service is found for this combination treat it as paused to prevent unwanted executions.
             if (dataTable.Rows.Count == 0)
@@ -258,10 +253,12 @@ AND time_id = ?timeId");
             databaseConnection.AddParameter("configuration", configuration);
             databaseConnection.AddParameter("timeId", timeId);
 
-            var dataTable = await databaseConnection.GetAsync($@"SELECT state
-FROM {WiserTableNames.WtsServices}
-WHERE configuration = ?configuration
-AND time_id = ?timeId");
+            var dataTable = await databaseConnection.GetAsync($"""
+                                                               SELECT state
+                                                               FROM {WiserTableNames.WtsServices}
+                                                               WHERE configuration = ?configuration
+                                                               AND time_id = ?timeId
+                                                               """);
 
             return dataTable.Rows[0].Field<string>("state").Equals("running", StringComparison.InvariantCultureIgnoreCase);
         }

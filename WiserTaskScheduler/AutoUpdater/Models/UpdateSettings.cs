@@ -1,7 +1,4 @@
-﻿using AutoUpdater.Slack.modules;
-using GeeksCoreLibrary.Modules.Communication.Models;
-
-namespace AutoUpdater.Models;
+﻿namespace AutoUpdater.Models;
 
 public class UpdateSettings
 {

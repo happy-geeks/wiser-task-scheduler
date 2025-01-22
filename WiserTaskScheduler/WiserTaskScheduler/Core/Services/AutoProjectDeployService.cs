@@ -16,7 +16,6 @@ using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Branches.Models;
 using GeeksCoreLibrary.Modules.Communication.Enums;
 using GeeksCoreLibrary.Modules.Communication.Models;
-using IGclCommunicationsService = GeeksCoreLibrary.Modules.Communication.Interfaces.ICommunicationsService;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.WiserDashboard.Models;
 using Microsoft.Extensions.DependencyInjection;
@@ -30,19 +29,23 @@ using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Modules.Branches.Interfaces;
 using WiserTaskScheduler.Modules.Wiser.Interfaces;
+using IGclCommunicationsService = GeeksCoreLibrary.Modules.Communication.Interfaces.ICommunicationsService;
 
 namespace WiserTaskScheduler.Core.Services;
 
-public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonService
+public class AutoProjectDeployService(
+    IOptions<WtsSettings> wtsSettings,
+    IOptions<GclSettings> gclSettings,
+    IServiceProvider serviceProvider,
+    IHttpClientService httpClientService,
+    IWiserService wiserService,
+    ILogService logService,
+    ILogger<AutoProjectDeployService> logger)
+    : IAutoProjectDeployService, ISingletonService
 {
-    private readonly WtsSettings wtsSettings;
-    private readonly GclSettings gclSettings;
-    private readonly IServiceProvider serviceProvider;
-    private readonly IHttpClientService httpClientService;
-    private readonly IWiserService wiserService;
-    private readonly ILogService logService;
-    private readonly ILogger<AutoProjectDeployService> logger;
-    private readonly string logName;
+    private readonly WtsSettings wtsSettings = wtsSettings.Value;
+    private readonly GclSettings gclSettings = gclSettings.Value;
+    private readonly string logName = $"AutoProjectDeploy ({Environment.MachineName})";
 
     private const string BranchSettingsEntityType = "branch_settings";
     private const string DefaultBranchSettingsId = "default_branch_settings";
@@ -62,33 +65,17 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
     private const string GitHubApiUrl = "https://api.github.com/repos/";
     private const string GitHubRequestAcceptType = "application/vnd.github+json";
 
-    private static readonly TimeSpan MaximumThreadSleepTime = new TimeSpan(6, 0, 0);
+    private static readonly TimeSpan MaximumThreadSleepTime = new(6, 0, 0);
     private static readonly int DefaultGitHubWorkflowTimeout = 15;
-    private static readonly TimeSpan DefaultGitHubWorkflowCheckInterval = new TimeSpan(0, 0, 15);
+    private static readonly TimeSpan DefaultGitHubWorkflowCheckInterval = new(0, 0, 15);
 
-    private readonly List<KeyValuePair<string, TimeSpan>> stepTimes = new List<KeyValuePair<string, TimeSpan>>();
+    private readonly List<KeyValuePair<string, TimeSpan>> stepTimes = [];
 
     private DateTime branchSettingsUpdateTimeLastRun;
     private DateTime branchSettingsUpdateTimeCurrentRun;
 
     /// <inheritdoc />
     public LogSettings LogSettings { get; set; }
-
-    /// <summary>
-    /// Creates a new instance of <see cref="AutoProjectDeployService" />.
-    /// </summary>
-    public AutoProjectDeployService(IOptions<WtsSettings> wtsSettings, IOptions<GclSettings> gclSettings, IServiceProvider serviceProvider, IHttpClientService httpClientService, IWiserService wiserService, ILogService logService, ILogger<AutoProjectDeployService> logger)
-    {
-        this.wtsSettings = wtsSettings.Value;
-        this.gclSettings = gclSettings.Value;
-        this.serviceProvider = serviceProvider;
-        this.httpClientService = httpClientService;
-        this.wiserService = wiserService;
-        this.logService = logService;
-        this.logger = logger;
-
-        logName = $"AutoProjectDeploy ({Environment.MachineName})";
-    }
 
     /// <inheritdoc />
     public async Task ManageAutoProjectDeployAsync(CancellationToken stoppingToken)
@@ -154,7 +141,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
         var gitHubAccessTokenExpires = branchSettings.GetDetailValue<DateTime>(GitHubAccessTokenExpiresProperty);
         var gitHubRepository = branchSettings.GetDetailValue(GitHubRepositoryProperty);
         var gitHubOrganization = branchSettings.GetDetailValue(GitHubOrganizationProperty);
-        var configurationsToPause = branchSettings.GetDetailValue(ConfigurationsToPauseProperty)?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(Int32.Parse).ToList() ?? new List<int>();
+        var configurationsToPause = branchSettings.GetDetailValue(ConfigurationsToPauseProperty)?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(Int32.Parse).ToList() ?? [];
         var currentDateTime = DateTime.Now;
 
         // If the start date is in the past, we should stop.
@@ -221,7 +208,7 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
 
         var branchQueueService = scope.ServiceProvider.GetRequiredService<IBranchQueueService>();
         await logService.LogInformation(logger, LogScopes.RunBody, LogSettings, "Initializing the branch queue service.", logName);
-        await ((IActionsService)branchQueueService).InitializeAsync(new ConfigurationModel()
+        await ((IActionsService)branchQueueService).InitializeAsync(new ConfigurationModel
         {
             ConnectionString = gclSettings.ConnectionString
         }, null);
@@ -770,9 +757,9 @@ public class AutoProjectDeployService : IAutoProjectDeployService, ISingletonSer
             }
 
             var communicationsService = scope.ServiceProvider.GetRequiredService<IGclCommunicationsService>();
-            var receivers = recipients.Select(email => new CommunicationReceiverModel() {Address = email}).ToList();
+            var receivers = recipients.Select(email => new CommunicationReceiverModel {Address = email}).ToList();
 
-            var email = new SingleCommunicationModel()
+            var email = new SingleCommunicationModel
             {
                 Type = CommunicationTypes.Email,
                 Receivers = receivers,

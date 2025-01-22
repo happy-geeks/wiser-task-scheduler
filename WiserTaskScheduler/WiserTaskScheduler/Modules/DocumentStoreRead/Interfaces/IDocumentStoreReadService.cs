@@ -1,3 +1,3 @@
 namespace WiserTaskScheduler.Modules.DocumentStoreRead.Interfaces;
 
-public interface IDocumentStoreReadService { }
+public interface IDocumentStoreReadService;

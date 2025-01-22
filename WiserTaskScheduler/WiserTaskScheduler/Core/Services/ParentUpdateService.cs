@@ -4,7 +4,6 @@ using System.Data;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Models;
-using GeeksCoreLibrary.Modules.Branches.Interfaces;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -14,185 +13,166 @@ using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Core.Models.ParentsUpdate;
 
-namespace WiserTaskScheduler.Core.Services
+namespace WiserTaskScheduler.Core.Services;
+
+/// <summary>
+/// A service to perform updates to parent items that are listed in the wiser_parent_updates table
+/// </summary>
+public class ParentUpdateService(IOptions<WtsSettings> wtsSettings, IServiceProvider serviceProvider, ILogService logService, ILogger<ParentUpdateService> logger) : IParentUpdateService, ISingletonService
 {
-    /// <summary>
-    /// A service to perform updates to parent items that are listed in the wiser_parent_updates table
-    /// </summary>
-    public class ParentUpdateService : IParentUpdateService, ISingletonService
+    private readonly string logName = $"ParentUpdateService ({Environment.MachineName})";
+
+    private readonly ParentsUpdateServiceSettings parentsUpdateServiceSettings = wtsSettings.Value.ParentsUpdateService;
+
+    private bool updatedParentUpdatesTable;
+    private bool updatedTargetDatabaseList;
+
+    // Database strings used to target other dbs in the same cluster.
+    private readonly List<ParentUpdateDatabaseStrings> targetDatabases = [];
+
+    private int runCounter;
+
+    /// <inheritdoc />
+    public LogSettings LogSettings { get; set; }
+
+    /// <inheritdoc />
+    public async Task ParentsUpdateAsync()
     {
-        private readonly string logName;
+        using var scope = serviceProvider.CreateScope();
+        await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
 
-        private readonly ParentsUpdateServiceSettings parentsUpdateServiceSettings;
-        private readonly IServiceProvider serviceProvider;
-        private readonly ILogService logService;
-        private readonly ILogger<ParentUpdateService> logger;
-
-        private bool updatedParentUpdatesTable;
-        private bool updatedTargetDatabaseList;
-
-        // Database strings used to target other dbs in the same cluster.
-        private readonly List<ParentUpdateDatabaseStrings> targetDatabases = [];
-
-        private int runCounter;
-
-        /// <inheritdoc />
-        public LogSettings LogSettings { get; set; }
-
-        public ParentUpdateService(IOptions<WtsSettings> wtsSettings, IServiceProvider serviceProvider, ILogService logService, ILogger<ParentUpdateService> logger)
+        // Update parent table if it has not already been done since launch. The table definitions can only change when the WTS restarts with a new update.
+        if (!updatedParentUpdatesTable)
         {
-            parentsUpdateServiceSettings = wtsSettings.Value.ParentsUpdateService;
-            this.serviceProvider = serviceProvider;
-            this.logService = logService;
-            this.logger = logger;
-            
-            logName = $"ParentUpdateService ({Environment.MachineName})";
+            await databaseHelpersService.CheckAndUpdateTablesAsync([WiserTableNames.WiserParentUpdates]);
+            updatedParentUpdatesTable = true;
         }
 
-        /// <inheritdoc />
-        public async Task ParentsUpdateAsync()
+        if (!updatedTargetDatabaseList)
         {
-            using var scope = serviceProvider.CreateScope();
-            await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
-            var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+            UpdateTargetedDatabases(databaseConnection);
+            updatedTargetDatabaseList = true;
+        }
 
-            // Update parent table if it has not already been done since launch. The table definitions can only change when the WTS restarts with a new update.
-            if (!updatedParentUpdatesTable)
-            {
-                await databaseHelpersService.CheckAndUpdateTablesAsync(new List<string>
-                    {
-                        WiserTableNames.WiserParentUpdates
-                    }
-                );
-                updatedParentUpdatesTable = true;
-            }
+        foreach (var database in targetDatabases)
+        {
+            await ParentsUpdateMainAsync(databaseConnection, databaseHelpersService, database);
+        }
 
-            if (!updatedTargetDatabaseList)
-            {
-                UpdateTargetedDatabases(databaseConnection);
-                updatedTargetDatabaseList = true;
-            }
-
+        runCounter++;
+        if (runCounter > parentsUpdateServiceSettings.PerformOptimizeEveryXtimes && parentsUpdateServiceSettings.PerformOptimizeEveryXtimes > 0)
+        {
             foreach (var database in targetDatabases)
             {
-                await ParentsUpdateMainAsync(databaseConnection, databaseHelpersService, database);
+                await ParentsUpdateOptimizeTables(databaseConnection, databaseHelpersService, database);
             }
 
-            runCounter++;
-            if (runCounter > parentsUpdateServiceSettings.PerformOptimizeEveryXtimes && parentsUpdateServiceSettings.PerformOptimizeEveryXtimes > 0)
-            {
-                foreach (var database in targetDatabases)
-                {
-                    await ParentsUpdateOptimizeTables(databaseConnection, databaseHelpersService, database);
-                }
-
-                runCounter = 0;
-            }
+            runCounter = 0;
         }
+    }
 
-        /// <summary>
-        /// The main parent update routine, checks if there are updates to be performed and performs them, then truncates WiserTableNames.WiserParentUpdates table.
-        /// </summary>
-        /// <param name="databaseConnection">The database connection to use.</param>
-        /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
-        /// <param name="targetDatabase">The database we are applying the parent updates on.</param>
-        private async Task ParentsUpdateMainAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, ParentUpdateDatabaseStrings targetDatabase)
+    /// <summary>
+    /// The main parent update routine, checks if there are updates to be performed and performs them, then truncates WiserTableNames.WiserParentUpdates table.
+    /// </summary>
+    /// <param name="databaseConnection">The database connection to use.</param>
+    /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
+    /// <param name="targetDatabase">The database we are applying the parent updates on.</param>
+    private async Task ParentsUpdateMainAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, ParentUpdateDatabaseStrings targetDatabase)
+    {
+        if (await databaseHelpersService.DatabaseExistsAsync(targetDatabase.DatabaseName))
         {
-            if (await databaseHelpersService.DatabaseExistsAsync(targetDatabase.DatabaseName))
+            if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserParentUpdates, targetDatabase.DatabaseName))
             {
-                if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserParentUpdates, targetDatabase.DatabaseName))
+                var dataTable = await databaseConnection.GetAsync(targetDatabase.ListTableQuery);
+                var exceptionOccurred = false;
+
+                foreach (DataRow dataRow in dataTable.Rows)
                 {
-                    var dataTable = await databaseConnection.GetAsync(targetDatabase.ListTableQuery);
-                    var exceptionOccurred = false;
+                    var tableName = dataRow.Field<string>("target_table");
 
-                    foreach (DataRow dataRow in dataTable.Rows)
-                    {
-                        var tableName = dataRow.Field<string>("target_table");
-
-                        var query = $"SET @saveHistory := false; UPDATE {targetDatabase.DatabaseName}.{tableName} item INNER JOIN {targetDatabase.DatabaseName}.{WiserTableNames.WiserParentUpdates} `updates` ON `item`.id = `updates`.target_id AND `updates`.target_table = '{tableName}' SET `item`.changed_on = `updates`.changed_on, `item`.changed_by = `updates`.changed_by;";
-
-                        try
-                        {
-                            await databaseConnection.ExecuteAsync(query);
-                        }
-                        catch (Exception e)
-                        {
-                            exceptionOccurred = true;
-                            await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to run query ( {query} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}", logName);
-                        }
-                    }
+                    var query = $"SET @saveHistory := false; UPDATE {targetDatabase.DatabaseName}.{tableName} item INNER JOIN {targetDatabase.DatabaseName}.{WiserTableNames.WiserParentUpdates} `updates` ON `item`.id = `updates`.target_id AND `updates`.target_table = '{tableName}' SET `item`.changed_on = `updates`.changed_on, `item`.changed_by = `updates`.changed_by;";
 
                     try
                     {
-                        if (!exceptionOccurred)
-                        {
-                            await databaseConnection.ExecuteAsync(targetDatabase.CleanUpQuery);
-                        }
+                        await databaseConnection.ExecuteAsync(query);
                     }
                     catch (Exception e)
                     {
-                        await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to run query ( {targetDatabase.CleanUpQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}", logName);
+                        exceptionOccurred = true;
+                        await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to run query ( {query} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}", logName);
                     }
+                }
+
+                try
+                {
+                    if (!exceptionOccurred)
+                    {
+                        await databaseConnection.ExecuteAsync(targetDatabase.CleanUpQuery);
+                    }
+                }
+                catch (Exception exception)
+                {
+                    await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to run query ( {targetDatabase.CleanUpQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{exception}", logName);
                 }
             }
         }
+    }
 
-        /// <summary>
-        /// The optimize routine, performs the optimize query on the targeted databse
-        /// </summary>
-        /// <param name="databaseConnection">The database connection to use.</param>
-        /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
-        /// <param name="targetDatabase">The database we are applying the parent updates on.</param>
-        private async Task ParentsUpdateOptimizeTables(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, ParentUpdateDatabaseStrings targetDatabase)
+    /// <summary>
+    /// The optimize routine, performs the optimize query on the targeted databse
+    /// </summary>
+    /// <param name="databaseConnection">The database connection to use.</param>
+    /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
+    /// <param name="targetDatabase">The database we are applying the parent updates on.</param>
+    private async Task ParentsUpdateOptimizeTables(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, ParentUpdateDatabaseStrings targetDatabase)
+    {
+        if (await databaseHelpersService.DatabaseExistsAsync(targetDatabase.DatabaseName))
         {
-            if (await databaseHelpersService.DatabaseExistsAsync(targetDatabase.DatabaseName))
+            if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserParentUpdates, targetDatabase.DatabaseName))
             {
-                if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserParentUpdates, targetDatabase.DatabaseName))
+                try
                 {
-                    try
-                    {
-                        await databaseConnection.ExecuteAsync(targetDatabase.OptimizeQuery);
-                    }
-                    catch (Exception e)
-                    {
-                        await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to run query ( {targetDatabase.OptimizeQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{e}", logName);
-                    }
+                    await databaseConnection.ExecuteAsync(targetDatabase.OptimizeQuery);
+                }
+                catch (Exception exception)
+                {
+                    await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to run query ( {targetDatabase.OptimizeQuery} ) in parent update service due to exception:{Environment.NewLine}{Environment.NewLine}{exception}", logName);
                 }
             }
         }
+    }
 
-        /// <summary>
-        /// Helper function to rebuild the targeted database list
-        /// </summary>
-        private void UpdateTargetedDatabases(IDatabaseConnection databaseConnection)
+    /// <summary>
+    /// Helper function to rebuild the targeted database list
+    /// </summary>
+    private void UpdateTargetedDatabases(IDatabaseConnection databaseConnection)
+    {
+        targetDatabases.Clear();
+
+        // Add main database.
+        var listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{WiserTableNames.WiserParentUpdates}`;";
+        var parentsCleanUpQuery = $"DELETE FROM `{WiserTableNames.WiserParentUpdates}` WHERE `id` IS NOT NULL;";
+        var resetIncrementQuery = $"ALTER TABLE `{WiserTableNames.WiserParentUpdates}` AUTO_INCREMENT = 1";
+        var optimizeQuery = $"OPTIMIZE TABLE `{WiserTableNames.WiserParentUpdates}`;";
+
+        var combinedCleanUpQuery = $"{parentsCleanUpQuery} {resetIncrementQuery}";
+
+        targetDatabases.Add(new ParentUpdateDatabaseStrings(databaseConnection.ConnectedDatabase, listTablesQuery, combinedCleanUpQuery, optimizeQuery ));
+
+        if (parentsUpdateServiceSettings.AdditionalDatabases == null)
         {
-            targetDatabases.Clear();
+            return;
+        }
 
-            // Add main database.
-            var listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{WiserTableNames.WiserParentUpdates}`;";
-            var parentsCleanUpQuery = $"DELETE FROM `{WiserTableNames.WiserParentUpdates}` WHERE `id` IS NOT NULL;";
-            var resetIncrementQuery = $"ALTER TABLE `{WiserTableNames.WiserParentUpdates}` AUTO_INCREMENT = 1";
-            var optimizeQuery = $"OPTIMIZE TABLE `{WiserTableNames.WiserParentUpdates}`;";
+        // Add additional databases.
+        foreach (var additionalDatabase in parentsUpdateServiceSettings.AdditionalDatabases)
+        {
+            listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}`;";
+            parentsCleanUpQuery = $"DELETE FROM `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}` WHERE `id` IS NOT NULL;";
+            optimizeQuery = $"OPTIMIZE TABLE `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}`;";
 
-            var combinedCleanUpQuery = $"{parentsCleanUpQuery} {resetIncrementQuery}";
-
-            targetDatabases.Add(new ParentUpdateDatabaseStrings(databaseConnection.ConnectedDatabase, listTablesQuery, combinedCleanUpQuery, optimizeQuery ));
-
-            if (parentsUpdateServiceSettings.AdditionalDatabases != null)
-            {
-                // Add additional databases.
-                foreach (var additionalDatabase in parentsUpdateServiceSettings.AdditionalDatabases)
-                {
-                    listTablesQuery = $"SELECT DISTINCT `target_table` FROM `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}`;";
-                    parentsCleanUpQuery = $"DELETE FROM `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}` WHERE `id` IS NOT NULL;";
-                    resetIncrementQuery = $"ALTER TABLE `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}` AUTO_INCREMENT = 1;";
-                    optimizeQuery = $"OPTIMIZE TABLE `{additionalDatabase}`.`{WiserTableNames.WiserParentUpdates}`;";
-
-                    combinedCleanUpQuery = $"{parentsCleanUpQuery} {resetIncrementQuery}";
-
-                    targetDatabases.Add(new ParentUpdateDatabaseStrings(additionalDatabase, listTablesQuery, parentsCleanUpQuery, optimizeQuery));
-                }
-            }
+            targetDatabases.Add(new ParentUpdateDatabaseStrings(additionalDatabase, listTablesQuery, parentsCleanUpQuery, optimizeQuery));
         }
     }
 }

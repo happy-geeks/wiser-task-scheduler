@@ -9,6 +9,7 @@ using GeeksCoreLibrary.Modules.Communication.Interfaces;
 using GeeksCoreLibrary.Modules.Communication.Models;
 using Microsoft.Extensions.Options;
 
+#pragma warning disable CA1416
 namespace AutoUpdater.Services;
 
 public class UpdateService : IUpdateService
@@ -26,14 +27,14 @@ public class UpdateService : IUpdateService
     private readonly IServiceProvider serviceProvider;
 
     private Version lastDownloadedVersion;
-    
+
     public UpdateService(IOptions<UpdateSettings> updateSettings, ILogger<UpdateService> logger, ISlackChatService slackChatService, IServiceProvider serviceProvider)
     {
         this.updateSettings = updateSettings.Value;
         this.logger = logger;
         this.slackChatService = slackChatService;
         this.serviceProvider = serviceProvider;
-        
+
         Directory.CreateDirectory(Path.Combine(WtsTempPath, "update"));
         Directory.CreateDirectory(Path.Combine(WtsTempPath, "backups"));
     }
@@ -60,9 +61,9 @@ public class UpdateService : IUpdateService
                 new Thread(() => UpdateWts(wts, versionList)).Start();
             }
         }
-        catch (Exception e)
+        catch (Exception exception)
         {
-            logger.LogError($"Failed to update the WTS services due to exception:{Environment.NewLine}{Environment.NewLine}{e}");
+            logger.LogError(exception, "Failed to update the WTS services due to exception.");
         }
     }
 
@@ -73,9 +74,9 @@ public class UpdateService : IUpdateService
     private async Task<List<VersionModel>> GetVersionList()
     {
         logger.LogInformation("Retrieving version list from server.");
-        
+
         using var request = new HttpRequestMessage(HttpMethod.Get, updateSettings.VersionListUrl);
-        using var client = new HttpClient(new HttpClientHandler() {AllowAutoRedirect = true});
+        using var client = new HttpClient(new HttpClientHandler {AllowAutoRedirect = true});
         using var response = await client.SendAsync(request);
         return await response.Content.ReadFromJsonAsync<List<VersionModel>>();
     }
@@ -88,29 +89,29 @@ public class UpdateService : IUpdateService
     private async Task<bool> DownloadUpdate(Version version)
     {
         logger.LogInformation("Download the latest update from the server.");
-        
+
         var filePath = Path.Combine(WtsTempPath, "update", "update.zip");
         if (File.Exists(filePath))
         {
             File.Delete(filePath);
         }
-        
+
         var downloadUrl = updateSettings.VersionDownloadUrl.EndsWith("/") ? updateSettings.VersionDownloadUrl : $"{updateSettings.VersionDownloadUrl}/";
         using var request = new HttpRequestMessage(HttpMethod.Get, $"{downloadUrl}version{version.ToString()}.zip");
-        using var client = new HttpClient(new HttpClientHandler() {AllowAutoRedirect = true});
+        using var client = new HttpClient(new HttpClientHandler {AllowAutoRedirect = true});
         using var response = await client.SendAsync(request);
-        
+
         if (!response.IsSuccessStatusCode)
         {
             logger.LogError($"Failed to download the update for version {version}.");
             return false;
         }
-        
+
         await File.WriteAllBytesAsync(filePath, await response.Content.ReadAsByteArrayAsync());
         lastDownloadedVersion = version;
         return true;
     }
-    
+
     /// <summary>
     /// Update a single WTS, method is started on its own thread.
     /// </summary>
@@ -125,15 +126,15 @@ public class UpdateService : IUpdateService
             logger.LogInformation($"WTS '{wts.ServiceName}' is not allowed to be updated and will check again tomorrow.");
             return;
         }
-        
+
         UpdateStates updateState;
         var version = new Version(0, 0, 0, 0);
-        
+
         var path = Path.Combine(wts.PathToFolder, WtsExeFile);
         if (Path.Exists(path))
         {
             var versionInfo = FileVersionInfo.GetVersionInfo(Path.Combine(wts.PathToFolder, WtsExeFile));
-            version = new Version(versionInfo.FileVersion);
+            version = new Version(versionInfo.FileVersion ?? String.Empty);
             updateState = CheckForUpdates(version, versionList);
         }
         else
@@ -151,7 +152,7 @@ public class UpdateService : IUpdateService
             case UpdateStates.BreakingChanges:
                 var subject = "WTS Auto Updater - Manual action required";
                 var message= $"Could not update WTS '{wts.ServiceName}' to version {versionList[0].Version} due to breaking changes since the current version of the WTS ({version}).{Environment.NewLine}Please check the release logs and resolve the breaking changes before manually updating the WTS.";
-                
+
                 logger.LogWarning(message);
                 InformPeople(wts, subject, message);
                 return;
@@ -162,16 +163,16 @@ public class UpdateService : IUpdateService
                     logger.LogInformation($"WTS '{wts.ServiceName}' will be updated at {wts.UpdateTime}.");
                     Thread.Sleep(wts.UpdateTime - DateTime.Now.TimeOfDay);
                 }
-        
+
                 logger.LogInformation($"Updating WTS '{wts.ServiceName}'.");
-                
+
                 PerformUpdate(wts, version, versionList[0].Version);
                 return;
             default:
-                throw new ArgumentOutOfRangeException(nameof(updateState), updateState.ToString());
+                throw new ArgumentOutOfRangeException(nameof(updateState), updateState.ToString(), null);
         }
     }
-    
+
     /// <summary>
     /// Check if the WTS is allowed to be updated today.
     /// </summary>
@@ -179,7 +180,7 @@ public class UpdateService : IUpdateService
     /// <returns>Returns true if it is a valid day to update, false if not.</returns>
     private bool ValidUpdateDay(WtsModel wts)
     {
-        var allowedDays = wts.UpdateDays ?? new[] {1, 2, 3, 4, 5};
+        var allowedDays = wts.UpdateDays ?? [1, 2, 3, 4, 5];
         return allowedDays.Contains((int) DateTime.Now.DayOfWeek);
     }
 
@@ -195,7 +196,7 @@ public class UpdateService : IUpdateService
         {
             return UpdateStates.UpToDate;
         }
-        
+
         for (var i = versionList.Count - 1; i >= 0; i--)
         {
             if (version >= versionList[i].Version)
@@ -222,7 +223,7 @@ public class UpdateService : IUpdateService
     private void PerformUpdate(WtsModel wts, Version currentVersion, Version versionToUpdateTo)
     {
         bool serviceAlreadyStopped;
-        
+
         using (var serviceController = new ServiceController())
         {
             serviceController.ServiceName = wts.ServiceName;
@@ -236,9 +237,9 @@ public class UpdateService : IUpdateService
             {
                 var subject = "WTS Auto Updater - WTS not found";
                 var message= $"The service for WTS '{wts.ServiceName}' could not be found on the server and can therefore not be updated.";
-                
+
                 InformPeople(wts, subject, message);
-                
+
                 logger.LogWarning($"No service found for '{wts.ServiceName}'.");
                 return;
             }
@@ -278,7 +279,7 @@ public class UpdateService : IUpdateService
 
             var subject = "WTS Auto Updater - Update installed";
             var message = $"WTS '{wts.ServiceName}' has been successfully updated to version {versionToUpdateTo}.";
-            
+
             logger.LogInformation(message);
 
             if (wts.SendEmailOnUpdateComplete)
@@ -286,13 +287,13 @@ public class UpdateService : IUpdateService
                 InformPeople(wts, subject, message);
             }
         }
-        catch (Exception e)
+        catch (Exception exception)
         {
             var subject = "WTS Auto Updater - Updating failed!";
-            var message= $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}.{Environment.NewLine}{Environment.NewLine} Error when updating:<br/>{e}";
-            
-            logger.LogError($"Exception occured while updating WTS '{wts.ServiceName}'.{Environment.NewLine}{Environment.NewLine}{e}");
-            
+            var message= $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}.{Environment.NewLine}{Environment.NewLine} Error when updating:<br/>{exception}";
+
+            logger.LogError(exception, $"Exception occured while updating WTS '{wts.ServiceName}'.");
+
             InformPeople(wts, subject, message);
         }
     }
@@ -305,13 +306,13 @@ public class UpdateService : IUpdateService
     {
         var backupPath = Path.Combine(WtsTempPath, "backups", wts.ServiceName);
         Directory.CreateDirectory(backupPath);
-        
+
         // Delete old backups.
         foreach (var file in new DirectoryInfo(backupPath).GetFiles())
         {
             file.Delete();
         }
-        
+
         ZipFile.CreateFromDirectory(wts.PathToFolder,  Path.Combine(backupPath, $"{DateTime.Now:yyyyMMdd}.zip"));
     }
 
@@ -328,7 +329,7 @@ public class UpdateService : IUpdateService
             {
                 continue;
             }
-            
+
             // Try to delete the file 5 times with a 1 second delay between each attempt.
             var attempts = 0;
             do
@@ -342,13 +343,15 @@ public class UpdateService : IUpdateService
                 catch (UnauthorizedAccessException)
                 {
                     if (attempts >= DeleteFileAttempts)
+                    {
                         throw;
-                    
+                    }
+
                     Thread.Sleep(DeleteFileDelay);
                 }
             } while (true);
         }
-        
+
         ZipFile.ExtractToDirectory(source, wts.PathToFolder, true);
     }
 
@@ -372,7 +375,7 @@ public class UpdateService : IUpdateService
 
             var subject = "WTS Auto Updater - Updating failed!";
             var message= $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}, successfully restored to version {currentVersion}.<br/><br/>Error when updating:<br/>{updateException}";
-            
+
             logger.LogError(message);
             InformPeople(wts, subject, message);
         }
@@ -380,8 +383,8 @@ public class UpdateService : IUpdateService
         {
             var subject = "WTS Auto Updater - Updating and reverting failed!";
             var message= $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}, failed to restore version {currentVersion}.{Environment.NewLine}{Environment.NewLine}Error when reverting:{Environment.NewLine}{revertException}{Environment.NewLine}{Environment.NewLine}Error when updating:{Environment.NewLine}{updateException}";
-            
-            logger.LogError(message);
+
+            logger.LogError(revertException, message);
             InformPeople(wts, subject, message);
         }
     }
@@ -399,7 +402,7 @@ public class UpdateService : IUpdateService
             slackChatService.SendChannelMessageAsync(message);
         }
     }
-    
+
     /// <summary>
     /// Send a email to the administrator of the WTS.
     /// </summary>
@@ -414,7 +417,7 @@ public class UpdateService : IUpdateService
             logger.LogWarning($"No email address provided for '{serviceName}'.");
             return;
         }
-        
+
         var scope = serviceProvider.CreateScope();
         var communicationsService = scope.ServiceProvider.GetRequiredService<ICommunicationsService>();
         var receivers = new List<CommunicationReceiverModel>();
@@ -423,11 +426,11 @@ public class UpdateService : IUpdateService
         {
             if (!String.IsNullOrWhiteSpace(emailAddress))
             {
-                receivers.Add(new CommunicationReceiverModel() {Address = emailAddress});
+                receivers.Add(new CommunicationReceiverModel {Address = emailAddress});
             }
         }
 
-        var communication = new SingleCommunicationModel()
+        var communication = new SingleCommunicationModel
         {
             Receivers =  receivers,
             Subject = $"{subject} ({Environment.MachineName})",
@@ -438,9 +441,9 @@ public class UpdateService : IUpdateService
         {
             communicationsService.SendEmailDirectlyAsync(communication);
         }
-        catch (Exception e)
+        catch (Exception exception)
         {
-            logger.LogError($"Failed to send email to '{receiver}' for '{serviceName}'.{Environment.NewLine}{Environment.NewLine}{e}");
+            logger.LogError(exception, $"Failed to send email to '{receiver}' for '{serviceName}'.");
             throw;
         }
     }

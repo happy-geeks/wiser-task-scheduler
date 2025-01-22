@@ -1,6 +1,4 @@
-﻿using System.Diagnostics;
-
-namespace AutoUpdater.Models;
+﻿namespace AutoUpdater.Models;
 
 public class VersionModel
 {

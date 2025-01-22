@@ -1,4 +1,3 @@
-﻿namespace WiserTaskScheduler.Modules.ServerMonitors.Interfaces
-{
-    internal interface IServerMonitorsService{}
-}
+﻿namespace WiserTaskScheduler.Modules.ServerMonitors.Interfaces;
+
+public interface IServerMonitorsService;

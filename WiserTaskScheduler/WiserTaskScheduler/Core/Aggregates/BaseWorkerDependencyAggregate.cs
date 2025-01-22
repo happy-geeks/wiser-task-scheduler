@@ -1,59 +1,44 @@
-using WiserTaskScheduler.Core.Interfaces;
-using WiserTaskScheduler.Core.Workers;
-using WiserTaskScheduler.Modules.RunSchemes.Interfaces;
-using WiserTaskScheduler.Modules.Wiser.Interfaces;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
+using WiserTaskScheduler.Core.Workers;
+using WiserTaskScheduler.Modules.RunSchemes.Interfaces;
+using WiserTaskScheduler.Modules.Wiser.Interfaces;
 
-namespace WiserTaskScheduler.Core.Aggregates
+namespace WiserTaskScheduler.Core.Aggregates;
+
+/// <summary>
+/// An aggregate for the dependencies of the <see cref="BaseWorker"/>.
+/// </summary>
+public class BaseWorkerDependencyAggregate(
+    ILogService logService,
+    ISlackChatService slackChatService,
+    ILogger<BaseWorker> logger,
+    IRunSchemesService runSchemesService,
+    IWiserDashboardService wiserDashboardService,
+    IErrorNotificationService errorNotificationService,
+    IOptions<WtsSettings> wtsSettings)
+    : IBaseWorkerDependencyAggregate, IScopedService, ISingletonService
 {
-    /// <summary>
-    /// An aggregate for the dependencies of the <see cref="BaseWorker"/>.
-    /// </summary>
-    public class BaseWorkerDependencyAggregate : IBaseWorkerDependencyAggregate, IScopedService, ISingletonService
-    {
-        /// <inheritdoc />
-        public ILogService LogService { get; }
-        
-        /// <inheritdoc />
-        public ISlackChatService SlackChatService { get; }
+    /// <inheritdoc />
+    public ILogService LogService { get; } = logService;
 
-        /// <inheritdoc />
-        public ILogger<BaseWorker> Logger { get; }
+    public ISlackChatService SlackChatService { get; } = slackChatService;
 
-        /// <inheritdoc />
-        public IRunSchemesService RunSchemesService { get; }
+    /// <inheritdoc />
+    public ILogger<BaseWorker> Logger { get; } = logger;
 
-        /// <inheritdoc />
-        public IWiserDashboardService WiserDashboardService { get; }
+    /// <inheritdoc />
+    public IRunSchemesService RunSchemesService { get; } = runSchemesService;
 
-        /// <inheritdoc />
-        public IErrorNotificationService ErrorNotificationService { get; }
-        
-        /// <inheritdoc />
-        public WtsSettings WtsSettings { get; }
+    /// <inheritdoc />
+    public IWiserDashboardService WiserDashboardService { get; } = wiserDashboardService;
 
-        /// <summary>
-        /// Creates a new instance of <see cref="BaseWorkerDependencyAggregate"/>.
-        /// </summary>
-        /// <param name="logService"></param>
-        /// <param name="slackChatService"></param>
-        /// <param name="logger"></param>
-        /// <param name="runSchemesService"></param>
-        /// <param name="wiserDashboardService"></param>
-        /// <param name="errorNotificationService"></param>
-        /// <param name="wtsSettings"></param>
-        public BaseWorkerDependencyAggregate(ILogService logService, ISlackChatService slackChatService, ILogger<BaseWorker> logger, IRunSchemesService runSchemesService, IWiserDashboardService wiserDashboardService, IErrorNotificationService errorNotificationService, IOptions<WtsSettings> wtsSettings)
-        {
-            LogService = logService;
-            SlackChatService = slackChatService;
-            Logger = logger;
-            RunSchemesService = runSchemesService;
-            WiserDashboardService = wiserDashboardService;
-            ErrorNotificationService = errorNotificationService;
-            WtsSettings = wtsSettings.Value;
-        }
-    }
+    /// <inheritdoc />
+    public IErrorNotificationService ErrorNotificationService { get; } = errorNotificationService;
+
+    /// <inheritdoc />
+    public WtsSettings WtsSettings { get; } = wtsSettings.Value;
 }

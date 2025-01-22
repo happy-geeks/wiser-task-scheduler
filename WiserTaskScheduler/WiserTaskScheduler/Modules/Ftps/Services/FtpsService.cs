@@ -3,6 +3,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Modules.Ftps.Interfaces;
+using GeeksCoreLibrary.Modules.Ftps.Models;
+using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Helpers;
 using WiserTaskScheduler.Core.Interfaces;
@@ -11,29 +16,11 @@ using WiserTaskScheduler.Modules.Body.Interfaces;
 using WiserTaskScheduler.Modules.Ftps.Enums;
 using WiserTaskScheduler.Modules.Ftps.Interfaces;
 using WiserTaskScheduler.Modules.Ftps.Models;
-using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
-using GeeksCoreLibrary.Modules.Ftps.Interfaces;
-using GeeksCoreLibrary.Modules.Ftps.Models;
-using Microsoft.Extensions.Logging;
-using Newtonsoft.Json.Linq;
 
 namespace WiserTaskScheduler.Modules.Ftps.Services;
 
-public class FtpsService : IFtpsService, IActionsService, IScopedService
+public class FtpsService(IBodyService bodyService, IFtpHandlerFactory ftpHandlerFactory, ILogService logService, ILogger<FtpsService> logger) : IFtpsService, IActionsService, IScopedService
 {
-    private readonly IBodyService bodyService;
-    private readonly IFtpHandlerFactory ftpHandlerFactory;
-    private readonly ILogService logService;
-    private readonly ILogger<FtpsService> logger;
-
-    public FtpsService(IBodyService bodyService, IFtpHandlerFactory ftpHandlerFactory, ILogService logService, ILogger<FtpsService> logger)
-    {
-        this.bodyService = bodyService;
-        this.ftpHandlerFactory = ftpHandlerFactory;
-        this.logService = logService;
-        this.logger = logger;
-    }
-    
     /// <inheritdoc />
     public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
     {
@@ -46,7 +33,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
         var ftpAction = (FtpModel) action;
         var ftpHandler = ftpHandlerFactory.GetFtpHandler(ftpAction.Type);
 
-        var ftpSettings = new FtpSettings()
+        var ftpSettings = new FtpSettings
         {
             User = ftpAction.User,
             Password = ftpAction.Password,
@@ -57,7 +44,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
             SshPrivateKeyPassphrase = ftpAction.SshPrivateKeyPassphrase,
             SshPrivateKeyPath = ftpAction.SshPrivateKeyPath
         };
-        
+
         await ftpHandler.OpenConnectionAsync(ftpSettings);
 
         try
@@ -89,7 +76,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
             await ftpHandler.CloseConnectionAsync();
         }
     }
-    
+
     /// <summary>
     /// Execute an FTP action based on the information.
     /// </summary>
@@ -110,7 +97,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
         {
             var keyParts = useResultSet.Split('.');
             var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(useResultSet, ReplacementHelper.EmptyRows, resultSets);
-            var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
+            var remainingKey = keyParts.Length > 1 ? useResultSet[(keyParts[0].Length + 1)..] : "";
 
             var fromPathTuple = ReplacementHelper.PrepareText(fromPath, usingResultSet, remainingKey, ftpAction.HashSettings);
             var toPathTuple = ReplacementHelper.PrepareText(toPath, usingResultSet, remainingKey, ftpAction.HashSettings);
@@ -119,7 +106,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
             toPath = ReplacementHelper.ReplaceText(toPathTuple.Item1, rows, toPathTuple.Item2, usingResultSet, ftpAction.HashSettings);
         }
 
-        var result = new JObject()
+        var result = new JObject
         {
             {"FromPath", fromPath},
             {"ToPath", toPath},
@@ -231,7 +218,7 @@ public class FtpsService : IFtpsService, IActionsService, IScopedService
                     await logService.LogError(logger, LogScopes.RunBody, ftpAction.LogSettings, $"Failed to download file(s) from '{fromPath}' to '{toPath} due to exception: {e}", configurationServiceName, ftpAction.TimeId, ftpAction.Order);
                     result.Add("Success", false);
                 }
-                
+
                 break;
             case FtpActionTypes.FilesInDirectory:
                 try

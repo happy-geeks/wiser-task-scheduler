@@ -1,3 +1,3 @@
 ﻿namespace WiserTaskScheduler.Modules.Ftps.Interfaces;
 
-public interface IFtpsService { }
+public interface IFtpsService;

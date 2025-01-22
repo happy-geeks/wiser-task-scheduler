@@ -5,218 +5,214 @@ using WiserTaskScheduler.Modules.RunSchemes.Enums;
 using WiserTaskScheduler.Modules.RunSchemes.Interfaces;
 using WiserTaskScheduler.Modules.RunSchemes.Models;
 
-namespace WiserTaskScheduler.Modules.RunSchemes.Services
+namespace WiserTaskScheduler.Modules.RunSchemes.Services;
+
+public class RunSchemesService : IRunSchemesService, IScopedService, ISingletonService
 {
-    public class RunSchemesService : IRunSchemesService, IScopedService, ISingletonService
+    /// <inheritdoc />
+    public TimeSpan GetTimeTillNextRun(RunSchemeModel runScheme)
     {
-        /// <inheritdoc />
-        public TimeSpan GetTimeTillNextRun(RunSchemeModel runScheme)
+        return GetDateTimeTillNextRun(runScheme) - DateTime.Now;
+    }
+
+    /// <inheritdoc />
+    public DateTime GetDateTimeTillNextRun(RunSchemeModel runScheme)
+    {
+        return runScheme.Type switch
         {
-            return GetDateTimeTillNextRun(runScheme) - DateTime.Now;
+            RunSchemeTypes.Continuous => CalculateNextDelayedDateTime(runScheme),
+            RunSchemeTypes.Daily => CalculateNextDailyDateTime(runScheme),
+            RunSchemeTypes.Weekly => CalculateNextWeeklyDateTime(runScheme),
+            RunSchemeTypes.Monthly => CalculateNextMonthlyDateTime(runScheme),
+            _ => throw new ArgumentOutOfRangeException(nameof(runScheme.Type), runScheme.Type.ToString(), null)
+        };
+    }
+
+    /// <summary>
+    /// Calculate the time till the next run based on the delay of the run scheme.
+    /// </summary>
+    /// <param name="runScheme">The run scheme to use.</param>
+    /// <returns></returns>
+    private DateTime CalculateNextDelayedDateTime(RunSchemeModel runScheme)
+    {
+        var nextDateTime = DateTime.Now.Date;
+        nextDateTime = HandleSkipDays(runScheme, nextDateTime);
+        nextDateTime = SetupStartStopTimes(runScheme, nextDateTime);
+
+        while (nextDateTime < DateTime.Now)
+        {
+            nextDateTime += runScheme.Delay;
         }
 
-        /// <inheritdoc />
-        public DateTime GetDateTimeTillNextRun(RunSchemeModel runScheme)
+        nextDateTime = ForceStartStopTimes(runScheme, nextDateTime);
+        nextDateTime = HandleSkipDays(runScheme, nextDateTime);
+
+        return nextDateTime;
+    }
+
+    /// <summary>
+    /// Calculate the time till the next date.
+    /// </summary>
+    /// <param name="runScheme"></param>
+    /// <returns></returns>
+    private DateTime CalculateNextDailyDateTime(RunSchemeModel runScheme)
+    {
+        var nextDateTime = DateTime.Now.Date;
+
+        nextDateTime = nextDateTime.AddHours(runScheme.Hour.Hours).AddMinutes(runScheme.Hour.Minutes).AddSeconds(runScheme.Hour.Seconds);
+
+        if (nextDateTime < DateTime.Now)
         {
-            switch (runScheme.Type)
-            {
-                case RunSchemeTypes.Continuous:
-                    return CalculateNextDelayedDateTime(runScheme);
-                case RunSchemeTypes.Daily:
-                    return CalculateNextDailyDateTime(runScheme);
-                case RunSchemeTypes.Weekly:
-                    return CalculateNextWeeklyDateTime(runScheme);
-                case RunSchemeTypes.Monthly:
-                    return CalculateNextMonthlyDateTime(runScheme);
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(runScheme.Type), runScheme.Type.ToString());
-            }
+            nextDateTime = nextDateTime.AddDays(1);
         }
 
-        /// <summary>
-        /// Calculate the time till the next run based on the delay of the run scheme.
-        /// </summary>
-        /// <param name="runScheme">The run scheme to use.</param>
-        /// <returns></returns>
-        private DateTime CalculateNextDelayedDateTime(RunSchemeModel runScheme)
+        nextDateTime = HandleSkipDays(runScheme, nextDateTime);
+
+        return nextDateTime;
+    }
+
+    /// <summary>
+    /// Calculate the time till the next date of the day of the week.
+    /// </summary>
+    /// <param name="runScheme"></param>
+    /// <returns></returns>
+    private DateTime CalculateNextWeeklyDateTime(RunSchemeModel runScheme)
+    {
+        var nextDateTime = new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, runScheme.Hour.Hours, runScheme.Hour.Minutes, runScheme.Hour.Seconds);
+        var dayOfWeek = (DayOfWeek)(runScheme.DayOfWeek % 7);
+
+        while (nextDateTime.DayOfWeek != dayOfWeek || nextDateTime < DateTime.Now)
         {
-            var nextDateTime = DateTime.Now.Date;
-            nextDateTime = HandleSkipDays(runScheme, nextDateTime);
-            nextDateTime = SetupStartStopTimes(runScheme, nextDateTime);
+            nextDateTime = nextDateTime.AddDays(1);
+        }
 
-            while (nextDateTime < DateTime.Now)
-                nextDateTime += runScheme.Delay;
+        return nextDateTime;
+    }
 
-            nextDateTime = ForceStartStopTimes(runScheme, nextDateTime);
-            nextDateTime = HandleSkipDays(runScheme, nextDateTime);
+    /// <summary>
+    /// Calculate the time till the next date of the day of the month.
+    /// </summary>
+    /// <param name="runScheme"></param>
+    /// <returns></returns>
+    private DateTime CalculateNextMonthlyDateTime(RunSchemeModel runScheme)
+    {
+        var nextDateTime = new DateTime(DateTime.Now.Year, DateTime.Now.Month, Math.Min(runScheme.DayOfMonth, DateTime.DaysInMonth(DateTime.Now.Year, DateTime.Now.Month)), runScheme.Hour.Hours, runScheme.Hour.Minutes, runScheme.Hour.Seconds);
 
+        if (nextDateTime >= DateTime.Now)
+        {
             return nextDateTime;
         }
 
-        /// <summary>
-        /// Calculate the time till the next date.
-        /// </summary>
-        /// <param name="runScheme"></param>
-        /// <returns></returns>
-        private DateTime CalculateNextDailyDateTime(RunSchemeModel runScheme)
+        nextDateTime = nextDateTime.AddMonths(1);
+        if (nextDateTime.Day < runScheme.DayOfMonth)
         {
-            var nextDateTime = DateTime.Now.Date;
+            nextDateTime = nextDateTime.AddDays(DateTime.DaysInMonth(nextDateTime.Year, nextDateTime.Month) - nextDateTime.Day);
+        }
 
-            nextDateTime = nextDateTime.AddHours(runScheme.Hour.Hours).AddMinutes(runScheme.Hour.Minutes).AddSeconds(runScheme.Hour.Seconds);
+        return nextDateTime;
+    }
 
-            if (nextDateTime < DateTime.Now)
-            {
-                nextDateTime = nextDateTime.AddDays(1);
-            }
+    /// <summary>
+    /// Modify the next date time to be on an allowed day.
+    /// </summary>
+    /// <param name="runScheme"></param>
+    /// <param name="nextDateTime"></param>
+    /// <returns></returns>
+    private DateTime HandleSkipDays(RunSchemeModel runScheme, DateTime nextDateTime)
+    {
+        var daysToSkip = GetDaysToSkip(runScheme);
 
-            nextDateTime = HandleSkipDays(runScheme, nextDateTime);
-
+        if (daysToSkip.Count <= 0)
+        {
             return nextDateTime;
         }
 
-        /// <summary>
-        /// Calculate the time till the next date of the day of the week.
-        /// </summary>
-        /// <param name="runScheme"></param>
-        /// <returns></returns>
-        private DateTime CalculateNextWeeklyDateTime(RunSchemeModel runScheme)
+        while(daysToSkip.Contains(nextDateTime.DayOfWeek) || runScheme.SkipWeekend && nextDateTime.DayOfWeek == DayOfWeek.Friday && nextDateTime.Hour >= 16)
         {
-            var nextDateTime = new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, runScheme.Hour.Hours, runScheme.Hour.Minutes, runScheme.Hour.Seconds);
-            var dayOfWeek = (DayOfWeek)(runScheme.DayOfWeek % 7);
+            nextDateTime = nextDateTime.AddDays(1);
+        }
 
-            while (nextDateTime.DayOfWeek != dayOfWeek || nextDateTime < DateTime.Now)
-            {
-                nextDateTime = nextDateTime.AddDays(1);
-            }
+        return nextDateTime;
+    }
 
+    /// <summary>
+    /// Modify the next date time to start at the starting time if provided.
+    /// </summary>
+    /// <param name="runScheme"></param>
+    /// <param name="nextDateTime"></param>
+    /// <returns></returns>
+    private DateTime SetupStartStopTimes(RunSchemeModel runScheme, DateTime nextDateTime)
+    {
+        if (runScheme.StartTime == runScheme.StopTime)
+        {
             return nextDateTime;
         }
 
-        /// <summary>
-        /// Calculate the time till the next date of the day of the month.
-        /// </summary>
-        /// <param name="runScheme"></param>
-        /// <returns></returns>
-        private DateTime CalculateNextMonthlyDateTime(RunSchemeModel runScheme)
+        nextDateTime = nextDateTime.AddSeconds(runScheme.StartTime.TotalSeconds);
+
+        // Start yesterday if the current start time has not been passed when the start time is later than the stop time.
+        if (runScheme.StartTime > runScheme.StopTime && DateTime.Now.TimeOfDay < runScheme.StartTime)
         {
-            var nextDateTime = new DateTime(DateTime.Now.Year, DateTime.Now.Month, Math.Min(runScheme.DayOfMonth, DateTime.DaysInMonth(DateTime.Now.Year, DateTime.Now.Month)), runScheme.Hour.Hours, runScheme.Hour.Minutes, runScheme.Hour.Seconds);
+            nextDateTime = nextDateTime.AddDays(-1);
+        }
 
-            if (nextDateTime >= DateTime.Now)
-            {
-                return nextDateTime;
-            }
+        return nextDateTime;
+    }
 
-            nextDateTime = nextDateTime.AddMonths(1);
-            if (nextDateTime.Day < runScheme.DayOfMonth)
-            {
-                nextDateTime = nextDateTime.AddDays(DateTime.DaysInMonth(nextDateTime.Year, nextDateTime.Month) - nextDateTime.Day);
-            }
-
+    /// <summary>
+    /// Modify the next date time after it has been calculated to be within bounds.
+    /// </summary>
+    /// <param name="runScheme"></param>
+    /// <param name="nextDateTime"></param>
+    /// <returns></returns>
+    private DateTime ForceStartStopTimes(RunSchemeModel runScheme, DateTime nextDateTime)
+    {
+        if (runScheme.StartTime == runScheme.StopTime)
+        {
             return nextDateTime;
         }
 
-        /// <summary>
-        /// Modify the next date time to be on an allowed day.
-        /// </summary>
-        /// <param name="runScheme"></param>
-        /// <param name="nextDateTime"></param>
-        /// <returns></returns>
-        private DateTime HandleSkipDays(RunSchemeModel runScheme, DateTime nextDateTime)
+        // Start tomorrow if the stop time has been passed and the start time is earlier than the stop time.
+        if (runScheme.StartTime < runScheme.StopTime && nextDateTime.TimeOfDay >= runScheme.StopTime)
         {
-            var daysToSkip = GetDaysToSkip(runScheme);
-
-            if (daysToSkip.Count <= 0)
-            {
-                return nextDateTime;
-            }
-
-            while(daysToSkip.Contains(nextDateTime.DayOfWeek) || runScheme.SkipWeekend && nextDateTime.DayOfWeek == DayOfWeek.Friday && nextDateTime.Hour >= 16)
-            {
-                nextDateTime = nextDateTime.AddDays(1);
-            }
-
-            return nextDateTime;
+            nextDateTime = nextDateTime.Date.AddDays(1).AddSeconds(runScheme.StartTime.TotalSeconds);
+        }
+        // Start at the start time if the current start time is between the stop and start time.
+        else if (runScheme.StartTime > runScheme.StopTime && nextDateTime.TimeOfDay < runScheme.StartTime && nextDateTime.TimeOfDay >= runScheme.StopTime)
+        {
+            nextDateTime = nextDateTime.Date.AddSeconds(runScheme.StartTime.TotalSeconds);
         }
 
-        /// <summary>
-        /// Modify the next date time to start at the starting time if provided.
-        /// </summary>
-        /// <param name="runScheme"></param>
-        /// <param name="nextDateTime"></param>
-        /// <returns></returns>
-        private DateTime SetupStartStopTimes(RunSchemeModel runScheme, DateTime nextDateTime)
+        return nextDateTime;
+    }
+
+    /// <summary>
+    /// Get a hash set of the days to skip, includes weekend if skipWeekend is true.
+    /// </summary>
+    /// <param name="runScheme"></param>
+    /// <returns></returns>
+    private HashSet<DayOfWeek> GetDaysToSkip(RunSchemeModel runScheme)
+    {
+        var daysToSkip = new HashSet<DayOfWeek>();
+
+        if (runScheme.SkipDays == null)
         {
-            if (runScheme.StartTime == runScheme.StopTime)
-            {
-                return nextDateTime;
-            }
-
-            nextDateTime = nextDateTime.AddSeconds(runScheme.StartTime.TotalSeconds);
-                
-            // Start yesterday if the current start time has not been passed when the start time is later than the stop time.
-            if (runScheme.StartTime > runScheme.StopTime && DateTime.Now.TimeOfDay < runScheme.StartTime)
-            {
-                nextDateTime = nextDateTime.AddDays(-1);
-            }
-
-            return nextDateTime;
-        }
-
-        /// <summary>
-        /// Modify the next date time after it has been calculated to be within bounds.
-        /// </summary>
-        /// <param name="runScheme"></param>
-        /// <param name="nextDateTime"></param>
-        /// <returns></returns>
-        private DateTime ForceStartStopTimes(RunSchemeModel runScheme, DateTime nextDateTime)
-        {
-            if (runScheme.StartTime == runScheme.StopTime)
-            {
-                return nextDateTime;
-            }
-
-            // Start tomorrow if the stop time has been passed and the start time is earlier than the stop time.
-            if (runScheme.StartTime < runScheme.StopTime && nextDateTime.TimeOfDay >= runScheme.StopTime)
-            {
-                nextDateTime = nextDateTime.Date.AddDays(1).AddSeconds(runScheme.StartTime.TotalSeconds);
-            }
-            // Start at the start time if the current start time is between the stop and start time.
-            else if (runScheme.StartTime > runScheme.StopTime && nextDateTime.TimeOfDay < runScheme.StartTime && nextDateTime.TimeOfDay >= runScheme.StopTime)
-            {
-                nextDateTime = nextDateTime.Date.AddSeconds(runScheme.StartTime.TotalSeconds);
-            }
-
-            return nextDateTime;
-        }
-
-        /// <summary>
-        /// Get a hash set of the days to skip, includes weekend if skipWeekend is true.
-        /// </summary>
-        /// <param name="runScheme"></param>
-        /// <returns></returns>
-        private HashSet<DayOfWeek> GetDaysToSkip(RunSchemeModel runScheme)
-        {
-            var daysToSkip = new HashSet<DayOfWeek>();
-
-            if (runScheme.SkipDays == null)
-            {
-                return daysToSkip;
-            }
-
-            foreach (var day in runScheme.SkipDays)
-            {
-                    daysToSkip.Add((DayOfWeek)(day % 7));
-            }
-
-            if (!runScheme.SkipWeekend)
-            {
-                return daysToSkip;
-            }
-
-            daysToSkip.Add(DayOfWeek.Saturday);
-            daysToSkip.Add(DayOfWeek.Sunday);
-
             return daysToSkip;
         }
+
+        foreach (var day in runScheme.SkipDays)
+        {
+            daysToSkip.Add((DayOfWeek)(day % 7));
+        }
+
+        if (!runScheme.SkipWeekend)
+        {
+            return daysToSkip;
+        }
+
+        daysToSkip.Add(DayOfWeek.Saturday);
+        daysToSkip.Add(DayOfWeek.Sunday);
+
+        return daysToSkip;
     }
 }

@@ -1,3 +1,3 @@
 ﻿namespace WiserTaskScheduler.Modules.CleanupItems.Interfaces;
 
-public interface ICleanupItemsService { }
+public interface ICleanupItemsService;

@@ -24,25 +24,15 @@ using WiserTaskScheduler.Modules.WiserImports.Models;
 
 namespace WiserTaskScheduler.Modules.WiserImports.Services;
 
-public class WiserImportsService : IWiserImportsService, IActionsService, IScopedService
+public class WiserImportsService(IServiceProvider serviceProvider, ILogService logService, ILogger<WiserImportsService> logger) : IWiserImportsService, IActionsService, IScopedService
 {
     private const string DefaultSubject = "Import[if({name}!)] with the name '{name}'[endif] from {date:DateTime(dddd\\, dd MMMM yyyy,en-US)} did [if({errorCount}=0)]finish successfully[else](partially) go wrong[endif]";
     private const string DefaultContent = "<p>The import started on {startDate:DateTime(HH\\:mm\\:ss)} and finished on {endDate:DateTime(HH\\:mm\\:ss)}. The import took a total of {hours} hour(s), {minutes} minute(s) and {seconds} second(s).</p>[if({errorCount}!0)] <br /><br />The following errors occurred during the import: {errors:Raw}[endif]";
 
-    private readonly IServiceProvider serviceProvider;
-    private readonly ILogService logService;
-    private readonly ILogger<WiserImportsService> logger;
     private readonly JsonSerializerSettings serializerSettings = new() {NullValueHandling = NullValueHandling.Ignore};
     private readonly FileExtensionContentTypeProvider fileExtensionContentTypeProvider = new();
 
     private string connectionString;
-
-    public WiserImportsService(IServiceProvider serviceProvider, ILogService logService, ILogger<WiserImportsService> logger)
-    {
-        this.serviceProvider = serviceProvider;
-        this.logService = logService;
-        this.logger = logger;
-    }
 
     /// <inheritdoc />
     public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
@@ -69,7 +59,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
         {
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, wiserImport.LogSettings, $"Finished the import for '{databaseName}' due to no imports to process.", configurationServiceName, wiserImport.TimeId, wiserImport.Order);
 
-            return new JObject()
+            return new JObject
             {
                 {"Database", databaseName},
                 {"Success", 0},
@@ -181,7 +171,7 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
             await taskAlertsService.SendMessageToUserAsync(importRow.UserId, importRow.Username, subject, wiserImport, configurationServiceName, replaceData, importRow.UserId, usernameForLogs);
         }
 
-        return new JObject()
+        return new JObject
         {
             {"Database", databaseName},
             {"Success", successfulImports},
@@ -221,20 +211,22 @@ public class WiserImportsService : IWiserImportsService, IActionsService, IScope
 
         // Ensure import times are based on server time and not database time to prevent difference in time zones to have imports be processed to early/late.
         databaseConnection.AddParameter("now", DateTime.Now);
-        return await databaseConnection.GetAsync($@"
-SELECT 
-    id,
-    name,
-    user_id,
-    customer_id,
-    added_by,
-    data,
-    sub_domain
-FROM {WiserTableNames.WiserImport}
-WHERE server_name = ?serverName
-AND started_on IS NULL
-AND start_on <= ?now
-ORDER BY added_on ASC");
+        return await databaseConnection.GetAsync($"""
+
+                                                  SELECT 
+                                                      id,
+                                                      name,
+                                                      user_id,
+                                                      customer_id,
+                                                      added_by,
+                                                      data,
+                                                      sub_domain
+                                                  FROM {WiserTableNames.WiserImport}
+                                                  WHERE server_name = ?serverName
+                                                  AND started_on IS NULL
+                                                  AND start_on <= ?now
+                                                  ORDER BY added_on ASC
+                                                  """);
     }
 
     /// <summary>
@@ -312,7 +304,7 @@ ORDER BY added_on ASC");
 
                         if (!listToUse[link.Type].ContainsKey(link.DestinationItemId))
                         {
-                            listToUse[link.Type].Add(link.DestinationItemId, new List<ulong>());
+                            listToUse[link.Type].Add(link.DestinationItemId, []);
                         }
 
                         listToUse[link.Type][link.DestinationItemId].Add(link.ItemId);
@@ -328,7 +320,7 @@ ORDER BY added_on ASC");
 
                         if (!sourceLinksToKeep[link.Type].ContainsKey(link.ItemId))
                         {
-                            sourceLinksToKeep[link.Type].Add(link.ItemId, new List<ulong>());
+                            sourceLinksToKeep[link.Type].Add(link.ItemId, []);
                         }
 
                         sourceLinksToKeep[link.Type][link.ItemId].Add(link.DestinationItemId);
@@ -468,7 +460,7 @@ ORDER BY added_on ASC");
                 try
                 {
                     var linkIds = new HashSet<ulong>();
-                    var destinationIds = new HashSet<ulong>() {parentItemId};
+                    var destinationIds = new HashSet<ulong> {parentItemId};
                     var sourceIds = new HashSet<ulong>();
                     var linkedItems = await wiserItemsService.GetLinkedItemDetailsAsync(parentItemId, linkType, userId: importRow.UserId, entityType: linkSettings.SourceEntityType);
 

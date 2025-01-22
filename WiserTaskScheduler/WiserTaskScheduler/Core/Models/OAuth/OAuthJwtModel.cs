@@ -1,5 +1,4 @@
-﻿using System;
-using System.Xml.Serialization;
+﻿using System.Xml.Serialization;
 
 namespace WiserTaskScheduler.Core.Models.OAuth;
 
@@ -44,5 +43,5 @@ public class OAuthJwtModel
     /// </summary>
     [XmlArray("Claims")]
     [XmlArrayItem(typeof(ClaimModel))]
-    public ClaimModel[] Claims { get; set; } = Array.Empty<ClaimModel>();
+    public ClaimModel[] Claims { get; set; } = [];
 }

@@ -22,7 +22,16 @@ using WiserTaskScheduler.Modules.Wiser.Interfaces;
 namespace WiserTaskScheduler.Modules.Wiser.Services;
 
 /// <inheritdoc cref="ITaskAlertsService" />
-public class TaskAlertsService : ITaskAlertsService, IScopedService
+public class TaskAlertsService(
+    IWiserItemsService wiserItemsService,
+    IWiserService wiserService,
+    IOptions<WtsSettings> wtsSettings,
+    ILogService logService,
+    ILogger<TaskAlertsService> logger,
+    IDatabaseConnection databaseConnection,
+    IStringReplacementsService stringReplacementsService,
+    ICommunicationsService gclCommunicationsService)
+    : ITaskAlertsService, IScopedService
 {
     private const string EntityType = "agendering";
     private const int ModuleId = 708;
@@ -33,38 +42,16 @@ public class TaskAlertsService : ITaskAlertsService, IScopedService
     private const string SenderNameField = "placed_by";
     private const string SenderIdField = "placed_by_id";
 
-    private readonly IWiserItemsService wiserItemsService;
-    private readonly IWiserService wiserService;
-    private readonly ILogService logService;
-    private readonly ILogger<TaskAlertsService> logger;
-    private readonly IDatabaseConnection databaseConnection;
-    private readonly IStringReplacementsService stringReplacementsService;
-    private readonly ICommunicationsService gclCommunicationsService;
-    private readonly WtsSettings wtsSettings;
-
-    public TaskAlertsService(IWiserItemsService wiserItemsService,
-                             IWiserService wiserService,
-                             IOptions<WtsSettings> wtsSettings,
-                             ILogService logService,
-                             ILogger<TaskAlertsService> logger,
-                             IDatabaseConnection databaseConnection,
-                             IStringReplacementsService stringReplacementsService,
-                             ICommunicationsService gclCommunicationsService)
-    {
-        this.wiserItemsService = wiserItemsService;
-        this.wiserService = wiserService;
-        this.logService = logService;
-        this.logger = logger;
-        this.databaseConnection = databaseConnection;
-        this.stringReplacementsService = stringReplacementsService;
-        this.gclCommunicationsService = gclCommunicationsService;
-        this.wtsSettings = wtsSettings.Value;
-    }
+    private readonly WtsSettings wtsSettings = wtsSettings.Value;
 
     /// <inheritdoc />
     public async Task<WiserItemModel> SendMessageToUserAsync(ulong receiverId, string receiverName, string message, ActionModel action, string configurationServiceName, IDictionary<string, object> replaceData, ulong senderId = 0, string senderName = "WTS")
     {
-        if (senderId == 0) senderId = receiverId;
+        if (senderId == 0)
+        {
+            senderId = receiverId;
+        }
+
         message = await stringReplacementsService.DoAllReplacementsAsync(stringReplacementsService.DoReplacements(message, replaceData));
 
         // Create and save the task alert in the database.
@@ -73,15 +60,15 @@ public class TaskAlertsService : ITaskAlertsService, IScopedService
             EntityType = EntityType,
             ModuleId = ModuleId,
             PublishedEnvironment = Environments.Live,
-            Details = new List<WiserItemDetailModel>
-            {
+            Details =
+            [
                 new() {Key = DateField, Value = DateTime.Now.ToString("yyyy-MM-dd")},
                 new() {Key = ContentField, Value = message},
                 new() {Key = UserIdField, Value = receiverId},
                 new() {Key = UsernameField, Value = receiverName},
                 new() {Key = SenderNameField, Value = senderName},
                 new() {Key = SenderIdField, Value = senderId}
-            }
+            ]
         };
 
         await wiserItemsService.SaveAsync(taskAlert, username: senderName, userId: senderId);

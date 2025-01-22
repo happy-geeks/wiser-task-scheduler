@@ -1,13 +1,12 @@
-﻿namespace WiserTaskScheduler.Core.Enums
+﻿namespace WiserTaskScheduler.Core.Enums;
+
+public enum OAuthGrantType
 {
-    public enum OAuthGrantType
-    {
-        NotSet,
-		AuthCode,
-		AuthCodeWithPKCE,
-		Implicit,
-		PasswordCredentials,
-		ClientCredentials,
-		RefreshToken
-    }
+	NotSet,
+	AuthCode,
+	AuthCodeWithPKCE,
+	Implicit,
+	PasswordCredentials,
+	ClientCredentials,
+	RefreshToken
 }

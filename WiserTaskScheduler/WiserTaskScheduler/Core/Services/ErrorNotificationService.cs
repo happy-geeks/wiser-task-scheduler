@@ -2,6 +2,8 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Models;
@@ -18,24 +20,10 @@ using WiserTaskScheduler.Core.Models;
 
 namespace WiserTaskScheduler.Core.Services;
 
-public class ErrorNotificationService : IErrorNotificationService, ISingletonService
+public class ErrorNotificationService(IServiceProvider serviceProvider, ILogService logService, ILogger<ErrorNotificationService> logger, IOptions<WtsSettings> wtsSettings) : IErrorNotificationService, ISingletonService
 {
-    private readonly IServiceProvider serviceProvider;
-    private readonly ILogService logService;
-    private readonly ILogger<ErrorNotificationService> logger;
-    private readonly WtsSettings wtsSettings;
-    
-    private ConcurrentDictionary<string, DateTime> sendNotifications;
+    private ConcurrentDictionary<string, DateTime> sendNotifications = new();
 
-    public ErrorNotificationService(IServiceProvider serviceProvider, ILogService logService, ILogger<ErrorNotificationService> logger, IOptions<WtsSettings> wtsSettings)
-    {
-        this.serviceProvider = serviceProvider;
-        this.logService = logService;
-        this.logger = logger;
-        this.wtsSettings = wtsSettings.Value;
-        sendNotifications = new ConcurrentDictionary<string, DateTime>();
-    }
-    
     /// <inheritdoc />
 #pragma warning disable CS1998
     public async Task NotifyOfErrorByEmailAsync(string emails, string subject, string content, LogSettings logSettings, LogScopes logScope, string configurationName)
@@ -46,12 +34,12 @@ public class ErrorNotificationService : IErrorNotificationService, ISingletonSer
         {
             return;
         }
-        
+
         // Generate SHA 256 based on configuration name, time id, order id and message
-        using var sha256 = System.Security.Cryptography.SHA256.Create();
-        var hash = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes($"{configurationName}{subject}{content}"));
+        using var sha256 = SHA256.Create();
+        var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes($"{configurationName}{subject}{content}"));
         var notificationHash = string.Join("", hash.Select(b => b.ToString("x2")));
-        
+
         // If the notification has been sent within the set interval time, don't send it again. 30 seconds are added as a buffer.
         if (sendNotifications.TryGetValue(notificationHash, out var lastSendDate) && lastSendDate > DateTime.Now.AddMinutes(-wtsSettings.ErrorNotificationsIntervalInMinutes).AddSeconds(30))
         {
@@ -69,16 +57,16 @@ public class ErrorNotificationService : IErrorNotificationService, ISingletonSer
     /// <inheritdoc />
     public async Task NotifyOfErrorByEmailAsync(List<string> emails, string subject, string content, LogSettings logSettings, LogScopes logScope, string configurationName)
     {
-        if (!emails.Any())
+        if (emails.Count == 0)
         {
             return;
         }
-        
-        var receivers = emails.Select(email => new CommunicationReceiverModel() {Address = email}).ToList();
+
+        var receivers = emails.Select(email => new CommunicationReceiverModel {Address = email}).ToList();
 
         using var scope = serviceProvider.CreateScope();
         await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
-        
+
         // If there are no settings provided to send an email abort.
         var gclSettings = scope.ServiceProvider.GetRequiredService<IOptions<GclSettings>>();
         if (gclSettings.Value.SmtpSettings == null)
@@ -86,12 +74,12 @@ public class ErrorNotificationService : IErrorNotificationService, ISingletonSer
             await logService.LogWarning(logger, logScope, logSettings, $"Service '{configurationName}' has email addresses declared to receive error notifications but not SMTP settings have been provided.", "Core");
             return;
         }
-        
+
         var communicationsService = scope.ServiceProvider.GetRequiredService<ICommunicationsService>();
 
         try
         {
-            var email = new SingleCommunicationModel()
+            var email = new SingleCommunicationModel
             {
                 Type = CommunicationTypes.Email,
                 Receivers = receivers,
@@ -105,9 +93,9 @@ public class ErrorNotificationService : IErrorNotificationService, ISingletonSer
 
             await communicationsService.SendEmailDirectlyAsync(email);
         }
-        catch (Exception e)
+        catch (Exception exception)
         {
-            await logService.LogError(logger, logScope, logSettings, $"Failed to send an error notification to emails '{string.Join(';', emails)}'.{Environment.NewLine}Exception: {e}", configurationName);
+            await logService.LogError(logger, logScope, logSettings, $"Failed to send an error notification to emails '{string.Join(';', emails)}'.{Environment.NewLine}Exception: {exception}", configurationName);
         }
     }
 }

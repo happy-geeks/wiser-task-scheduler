@@ -24,40 +24,20 @@ namespace WiserTaskScheduler.Modules.GenerateCommunications.Services;
 /// <summary>
 /// A service to generate communications.
 /// </summary>
-public class GenerateCommunicationsService : IGenerateCommunicationsService, IActionsService, IScopedService
+public class GenerateCommunicationsService(IServiceProvider serviceProvider, IBodyService bodyService, ILogger<GenerateCommunicationsService> logger, ILogService logService) : IGenerateCommunicationsService, IActionsService, IScopedService
 {
-    private readonly IServiceProvider serviceProvider;
-    private readonly IBodyService bodyService;
-    private readonly ILogger<GenerateCommunicationsService> logger;
-    private readonly ILogService logService;
-
     private string connectionString;
-    
-    /// <summary>
-    /// Creates a new instance of <see cref="GenerateCommunicationsService"/>.
-    /// </summary>
-    /// <param name="serviceProvider"></param>
-    /// <param name="bodyService"></param>
-    /// <param name="logger"></param>
-    /// <param name="logService"></param>
-    public GenerateCommunicationsService(IServiceProvider serviceProvider, IBodyService bodyService, ILogger<GenerateCommunicationsService> logger, ILogService logService)
-    {
-        this.serviceProvider = serviceProvider;
-        this.bodyService = bodyService;
-        this.logger = logger;
-        this.logService = logService;
-    }
-    
+
     /// <inheritdoc />
     public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
     {
         connectionString = configuration.ConnectionString;
-        
+
         if (String.IsNullOrWhiteSpace(connectionString))
         {
             throw new ArgumentException($"Configuration '{configuration.ServiceName}' has no connection string defined but contains active `GenerateCommunication` actions. Please provide a connection string.");
         }
-        
+
         return Task.CompletedTask;
     }
 
@@ -85,7 +65,7 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
             catch (Exception e)
             {
                 await logService.LogError(logger, LogScopes.RunStartAndStop, generateCommunication.LogSettings, $"Failed to generate single communication due to exception:{Environment.NewLine}{e}", configurationServiceName, generateCommunication.TimeId, generateCommunication.Order);
-                return new JObject()
+                return new JObject
                 {
                     {"Identifier", ""},
                     {"CommunicationId", -1},
@@ -94,9 +74,9 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
                 };
             }
         }
-        
+
         var jArray = new JArray();
-        
+
         var rows = ResultSetHelper.GetCorrectObject<JArray>(generateCommunication.UseResultSet, ReplacementHelper.EmptyRows, resultSets);
         for (var i = 0; i < rows.Count; i++)
         {
@@ -110,9 +90,9 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
                 await logService.LogError(logger, LogScopes.RunBody, generateCommunication.LogSettings, $"Failed to generate communication in loop due to exception:{Environment.NewLine}{e}", configurationServiceName, generateCommunication.TimeId, generateCommunication.Order);
             }
         }
-        
+
         await logService.LogInformation(logger, LogScopes.RunStartAndStop, generateCommunication.LogSettings, $"Generated {rows.Count} communications of type '{generateCommunication.CommunicationType}' in time id: {generateCommunication.TimeId}, order: {generateCommunication.Order}", configurationServiceName, generateCommunication.TimeId, generateCommunication.Order);
-        
+
         return new JObject
         {
             {"Results", jArray}
@@ -148,43 +128,43 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         {
             var keyParts = useResultSet.Split('.');
             var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(useResultSet, rows, resultSets);
-            var remainingKey = keyParts.Length > 1 ? useResultSet.Substring(keyParts[0].Length + 1) : "";
-            
+            var remainingKey = keyParts.Length > 1 ? useResultSet[(keyParts[0].Length + 1)..] : "";
+
             if (!String.IsNullOrWhiteSpace(identifier))
             {
                 identifier = HandleReplacements(identifier, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
             }
-            
+
             if (!String.IsNullOrWhiteSpace(receivers))
             {
                 receivers = HandleReplacements(receivers, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
             }
-            
+
             if (!String.IsNullOrWhiteSpace(receiverNames))
             {
                 receiverNames = HandleReplacements(receiverNames, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
             }
-            
+
             if (!String.IsNullOrWhiteSpace(additionalReceivers))
             {
                 additionalReceivers = HandleReplacements(additionalReceivers, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
             }
-            
+
             if (!String.IsNullOrWhiteSpace(sender))
             {
                 sender = HandleReplacements(sender, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
             }
-            
+
             if (!String.IsNullOrWhiteSpace(senderName))
             {
                 senderName = HandleReplacements(senderName, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
             }
-            
+
             if (!String.IsNullOrWhiteSpace(replyTo))
             {
                 replyTo = HandleReplacements(replyTo, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
             }
-            
+
             if (!String.IsNullOrWhiteSpace(subject))
             {
                 subject = HandleReplacements(subject, usingResultSet, remainingKey, rows, generateCommunication.HashSettings);
@@ -197,11 +177,11 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         }
 
         // Create the communication object to place in queue or send directly.
-        var singleCommunication = new SingleCommunicationModel()
+        var singleCommunication = new SingleCommunicationModel
         {
             Type = generateCommunication.CommunicationType
         };
-        
+
         // Add receivers if they are provided.
         if (!String.IsNullOrWhiteSpace(receivers))
         {
@@ -209,14 +189,14 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
             var receiverNamesParts = String.IsNullOrWhiteSpace(receiverNames) ? null : receiverNames.Split(';');
             var receiverParts = receivers.Split(';');
             var includeNames = receiverNamesParts != null && receiverNamesParts.Length == receiverParts.Length;
-            
+
             for (var i = 0; i < receiverParts.Length; i++)
             {
                 receiverList.Add(new CommunicationReceiverModel
                 {
                     Address = receiverParts[i]
                 });
-                
+
                 if (includeNames)
                 {
                     receiverList.Last().DisplayName = receiverNamesParts[i];
@@ -233,7 +213,7 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         {
             singleCommunication.Sender = sender;
         }
-        
+
         if (!String.IsNullOrWhiteSpace(senderName))
         {
             singleCommunication.SenderName = senderName;
@@ -243,12 +223,12 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         {
             singleCommunication.Bcc = additionalReceivers.Split(';').ToList();
         }
-        
+
         if (!String.IsNullOrWhiteSpace(replyTo))
         {
             singleCommunication.ReplyTo = replyTo;
         }
-        
+
         if (!String.IsNullOrWhiteSpace(subject))
         {
             singleCommunication.Subject = subject;
@@ -258,9 +238,9 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
         {
             singleCommunication.Content = body;
         }
-        
+
         var communicationId = 0;
-        
+
         // If the queue is skipped send it directly, otherwise add it to the queue.
         if (generateCommunication.SkipQueue)
         {
@@ -280,32 +260,25 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
                         await communicationsService.SendWhatsAppDirectlyAsync(singleCommunication, generateCommunication.SmsSettings);
                         break;
                     default:
-                        throw new ArgumentOutOfRangeException(nameof(generateCommunication.CommunicationType), generateCommunication.CommunicationType.ToString());
+                        throw new ArgumentOutOfRangeException(nameof(generateCommunication.CommunicationType), generateCommunication.CommunicationType.ToString(), null);
                 }
             }
-            catch (Exception e)
+            catch (Exception exception)
             {
-                await logService.LogError(logger, LogScopes.RunBody, generateCommunication.LogSettings, $"Failed to directly send communication '{generateCommunication.Identifier}' using '{generateCommunication.CommunicationType}' due to exception:{Environment.NewLine}{e}", configurationServiceName, generateCommunication.TimeId, generateCommunication.Order);
+                await logService.LogError(logger, LogScopes.RunBody, generateCommunication.LogSettings, $"Failed to directly send communication '{generateCommunication.Identifier}' using '{generateCommunication.CommunicationType}' due to exception:{Environment.NewLine}{exception}", configurationServiceName, generateCommunication.TimeId, generateCommunication.Order);
             }
         }
         else
         {
             try
             {
-                switch (generateCommunication.CommunicationType)
+                communicationId = generateCommunication.CommunicationType switch
                 {
-                    case CommunicationTypes.Email:
-                        communicationId = await communicationsService.SendEmailAsync(singleCommunication);
-                        break;
-                    case CommunicationTypes.Sms:
-                        communicationId = await communicationsService.SendSmsAsync(singleCommunication);
-                        break;
-                    case CommunicationTypes.WhatsApp:
-                        communicationId = await communicationsService.SendWhatsAppAsync(singleCommunication);
-                        break;
-                    default:
-                        throw new ArgumentOutOfRangeException(nameof(generateCommunication.CommunicationType), generateCommunication.CommunicationType.ToString());
-                }
+                    CommunicationTypes.Email => await communicationsService.SendEmailAsync(singleCommunication),
+                    CommunicationTypes.Sms => await communicationsService.SendSmsAsync(singleCommunication),
+                    CommunicationTypes.WhatsApp => await communicationsService.SendWhatsAppAsync(singleCommunication),
+                    _ => throw new ArgumentOutOfRangeException(nameof(generateCommunication.CommunicationType), generateCommunication.CommunicationType.ToString(), null)
+                };
             }
             catch (Exception e)
             {
@@ -313,7 +286,7 @@ public class GenerateCommunicationsService : IGenerateCommunicationsService, IAc
             }
         }
 
-        return new JObject()
+        return new JObject
         {
             {"Identifier", identifier},
             {"CommunicationId", communicationId},

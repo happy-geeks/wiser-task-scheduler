@@ -1,3 +1,3 @@
 ﻿namespace WiserTaskScheduler.Modules.Communications.Interfaces;
 
-public interface ICommunicationsService { }
+public interface ICommunicationsService;
