@@ -76,7 +76,7 @@ namespace WiserTaskScheduler
             services.AddHostedService<MainWorker>();
             services.AddHostedService<CleanupWorker>();
             services.AddHostedService<UpdateParentsWorker>();
-            
+
             // Only add the auto project deploy worker if it is enabled.
             if (hostContext.Configuration.GetSection("Wts").GetSection("AutoProjectDeploy").GetValue<bool>("IsEnabled"))
             {
@@ -104,7 +104,7 @@ namespace WiserTaskScheduler
             // Configure automatic scanning of classes for dependency injection.
             services.Scan(scan => scan
                 // We start out with all types in the current assembly.
-                .FromCallingAssembly()
+                .FromEntryAssembly()
                 // AddClasses starts out with all public, non-abstract types in this assembly.
                 // These types are then filtered by the delegate passed to the method.
                 // In this case, we filter out only the classes that are assignable to ITransientService.

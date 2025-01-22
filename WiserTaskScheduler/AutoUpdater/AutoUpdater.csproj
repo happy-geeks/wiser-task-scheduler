@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Worker">
 
     <PropertyGroup>
-        <TargetFramework>net7.0</TargetFramework>
+        <TargetFramework>net9.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <UserSecretsId>dotnet-AutoUpdater-E9117816-DA98-4D43-9E8B-FDE0D48F866C</UserSecretsId>
 		<OutputType>exe</OutputType>
@@ -15,10 +15,10 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="GeeksCoreLibrary" Version="4.4.0" />
-        <PackageReference Include="Microsoft.Extensions.Hosting" Version="7.0.1" />
-        <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="7.0.1" />
-        <PackageReference Include="Serilog.AspNetCore" Version="7.0.0" />
-        <PackageReference Include="SlackNet.AspNetCore" Version="0.13.2" />
+        <PackageReference Include="GeeksCoreLibrary" Version="5.0.2501.3" />
+        <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.1" />
+        <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.1" />
+        <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+        <PackageReference Include="SlackNet.AspNetCore" Version="0.15.4" />
     </ItemGroup>
 </Project>

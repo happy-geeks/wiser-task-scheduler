@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Worker">
 
   <PropertyGroup>
-    <TargetFramework>net7.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <UserSecretsId>dotnet-WiserTaskScheduler-48EC2706-BD2A-44EC-8019-D81A72ED7B23</UserSecretsId>
 	<OutputType>exe</OutputType>
     <PublishSingleFile>false</PublishSingleFile>
@@ -14,15 +14,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="GeeksCoreLibrary" Version="4.4.0" />
-    <PackageReference Include="jose-jwt" Version="5.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="7.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="7.0.1" />
-    <PackageReference Include="Serilog.AspNetCore" Version="7.0.0" />
+    <PackageReference Include="GeeksCoreLibrary" Version="5.0.2501.3" />
+    <PackageReference Include="jose-jwt" Version="5.1.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.1" />
+    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
     <PackageReference Include="Serilog.Sinks.MySQL" Version="5.0.0" />
-	<PackageReference Include="System.Diagnostics.PerformanceCounter" Version="7.0.0" />
-    <PackageReference Include="SlackNet.AspNetCore" Version="0.13.2" />
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.7.0" />
+	<PackageReference Include="System.Diagnostics.PerformanceCounter" Version="9.0.1" />
+    <PackageReference Include="SlackNet.AspNetCore" Version="0.15.4" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
   </ItemGroup>
 
   <ItemGroup>
