@@ -15,7 +15,7 @@
 
     <ItemGroup>
         <PackageReference Include="GeeksCoreLibrary" Version="5.0.2501.3"/>
-        <PackageReference Include="jose-jwt" Version="5.1.0"/>
+        <PackageReference Include="jose-jwt" Version="5.1.1"/>
         <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.1"/>
         <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.1"/>
         <PackageReference Include="Serilog.AspNetCore" Version="9.0.0"/>
