@@ -46,13 +46,27 @@ public static class ResultSetHelper
 
                 var arrayKey = key[..key.IndexOf('[')];
                 var indexKey = GetIndex(keyParts, rows);
-                return usingResultSet[arrayKey][indexKey] as T;
+
+                if (usingResultSet[arrayKey] is not JArray tempArray || (indexKey < 0 && Math.Abs(indexKey) > tempArray.Count) || indexKey >= tempArray.Count)
+                {
+                    var fullKey = $"{processedKey}.{key}";
+                    fullKey = fullKey.StartsWith('.') ? fullKey[1..] : fullKey;
+                    throw new ResultSetException($"Failed to get array from result set. The key being processed is '{fullKey}' at part '{currentPart}'. Already processed '{processedKey}'. If the key is correct but the value is not always present it is recommended to use a default value.");
+                }
+
+                if (indexKey >= 0)
+                {
+                    return tempArray[indexKey] as T;
+                }
+
+                // If the index is negative, return the value at the index from the end of the array.
+                return tempArray[^Math.Abs(indexKey)] as T;
             }
 
-            var remainingKey = key[(key.IndexOf(".") + 1)..];
+            var remainingKey = key[(key.IndexOf('.') + 1)..];
 
             // Object to step into is not an array.
-            if (!currentPart.EndsWith("]"))
+            if (!currentPart.EndsWith(']'))
             {
                 switch (usingResultSet[keyParts[0]])
                 {
@@ -71,14 +85,24 @@ public static class ResultSetHelper
                 firstPartKey = firstPartKey[..bracketIndexOf];
             }
 
-            if (usingResultSet[firstPartKey] is not JArray resultSetArray || index < 0 || index >= resultSetArray.Count)
+            if (usingResultSet[firstPartKey] is not JArray resultSetArray || (index < 0 && Math.Abs(index) > resultSetArray.Count) || index >= resultSetArray.Count)
             {
                 var fullKey = $"{processedKey}.{key}";
                 fullKey = fullKey.StartsWith('.') ? fullKey[1..] : fullKey;
                 throw new ResultSetException($"Failed to get array from result set. The key being processed is '{fullKey}' at part '{currentPart}'. Already processed '{processedKey}'. If the key is correct but the value is not always present it is recommended to use a default value.");
             }
 
-            var resultObject = resultSetArray[index] as JObject;
+            JObject resultObject;
+
+            if (index >= 0)
+            {
+                resultObject = resultSetArray[index] as JObject;
+            }
+            else
+            {
+                // If the index is negative, return the value at the index from the end of the array.
+                resultObject = resultSetArray[^Math.Abs(index)] as JObject;
+            }
 
             return GetCorrectObject<T>(remainingKey, rows, resultObject, $"{processedKey}.{currentPart}");
         }
