@@ -16,8 +16,8 @@
     <ItemGroup>
         <PackageReference Include="GeeksCoreLibrary" Version="5.0.2501.3"/>
         <PackageReference Include="jose-jwt" Version="5.1.0"/>
-        <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.1"/>
-        <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.1"/>
+        <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.2"/>
+        <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.2"/>
         <PackageReference Include="Serilog.AspNetCore" Version="9.0.0"/>
         <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="9.0.1"/>
         <PackageReference Include="SlackNet.AspNetCore" Version="0.15.4"/>
