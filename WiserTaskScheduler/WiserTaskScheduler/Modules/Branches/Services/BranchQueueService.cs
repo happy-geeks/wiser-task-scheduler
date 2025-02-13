@@ -1346,7 +1346,10 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     }
                 }
 
-                var objectCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == idForComparison && String.Equals(i.TableName, tableName, StringComparison.OrdinalIgnoreCase));
+                // Treat details as items during the check for deleted items.
+                var tableNameForDeletedItemCheck = tableName.Replace(WiserTableNames.WiserItemDetail, WiserTableNames.WiserItem);
+
+                var objectCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == idForComparison && String.Equals(i.TableName, tableNameForDeletedItemCheck, StringComparison.OrdinalIgnoreCase));
                 if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
                 {
                     // This item was created and then deleted in the branch, so we don't need to do anything.
