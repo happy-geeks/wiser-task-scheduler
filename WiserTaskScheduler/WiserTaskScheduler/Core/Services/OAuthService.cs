@@ -96,83 +96,78 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
         {
             if (!String.IsNullOrWhiteSpace(oAuthApi.AccessToken) && oAuthApi.ExpireTime > DateTime.UtcNow)
             {
+                // We have a token and it's still valid, so just use that one.
                 result.State = OAuthState.UsingAlreadyExistingToken;
             }
             else
             {
+                string jwtToken = null;
                 var formData = new List<KeyValuePair<string, string>>();
 
-                // Setup correct authentication.
-                if (String.IsNullOrWhiteSpace(oAuthApi.AccessToken) || String.IsNullOrWhiteSpace(oAuthApi.RefreshToken))
+                // We either have no token yet, or it's expired, so we need to get a new one.
+                result.State = OAuthState.AuthenticationFailed;
+                if (oAuthApi.OAuthJwt == null)
                 {
-                    result.State = OAuthState.AuthenticationFailed;
-                    if (oAuthApi.OAuthJwt == null)
+                    // If we have a refresh token, then we can always use that to get a new access token.
+                    if (!String.IsNullOrWhiteSpace(oAuthApi.RefreshToken))
                     {
-                        switch (oAuthApi.GrantType)
-                        {
-                            case OAuthGrantType.RefreshToken:
-                                formData.Add(new KeyValuePair<string, string>("refresh_token", oAuthApi.RefreshToken));
-                                formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
-                                break;
+                        oAuthApi.GrantType = OAuthGrantType.RefreshToken;
+                    }
 
-                            case OAuthGrantType.AuthCode:
-                                result = await SetupAuthorizationCodeAuthenticationAsync(result, oAuthApi, communicationsService, formData);
-                                if (result.State == OAuthState.WaitingForManualAuthentication)
-                                {
-                                    // If we're waiting for manual authentication, then we should stop the process here, because we can't continue without the authorization code.
-                                    return result;
-                                }
+                    switch (oAuthApi.GrantType)
+                    {
+                        case OAuthGrantType.RefreshToken:
+                            await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.", LogName);
 
-                                break;
+                            result.State = OAuthState.RefreshTokenFailed;
+                            formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
+                            formData.Add(new KeyValuePair<string, string>("refresh_token", oAuthApi.RefreshToken));
+                            break;
 
-                            case OAuthGrantType.AuthCodeWithPKCE:
-                                throw new NotImplementedException("OAuthGrantType.AuthCodeWithPKCE is not supported yet");
+                        case OAuthGrantType.AuthCode:
+                            result = await SetupAuthorizationCodeAuthenticationAsync(result, oAuthApi, communicationsService, formData);
+                            if (result.State == OAuthState.WaitingForManualAuthentication)
+                            {
+                                // If we're waiting for manual authentication, then we should stop the process here, because we can't continue without the authorization code.
+                                return result;
+                            }
 
-                            case OAuthGrantType.Implicit:
-                                throw new NotImplementedException("OAuthGrantType.Implicit is not supported yet");
+                            break;
 
-                            case OAuthGrantType.PasswordCredentials:
-                                await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using username and password.", LogName);
+                        case OAuthGrantType.AuthCodeWithPKCE:
+                            throw new NotImplementedException("OAuthGrantType.AuthCodeWithPKCE is not supported yet");
 
-                                formData.Add(new KeyValuePair<string, string>("grant_type", "password"));
-                                formData.Add(new KeyValuePair<string, string>("username", oAuthApi.Username));
-                                formData.Add(new KeyValuePair<string, string>("password", oAuthApi.Password));
+                        case OAuthGrantType.Implicit:
+                            throw new NotImplementedException("OAuthGrantType.Implicit is not supported yet");
 
-                                break;
+                        case OAuthGrantType.PasswordCredentials:
+                            await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using username and password.", LogName);
 
-                            case OAuthGrantType.ClientCredentials:
-                                await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using client credentials.", LogName);
+                            formData.Add(new KeyValuePair<string, string>("grant_type", "password"));
+                            formData.Add(new KeyValuePair<string, string>("username", oAuthApi.Username));
+                            formData.Add(new KeyValuePair<string, string>("password", oAuthApi.Password));
 
-                                formData.Add(new KeyValuePair<string, string>("grant_type", "client_credentials"));
+                            break;
 
-                                if (oAuthApi.SendClientCredentialsInBody)
-                                {
-                                    formData.Add(new KeyValuePair<string, string>("client_id", oAuthApi.ClientId));
-                                    formData.Add(new KeyValuePair<string, string>("client_secret", oAuthApi.ClientSecret));
-                                }
+                        case OAuthGrantType.ClientCredentials:
+                            await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using client credentials.", LogName);
 
-                                break;
-                            case OAuthGrantType.NotSet:
-                                break;
-                            default:
-                                throw new ArgumentOutOfRangeException(nameof(oAuthApi.GrantType), oAuthApi.GrantType, null);
-                        }
+                            formData.Add(new KeyValuePair<string, string>("grant_type", "client_credentials"));
+
+                            if (oAuthApi.SendClientCredentialsInBody)
+                            {
+                                formData.Add(new KeyValuePair<string, string>("client_id", oAuthApi.ClientId));
+                                formData.Add(new KeyValuePair<string, string>("client_secret", oAuthApi.ClientSecret));
+                            }
+
+                            break;
+                        case OAuthGrantType.NotSet:
+                            break;
+                        default:
+                            throw new ArgumentOutOfRangeException(nameof(oAuthApi.GrantType), oAuthApi.GrantType, null);
                     }
                 }
                 else
-                {
-                    await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.", LogName);
-
-                    result.State = OAuthState.RefreshTokenFailed;
-                    if (oAuthApi.OAuthJwt == null)
-                    {
-                        formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
-                        formData.Add(new KeyValuePair<string, string>("refresh_token", oAuthApi.RefreshToken));
-                    }
-                }
-
-                string jwtToken = null;
-                if (oAuthApi.OAuthJwt != null)
                 {
                     var claims = new Dictionary<string, object>
                     {
@@ -244,7 +239,7 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
 
                 request.Headers.Add("Accept", "application/json");
 
-                if (!oAuthApi.SendClientCredentialsInBody && oAuthApi.GrantType == OAuthGrantType.ClientCredentials)
+                if (!oAuthApi.SendClientCredentialsInBody && !String.IsNullOrWhiteSpace(oAuthApi.ClientId) && !String.IsNullOrWhiteSpace(oAuthApi.ClientSecret) && oAuthApi.GrantType is OAuthGrantType.ClientCredentials or OAuthGrantType.RefreshToken)
                 {
                     var authString = $"{oAuthApi.ClientId}:{oAuthApi.ClientSecret}";
                     var plainTextBytes = Encoding.UTF8.GetBytes(authString);
@@ -269,16 +264,17 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
                 {
                     oAuthApi.AccessToken = (string) body["access_token"];
                     oAuthApi.TokenType = (string) body["token_type"];
-                    oAuthApi.RefreshToken = (string) body["refresh_token"];
 
-                    if (body["expires_in"]?.Type == JTokenType.Integer)
+                    // Not all APIs return a new refresh token after using it, so only update it if it's present.
+                    var newRefreshToken = (string) body["refresh_token"];
+                    if (!String.IsNullOrWhiteSpace(newRefreshToken))
                     {
-                        oAuthApi.ExpireTime = DateTime.UtcNow.AddSeconds((int) body["expires_in"]);
+                        oAuthApi.RefreshToken = newRefreshToken;
                     }
-                    else
-                    {
-                        oAuthApi.ExpireTime = DateTime.UtcNow.AddSeconds(Convert.ToInt32((string) body["expires_in"]));
-                    }
+
+                    oAuthApi.ExpireTime = body["expires_in"]?.Type == JTokenType.Integer
+                        ? DateTime.UtcNow.AddSeconds((int) body["expires_in"])
+                        : DateTime.UtcNow.AddSeconds(Convert.ToInt32((string) body["expires_in"]));
 
                     oAuthApi.ExpireTime -= oAuthApi.ExpireTimeOffset;
 
@@ -337,7 +333,6 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
 
         oAuthApi.AccessToken = null;
         oAuthApi.TokenType = null;
-        oAuthApi.RefreshToken = null;
         oAuthApi.ExpireTime = DateTime.MinValue;
 
         await SaveToDatabaseAsync(oAuthApi);
