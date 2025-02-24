@@ -1248,7 +1248,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
             // This is to map one item ID to another. This is needed because when someone creates a new item in the other environment, that ID could already exist in the production environment.
             // So we need to map the ID that is saved in wiser_history to the new ID of the item that we create in the production environment.
-            var idMapping = new Dictionary<string, Dictionary<ulong, ulong>>();
+            var idMapping = new Dictionary<string, Dictionary<ulong, ulong>>(StringComparer.OrdinalIgnoreCase);
             await using (var environmentCommand = branchConnection.CreateCommand())
             {
                 environmentCommand.CommandText = $"SELECT table_name, our_id, production_id FROM `{WiserTableNames.WiserIdMappings}`";
@@ -1268,6 +1268,36 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     }
 
                     idMapping[tableName][ourId] = productionId;
+                }
+
+                // Get all IDs from the mappings that don't exist anymore in production, so that we can remove them.
+                var idMappingsToRemove = new Dictionary<string, List<ulong>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (table, tableIdMappings) in idMapping)
+                {
+                    // Get the list of all values from the current table, which are the IDs from production.
+                    var productionIds = tableIdMappings.Values.Distinct().ToList();
+
+                    // Find all IDs that don't exist anymore in production.
+                    var query = $"SELECT id FROM {table} WHERE id IN ({String.Join(", ", productionIds)})";
+                    await using var productionCommand = productionConnection.CreateCommand();
+                    productionCommand.CommandText = query;
+                    using var productionAdapter = new MySqlDataAdapter(productionCommand);
+                    var productionIdsDatatable = new DataTable();
+                    productionAdapter.Fill(productionIdsDatatable);
+
+                    // Get the list of IDs that do exist in the production database.
+                    var productionIdsInTable = productionIdsDatatable.Rows.Cast<DataRow>().Select(x => Convert.ToUInt64(x["id"])).ToList();
+
+                    // Compare both lists, to find out which IDs to remove from the mappings.
+                    var valuesToRemove = productionIds.Where(id => !productionIdsInTable.Contains(id)).ToList();
+                    var keysToRemove = tableIdMappings.Where(mapping => valuesToRemove.Contains(mapping.Value)).Select(mapping => mapping.Key).ToList();
+                    idMappingsToRemove.Add(table, keysToRemove);
+                }
+
+                // Remove all ID mappings that don't exist anymore in production.
+                foreach (var (table, ids) in idMappingsToRemove)
+                {
+                    await RemoveIdMappingsAsync(idMapping, table, ids, branchConnection);
                 }
             }
 
@@ -1308,6 +1338,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 var languageCode = dataRow.Field<string>("language_code") ?? "";
                 var groupName = dataRow.Field<string>("groupname") ?? "";
                 var targetId = dataTable.Columns.Contains("target_id") ? dataRow.Field<ulong>("target_id") : 0;
+                ulong? mappedTargetId = null;
                 var originalTargetId = targetId;
                 ulong? linkId = null;
                 ulong? originalLinkId;
@@ -1672,7 +1703,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     linkId = GetMappedId(tableName, idMapping, linkId);
                     fileId = GetMappedId(tableName, idMapping, fileId);
                     objectId = GetMappedId(tableName, idMapping, objectId) ?? 0;
-                    targetId = GetMappedId(itemTableName, idMapping, targetId).Value;
+                    mappedTargetId = GetMappedId(tableName, idMapping, targetId, true);
+                    targetId = mappedTargetId ?? targetId;
                     var linkSourceItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalItemId.ToString() && String.Equals(i.TableName, $"{linkData?.SourceTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
                     var linkDestinationItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalDestinationItemId.ToString() && String.Equals(i.TableName, $"{linkData?.DestinationTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
 
@@ -1825,16 +1857,26 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 sqlParameters["value"] = useLongValue ? "" : newValue;
                                 sqlParameters["longValue"] = useLongValue ? newValue : "";
 
-                                // Check if this item detail already exists in production.
-                                productionCommand.CommandText = $"""
-                                                                 SELECT id
-                                                                 FROM `{tableName}`
-                                                                 WHERE item_id = ?itemId
-                                                                 AND `key` = ?key
-                                                                 AND language_code = ?languageCode
-                                                                 AND groupname = ?groupName
-                                                                 """;
-                                var existingId = Convert.ToUInt64(await productionCommand.ExecuteScalarAsync() ?? 0);
+                                ulong existingId;
+                                if (mappedTargetId is > 0)
+                                {
+                                    // If we already found an ID in the mappings, just use that one.
+                                    existingId = mappedTargetId.Value;
+                                }
+                                else
+                                {
+                                    // Check if this item detail already exists in production.
+                                    productionCommand.CommandText = $"""
+                                                                     SELECT id
+                                                                     FROM `{tableName}`
+                                                                     WHERE item_id = ?itemId
+                                                                     AND `key` = ?key
+                                                                     AND language_code = ?languageCode
+                                                                     AND groupname = ?groupName
+                                                                     """;
+                                    existingId = Convert.ToUInt64(await productionCommand.ExecuteScalarAsync() ?? 0);
+                                }
+
                                 if (existingId > 0)
                                 {
                                     sqlParameters["existingId"] = existingId;
@@ -2988,24 +3030,21 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     /// <param name="tableName">The table that the ID belongs to.</param>
     /// <param name="idMapping">The dictionary that contains all the ID mappings.</param>
     /// <param name="id">The ID to get the mapped value of.</param>
+    /// <param name="returnNullIfNotFound">Optional: Whether to return <c>null</c> if no mapping was found. When <c>false</c>, we'll return the same value as the input. Default value is <c>false</c>.</param>
     /// <returns>The ID of the same item in the production environment.</returns>
-    private static ulong? GetMappedId(string tableName, IReadOnlyDictionary<string, Dictionary<ulong, ulong>> idMapping, ulong? id)
+    private static ulong? GetMappedId(string tableName, Dictionary<string, Dictionary<ulong, ulong>> idMapping, ulong? id, bool returnNullIfNotFound = false)
     {
         if (id is null or 0)
         {
             return id;
         }
 
-        if (tableName.EndsWith(WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase) && idMapping.ContainsKey(tableName) && idMapping[tableName].ContainsKey(id.Value))
+        if (!idMapping.TryGetValue(tableName, out var tableIdMapping))
         {
-            id = idMapping[tableName][id.Value];
-        }
-        else
-        {
-            id = idMapping.FirstOrDefault(x => x.Value.ContainsKey(id.Value)).Value?[id.Value] ?? id;
+            return id;
         }
 
-        return id;
+        return !tableIdMapping.TryGetValue(id.Value, out var mappedId) ? id : mappedId;
     }
 
     /// <summary>
@@ -3096,24 +3135,11 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         await using var productionCommand = productionConnection.CreateCommand();
         await using var environmentCommand = environmentConnection.CreateCommand();
 
-        productionCommand.CommandText = $"SELECT MAX(id) AS maxId FROM `{tableName}`";
-        environmentCommand.CommandText = $"SELECT MAX(id) AS maxId FROM `{tableName}`";
+        productionCommand.CommandText = $"SELECT IFNULL(MAX(id), 0) AS maxId FROM `{tableName}`";
+        environmentCommand.CommandText = $"SELECT IFNULL(MAX(id), 0) AS maxId FROM `{tableName}`";
 
-        var maxProductionId = 0UL;
-        var maxEnvironmentId = 0UL;
-
-        await using var productionReader = await productionCommand.ExecuteReaderAsync();
-        if (await productionReader.ReadAsync())
-        {
-            maxProductionId = Convert.ToUInt64(productionReader.GetValue(0));
-        }
-
-        await using var environmentReader = await environmentCommand.ExecuteReaderAsync();
-        if (await environmentReader.ReadAsync())
-        {
-            maxEnvironmentId = Convert.ToUInt64(environmentReader.GetValue(0));
-        }
-
+        var maxProductionId = Convert.ToUInt64(await productionCommand.ExecuteScalarAsync() ?? 0);
+        var maxEnvironmentId = Convert.ToUInt64(await environmentCommand.ExecuteScalarAsync() ?? 0);
 
         return Math.Max(maxProductionId, maxEnvironmentId) + 1;
     }
@@ -3129,12 +3155,13 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     /// <param name="productionConnection"></param>
     private async Task AddIdMappingAsync(IDictionary<string, Dictionary<ulong, ulong>> idMappings, string tableName, ulong originalItemId, ulong newItemId, MySqlConnection environmentConnection, MySqlConnection productionConnection)
     {
-        if (!idMappings.ContainsKey(tableName))
+        if (!idMappings.TryGetValue(tableName, out var tableIdMappings))
         {
-            idMappings.Add(tableName, new Dictionary<ulong, ulong>());
+            tableIdMappings = new Dictionary<ulong, ulong>();
+            idMappings.Add(tableName, tableIdMappings);
         }
 
-        if (idMappings[tableName].TryGetValue(originalItemId, out var otherId))
+        if (tableIdMappings.TryGetValue(originalItemId, out var otherId))
         {
             if (otherId == newItemId)
             {
@@ -3165,7 +3192,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             }
         }
 
-        idMappings[tableName].Add(originalItemId, newItemId);
+        tableIdMappings.Add(originalItemId, newItemId);
         await using var environmentCommand = environmentConnection.CreateCommand();
         environmentCommand.CommandText = $"""
                                           INSERT INTO `{WiserTableNames.WiserIdMappings}` 
@@ -3186,28 +3213,46 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     /// <param name="tableName">The table that the ID belongs to.</param>
     /// <param name="originalItemId">The ID of the item in the selected environment.</param>
     /// <param name="environmentConnection">The database connection to the selected environment.</param>
-    private async Task RemoveIdMappingAsync(IDictionary<string, Dictionary<ulong, ulong>> idMappings, string tableName, ulong originalItemId, MySqlConnection environmentConnection)
+    private static async Task RemoveIdMappingAsync(IDictionary<string, Dictionary<ulong, ulong>> idMappings, string tableName, ulong originalItemId, MySqlConnection environmentConnection)
     {
-        if (!idMappings.ContainsKey(tableName))
+        await RemoveIdMappingsAsync(idMappings, tableName, [originalItemId], environmentConnection);
+    }
+
+    /// <summary>
+    /// Remove multiple ID mappings. If an item that was already mapped was removed, it should also be removed from the mapping table.
+    /// </summary>
+    /// <param name="idMappings">The dictionary that contains the in-memory mappings.</param>
+    /// <param name="tableName">The table that the ID belongs to.</param>
+    /// <param name="originalItemIds">The IDs of the items in the selected environment.</param>
+    /// <param name="environmentConnection">The database connection to the selected environment.</param>
+    private static async Task RemoveIdMappingsAsync(IDictionary<string, Dictionary<ulong, ulong>> idMappings, string tableName, List<ulong> originalItemIds, MySqlConnection environmentConnection)
+    {
+        if (!idMappings.TryGetValue(tableName, out var tableIdMappings))
         {
-            idMappings.Add(tableName, new Dictionary<ulong, ulong>());
+            tableIdMappings = new Dictionary<ulong, ulong>();
+            idMappings.Add(tableName, tableIdMappings);
         }
 
-        if (!idMappings[tableName].ContainsKey(originalItemId))
+        var idsToRemoveFromDatabase = new List<ulong>();
+        foreach (var originalItemId in originalItemIds.Where(id => tableIdMappings.ContainsKey(id)))
         {
-            // If we didn't have a mapping for this ID, we can skip it.
+            tableIdMappings.Remove(originalItemId);
+            idsToRemoveFromDatabase.Add(originalItemId);
+        }
+
+        if (idsToRemoveFromDatabase.Count == 0)
+        {
             return;
         }
 
-        idMappings[tableName].Remove(originalItemId);
         await using var environmentCommand = environmentConnection.CreateCommand();
         environmentCommand.CommandText = $"""
                                           DELETE FROM `{WiserTableNames.WiserIdMappings}` 
-                                          WHERE table_name = ?tableName AND our_id = ?ourId
+                                          WHERE table_name = ?tableName 
+                                          AND our_id IN ({String.Join(",", idsToRemoveFromDatabase)})
                                           """;
 
         environmentCommand.Parameters.AddWithValue("tableName", tableName);
-        environmentCommand.Parameters.AddWithValue("ourId", originalItemId);
         await environmentCommand.ExecuteNonQueryAsync();
     }
 }
