@@ -20,7 +20,7 @@
         <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.1"/>
         <PackageReference Include="Serilog.AspNetCore" Version="9.0.0"/>
         <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="9.0.2"/>
-        <PackageReference Include="SlackNet.AspNetCore" Version="0.15.4"/>
+        <PackageReference Include="SlackNet.AspNetCore" Version="0.15.5"/>
     </ItemGroup>
 
     <ItemGroup>
