@@ -14,7 +14,7 @@ namespace WiserTaskScheduler.Core.Workers;
 /// </summary>
 public class MainWorker : BaseWorker
 {
-    private const string LogName = "MainService";
+    private static readonly string LogName = $"MainService ({Environment.MachineName})";
 
     private readonly IMainService mainService;
     private readonly ILogService logService;
