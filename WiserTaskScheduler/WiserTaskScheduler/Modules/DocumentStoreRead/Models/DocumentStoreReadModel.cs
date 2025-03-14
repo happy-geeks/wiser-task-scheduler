@@ -16,4 +16,9 @@ public class DocumentStoreReadModel : ActionModel
     /// Gets or sets what published Environment the item needs to be set as
     /// </summary>
     public int? PublishedEnvironmentToSet { get; set; } = null;
+
+    /// <summary>
+    /// Gets or sets if the results of the query should be cached in the database.
+    /// </summary>
+    public bool NoCache { get; set; } = false;
 }
