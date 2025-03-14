@@ -20,7 +20,7 @@ public class WtsSettings
     /// </summary>
     public string Name
     {
-        get => String.IsNullOrWhiteSpace(name) ? $"Wiser Task Scheduler ({Environment.MachineName})" : name;
+        get => String.IsNullOrWhiteSpace(name) ? $"({Environment.MachineName})" : name;
         init => name = value;
     }
 

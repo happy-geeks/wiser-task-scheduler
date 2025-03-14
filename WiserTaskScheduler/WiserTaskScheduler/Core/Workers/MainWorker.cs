@@ -14,12 +14,14 @@ namespace WiserTaskScheduler.Core.Workers;
 /// </summary>
 public class MainWorker : BaseWorker
 {
-    private static readonly string LogName = $"MainService ({Environment.MachineName})";
+    private const string LogName = "MainService";
 
     private readonly IMainService mainService;
     private readonly ILogService logService;
     private readonly ILogger<MainWorker> logger;
     private readonly ISlackChatService slackChatService;
+
+    private readonly string wtsName;
 
     /// <summary>
     /// Creates a new instance of <see cref="MainWorker"/>.
@@ -40,9 +42,11 @@ public class MainWorker : BaseWorker
         this.logger = logger;
         this.slackChatService = slackChatService;
 
+        wtsName = wtsSettings.Value.Name;
+
         this.mainService.LogSettings = RunScheme.LogSettings;
 
-        slackChatService.SendChannelMessageAsync($"*Wiser Task Scheduler has started ({Environment.MachineName})*");
+        slackChatService.SendChannelMessageAsync($"*Wiser Task Scheduler has started ({wtsName})*");
     }
 
     /// <inheritdoc />
@@ -55,7 +59,7 @@ public class MainWorker : BaseWorker
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "Main worker needs to stop, stopping all configuration workers.", Name, RunScheme.TimeId);
-        await slackChatService.SendChannelMessageAsync($"*Wiser Task Scheduler was shut down ({Environment.MachineName})*");
+        await slackChatService.SendChannelMessageAsync($"*Wiser Task Scheduler was shut down ({wtsName})*");
         await mainService.StopAllConfigurationsAsync();
         await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "All configuration workers have stopped, stopping main worker.", Name, RunScheme.TimeId);
         await base.StopAsync(cancellationToken);

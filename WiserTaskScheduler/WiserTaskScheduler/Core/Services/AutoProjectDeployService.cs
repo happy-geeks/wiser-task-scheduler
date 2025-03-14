@@ -45,7 +45,7 @@ public class AutoProjectDeployService(
 {
     private readonly WtsSettings wtsSettings = wtsSettings.Value;
     private readonly GclSettings gclSettings = gclSettings.Value;
-    private readonly string logName = $"AutoProjectDeploy ({Environment.MachineName})";
+    private readonly string logName = $"AutoProjectDeploy ({wtsSettings.Value.Name})";
 
     private const string BranchSettingsEntityType = "branch_settings";
     private const string DefaultBranchSettingsId = "default_branch_settings";

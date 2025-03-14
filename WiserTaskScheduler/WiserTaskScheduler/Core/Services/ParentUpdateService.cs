@@ -20,7 +20,7 @@ namespace WiserTaskScheduler.Core.Services;
 /// </summary>
 public class ParentUpdateService(IOptions<WtsSettings> wtsSettings, IServiceProvider serviceProvider, ILogService logService, ILogger<ParentUpdateService> logger) : IParentUpdateService, ISingletonService
 {
-    private readonly string logName = $"ParentUpdateService ({Environment.MachineName})";
+    private readonly string logName = $"ParentUpdateService ({wtsSettings.Value.Name})";
 
     private readonly ParentsUpdateServiceSettings parentsUpdateServiceSettings = wtsSettings.Value.ParentsUpdateService;
 

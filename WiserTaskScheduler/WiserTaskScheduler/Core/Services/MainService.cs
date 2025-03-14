@@ -39,7 +39,7 @@ public class MainService(
     IErrorNotificationService errorNotificationService)
     : IMainService, ISingletonService
 {
-    private readonly string logName = $"MainService ({Environment.MachineName})";
+    private readonly string logName = $"MainService ({wtsSettings.Value.Name})";
 
     private readonly WtsSettings wtsSettings = wtsSettings.Value;
     private readonly GclSettings gclSettings = gclSettings.Value;
@@ -133,7 +133,7 @@ public class MainService(
         catch (InvalidOperationException e)
         {
             await logService.LogCritical(logger, LogScopes.StartAndStop, LogSettings, $"Could not parse OAuth configuration due to exception {e}", "OAuth");
-            await errorNotificationService.NotifyOfErrorByEmailAsync(wtsSettings.ServiceFailedNotificationEmails, $"OAuth configuration of '{wtsSettings.Name}' could not be parsed.", $"Wiser Task Scheduler '{wtsSettings.Name}' could not parse OAuth configuration. Please check the logs for more details.", LogSettings, LogScopes.StartAndStop, "OAuth");
+            await errorNotificationService.NotifyOfErrorByEmailAsync(wtsSettings.ServiceFailedNotificationEmails, $"OAuth configuration of Wiser Task Scheduler '{wtsSettings.Name}' could not be parsed.", $"Wiser Task Scheduler '{wtsSettings.Name}' could not parse OAuth configuration. Please check the logs for more details.", LogSettings, LogScopes.StartAndStop, "OAuth");
         }
 
         if (configuration != null)
@@ -266,7 +266,7 @@ public class MainService(
                 catch (InvalidOperationException e)
                 {
                     await logService.LogCritical(logger, LogScopes.StartAndStop, LogSettings, $"Could not parse configuration {wiserConfiguration.Name} due to exception {e}", wiserConfiguration.Name);
-                    await errorNotificationService.NotifyOfErrorByEmailAsync(wtsSettings.ServiceFailedNotificationEmails, $"Configuration '{wiserConfiguration.Name}' of '{wtsSettings.Name}' could not be parsed.", $"Wiser Task Scheduler '{wtsSettings.Name}' could not parse configuration '{wiserConfiguration.Name}'. Please check the logs for more details.", LogSettings, LogScopes.StartAndStop, wiserConfiguration.Name);
+                    await errorNotificationService.NotifyOfErrorByEmailAsync(wtsSettings.ServiceFailedNotificationEmails, $"Configuration '{wiserConfiguration.Name}' of Wiser Task Scheduler '{wtsSettings.Name}' could not be parsed.", $"Wiser Task Scheduler '{wtsSettings.Name}' could not parse configuration '{wiserConfiguration.Name}'. Please check the logs for more details.", LogSettings, LogScopes.StartAndStop, wiserConfiguration.Name);
                 }
 
                 if (configuration != null)
@@ -400,7 +400,7 @@ public class MainService(
             await logService.LogCritical(logger, LogScopes.StartAndStop, configuration.LogSettings, $"{configuration.ServiceName} with time ID '{runScheme.TimeId}' could not be started due to exception {e}", configuration.ServiceName, runScheme.TimeId);
             await wiserDashboardService.UpdateServiceAsync(configuration.ServiceName, runScheme.TimeId, state: "crashed");
 
-            await errorNotificationService.NotifyOfErrorByEmailAsync(String.IsNullOrWhiteSpace(configuration.ServiceFailedNotificationEmails) ? configuration.ServiceFailedNotificationEmails : wtsSettings.ServiceFailedNotificationEmails, $"Service '{configuration.ServiceName}' with time ID '{runScheme.TimeId}' of '{wtsSettings.Name}' could not be started.", $"Wiser Task Scheduler '{wtsSettings.Name}' could not start service '{configuration.ServiceName}' with time ID '{runScheme.TimeId}'. Please check the logs for more details.", runScheme.LogSettings, LogScopes.StartAndStop, configuration.ServiceName);
+            await errorNotificationService.NotifyOfErrorByEmailAsync(String.IsNullOrWhiteSpace(configuration.ServiceFailedNotificationEmails) ? configuration.ServiceFailedNotificationEmails : wtsSettings.ServiceFailedNotificationEmails, $"Service '{configuration.ServiceName}' with time ID '{runScheme.TimeId}' of Wiser Task Scheduler '{wtsSettings.Name}' could not be started.", $"Wiser Task Scheduler '{wtsSettings.Name}' could not start service '{configuration.ServiceName}' with time ID '{runScheme.TimeId}'. Please check the logs for more details.", runScheme.LogSettings, LogScopes.StartAndStop, configuration.ServiceName);
 
             return;
         }
