@@ -3037,22 +3037,18 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     /// <returns>The ID of the same item in the production environment.</returns>
     private static ulong? GetMappedId(string tableName, Dictionary<string, Dictionary<ulong, ulong>> idMapping, ulong? id, bool returnNullIfNotFound = false)
     {
+        var defaultValue = returnNullIfNotFound ? null : id;
         if (id is null or 0)
         {
-            return id;
+            return defaultValue;
         }
 
         if (!idMapping.TryGetValue(tableName, out var tableIdMapping))
         {
-            return id;
+            return defaultValue;
         }
 
-        if (tableIdMapping.TryGetValue(id.Value, out var mappedId))
-        {
-            return mappedId;
-        }
-
-        return returnNullIfNotFound ? null : id;
+        return tableIdMapping.TryGetValue(id.Value, out var mappedId) ? mappedId : defaultValue;
     }
 
     /// <summary>
