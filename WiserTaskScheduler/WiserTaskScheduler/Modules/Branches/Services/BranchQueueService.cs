@@ -2488,6 +2488,18 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             switch (tableName)
                             {
                                 case WiserTableNames.WiserEntity when entityMergeSettings is not {Update: true}:
+                                case WiserTableNames.WiserEntityProperty when entityPropertyMergeSettings is not {Update: true}:
+                                case WiserTableNames.WiserQuery when queryMergeSettings is not {Update: true}:
+                                case WiserTableNames.WiserModule when moduleMergeSettings is not {Update: true}:
+                                case WiserTableNames.WiserDataSelector when dataSelectorMergeSettings is not {Update: true}:
+                                case WiserTableNames.WiserPermission when permissionMergeSettings is not {Update: true}:
+                                case WiserTableNames.WiserUserRoles when userRoleMergeSettings is not {Update: true}:
+                                case WiserTableNames.WiserFieldTemplates when fieldTemplatesMergeSettings is not {Update: true}:
+                                case WiserTableNames.WiserLink when linkMergeSettings is not {Update: true}:
+                                case WiserTableNames.WiserApiConnection when apiConnectionMergeSettings is not {Update: true}:
+                                case WiserTableNames.WiserRoles when roleMergeSettings is not {Update: true}:
+                                case WiserTableNames.WiserStyledOutput when styledOutputMergeSettings is not {Update: true}:
+                                case "easy_objects" when objectMergeSettings is not {Update: true}:
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
@@ -2574,6 +2586,18 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             switch (tableName)
                             {
                                 case WiserTableNames.WiserEntity when entityMergeSettings is not {Delete: true}:
+                                case WiserTableNames.WiserEntityProperty when entityPropertyMergeSettings is not {Delete: true}:
+                                case WiserTableNames.WiserQuery when queryMergeSettings is not {Delete: true}:
+                                case WiserTableNames.WiserModule when moduleMergeSettings is not {Delete: true}:
+                                case WiserTableNames.WiserDataSelector when dataSelectorMergeSettings is not {Delete: true}:
+                                case WiserTableNames.WiserPermission when permissionMergeSettings is not {Delete: true}:
+                                case WiserTableNames.WiserUserRoles when userRoleMergeSettings is not {Delete: true}:
+                                case WiserTableNames.WiserFieldTemplates when fieldTemplatesMergeSettings is not {Delete: true}:
+                                case WiserTableNames.WiserLink when linkMergeSettings is not {Delete: true}:
+                                case WiserTableNames.WiserApiConnection when apiConnectionMergeSettings is not {Delete: true}:
+                                case WiserTableNames.WiserRoles when roleMergeSettings is not {Delete: true}:
+                                case WiserTableNames.WiserStyledOutput when styledOutputMergeSettings is not {Delete: true}:
+                                case "easy_objects" when objectMergeSettings is not {Delete: true}:
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
