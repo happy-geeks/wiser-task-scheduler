@@ -1262,12 +1262,13 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     var ourId = dataRow.Field<ulong>("our_id");
                     var productionId = dataRow.Field<ulong>("production_id");
 
-                    if (!idMapping.ContainsKey(tableName!))
+                    if (!idMapping.TryGetValue(tableName!, out var idMappingsForTable))
                     {
-                        idMapping.Add(tableName, new Dictionary<ulong, ulong>());
+                        idMappingsForTable = new Dictionary<ulong, ulong>();
+                        idMapping.Add(tableName, idMappingsForTable);
                     }
 
-                    idMapping[tableName][ourId] = productionId;
+                    idMappingsForTable[ourId] = productionId;
                 }
 
                 // Get all IDs from the mappings that don't exist anymore in production, so that we can remove them.
@@ -2345,6 +2346,18 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             switch (tableName)
                             {
                                 case WiserTableNames.WiserEntity when entityMergeSettings is not {Create: true}:
+                                case WiserTableNames.WiserEntityProperty when entityPropertyMergeSettings is not {Create: true}:
+                                case WiserTableNames.WiserQuery when queryMergeSettings is not {Create: true}:
+                                case WiserTableNames.WiserModule when moduleMergeSettings is not {Create: true}:
+                                case WiserTableNames.WiserDataSelector when dataSelectorMergeSettings is not {Create: true}:
+                                case WiserTableNames.WiserPermission when permissionMergeSettings is not {Create: true}:
+                                case WiserTableNames.WiserUserRoles when userRoleMergeSettings is not {Create: true}:
+                                case WiserTableNames.WiserFieldTemplates when fieldTemplatesMergeSettings is not {Create: true}:
+                                case WiserTableNames.WiserLink when linkMergeSettings is not {Create: true}:
+                                case WiserTableNames.WiserApiConnection when apiConnectionMergeSettings is not {Create: true}:
+                                case WiserTableNames.WiserRoles when roleMergeSettings is not {Create: true}:
+                                case WiserTableNames.WiserStyledOutput when styledOutputMergeSettings is not {Create: true}:
+                                case "easy_objects" when objectMergeSettings is not {Create: true}:
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
                                     continue;
