@@ -3047,7 +3047,12 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             return id;
         }
 
-        return !tableIdMapping.TryGetValue(id.Value, out var mappedId) ? id : mappedId;
+        if (tableIdMapping.TryGetValue(id.Value, out var mappedId))
+        {
+            return mappedId;
+        }
+
+        return returnNullIfNotFound ? null : id;
     }
 
     /// <summary>
