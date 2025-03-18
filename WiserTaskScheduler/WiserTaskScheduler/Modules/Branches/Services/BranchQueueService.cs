@@ -380,12 +380,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             continue;
                         }
 
-                        // If mode is nothing, skip everything of this entity type.
-                        if (entity.Mode == CreateBranchEntityModes.Nothing)
-                        {
-                            continue;
-                        }
-
                         var orderBy = "";
                         var whereClauseBuilder = new StringBuilder($"WHERE item.entity_type = '{entity.EntityType.ToMySqlSafeValue(false)}'");
 
@@ -476,6 +470,9 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 var dataSelectorIds = dataSelectorResult.Select(i => i["id"]).ToList();
                                 whereClauseBuilder.AppendLine($"AND item.id IN ({String.Join(", ", dataSelectorIds)})");
                                 break;
+                            case CreateBranchEntityModes.Nothing:
+                                // If mode is nothing, skip everything of this entity type.
+                                continue;
                             default:
                                 throw new ArgumentOutOfRangeException(nameof(entity.Mode), entity.Mode.ToString(), null);
                         }
@@ -2948,7 +2945,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     /// <param name="allLinkTypeSettings">The list with all link type settings.</param>
     /// <param name="allEntityTypeSettings">The dictionary with settings for each entity type. This function will add items to this dictionary if they don't exist yet.</param>
     /// <returns>A named tuple with the entity types and table prefixes for both the source and the destination.</returns>
-    private async Task<(string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)?> GetEntityTypesOfLinkAsync(ulong sourceId, ulong destinationId, int linkType, MySqlConnection mySqlConnection, IWiserItemsService wiserItemsService, List<LinkSettingsModel> allLinkTypeSettings, Dictionary<string, EntitySettingsModel> allEntityTypeSettings)
+    private static async Task<(string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)?> GetEntityTypesOfLinkAsync(ulong sourceId, ulong destinationId, int linkType, MySqlConnection mySqlConnection, IWiserItemsService wiserItemsService, List<LinkSettingsModel> allLinkTypeSettings, Dictionary<string, EntitySettingsModel> allEntityTypeSettings)
     {
         var currentLinkTypeSettings = allLinkTypeSettings.Where(l => l.Type == linkType);
         await using var command = mySqlConnection.CreateCommand();
@@ -3020,7 +3017,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     /// <param name="productionConnection">The connection to the production database.</param>
     /// <param name="environmentConnection">The connection to the environment database.</param>
     /// <returns>The new ID that should be used for the first new item to be inserted into this table.</returns>
-    private async Task<ulong> GenerateNewIdAsync(string tableName, MySqlConnection productionConnection, MySqlConnection environmentConnection)
+    private static async Task<ulong> GenerateNewIdAsync(string tableName, MySqlConnection productionConnection, MySqlConnection environmentConnection)
     {
         await using var productionCommand = productionConnection.CreateCommand();
         await using var environmentCommand = environmentConnection.CreateCommand();
