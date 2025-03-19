@@ -100,16 +100,18 @@ public class DocumentStoreReadService(IServiceProvider serviceProvider, ILogServ
                 entityWherePart.Append(')');
             }
 
-            var dataTable = await databaseConnection.GetAsync($"""
-                                                                           SELECT {(documentStoreReadItem.NoCache ? "SQL_NO_CACHE" : "")} id
-                                                                           FROM {tableGroup.Key}{WiserTableNames.WiserItem}
-                                                                           WHERE entity_type {entityWherePart}
-                                                                           AND json IS NOT NULL
-                                                                           AND (
-                                                               	            json_last_processed_date IS NULL
-                                                               	            OR json_last_processed_date < changed_on
-                                                                           )
-                                                               """);
+            var query = $"""
+                         SELECT {(documentStoreReadItem.NoCache ? "SQL_NO_CACHE" : "")} id, entity_type
+                         FROM {tableGroup.Key}{WiserTableNames.WiserItem}
+                         WHERE entity_type {entityWherePart}
+                         AND json IS NOT NULL
+                         AND (
+                         	json_last_processed_date IS NULL
+                         	OR json_last_processed_date < changed_on
+                         )
+                         """;
+
+            var dataTable = await databaseConnection.GetAsync(query);
 
             // Process each item in the group.
             foreach (DataRow row in dataTable.Rows)
@@ -119,7 +121,8 @@ public class DocumentStoreReadService(IServiceProvider serviceProvider, ILogServ
                     processedItems++;
 
                     var itemId = row.Field<ulong>("id");
-                    var item = await wiserItemsService.GetItemDetailsAsync(itemId, entityType: documentStoreReadItem.EntityName, skipPermissionsCheck: true);
+                    var entityType = row.Field<string>("entity_type");
+                    var item = await wiserItemsService.GetItemDetailsAsync(itemId, entityType: entityType, skipPermissionsCheck: true);
 
                     if (item == null)
                     {
@@ -133,7 +136,7 @@ public class DocumentStoreReadService(IServiceProvider serviceProvider, ILogServ
                         item.PublishedEnvironment = (Environments) documentStoreReadItem.PublishedEnvironmentToSet;
                     }
 
-                    if (settingsPerEntity[tableGroup.Key].StoreType == StoreType.Hybrid)
+                    if (settingsPerEntity[entityType].StoreType == StoreType.Hybrid)
                     {
                         // Set the json to null to mark the item as processed. Hybrid mode will then no longer load and update by JSON.
                         item.Json = null;
