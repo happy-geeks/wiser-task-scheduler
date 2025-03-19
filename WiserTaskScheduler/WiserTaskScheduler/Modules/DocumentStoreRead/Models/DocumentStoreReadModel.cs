@@ -20,5 +20,5 @@ public class DocumentStoreReadModel : ActionModel
     /// <summary>
     /// Gets or sets if the results of the query should be cached in the database.
     /// </summary>
-    public bool NoCache { get; set; } = false;
+    public bool NoCache { get; set; } = true;
 }
