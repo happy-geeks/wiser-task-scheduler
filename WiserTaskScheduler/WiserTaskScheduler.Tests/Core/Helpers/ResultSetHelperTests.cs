@@ -41,7 +41,8 @@ public class ResultSetHelperTests
                         ["Value"] = "Test4"
                     }
                 }
-            }
+            },
+            ["RawBody"] = "<html><body><h1>Test</h1></body></html>"
         };
     }
 
@@ -55,6 +56,7 @@ public class ResultSetHelperTests
     [TestCase("Body.ObjectArray[i].Value", "Test3", 0, 0)]
     [TestCase("Body.ObjectArray[i].Array[0]", "InnerArrayIndex0", 0, 0)]
     [TestCase("Body.ObjectArray[i].Array[j]", "InnerArrayIndex1", 0, 1)]
+    [TestCase("RawBody", "<html><body><h1>Test</h1></body></html>")]
     public void GetCorrectObject_ValidPath_ReturnsCorrectObject(string key, string expectedValue, int indexI = 0, int indexJ = 0)
     {
         // Act
@@ -88,9 +90,9 @@ public class ResultSetHelperTests
     public void GetCorrectObject_InvalidPath_ThrowsResultSetException(string key, int indexI = 0, int indexJ = 0)
     {
         // Act
-        Action act = () => ResultSetHelper.GetCorrectObject<JValue>(key, [indexI, indexJ], resultSet);
+        var actual = () => ResultSetHelper.GetCorrectObject<JValue>(key, [indexI, indexJ], resultSet);
 
         // Assert
-        act.Should().Throw<ResultSetException>("because the path is invalid.");
+        actual.Should().Throw<ResultSetException>("because the path is invalid.");
     }
 }
