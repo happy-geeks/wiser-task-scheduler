@@ -271,7 +271,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             // Update connection string again after creating and selecting the new database schema.
             await branchDatabaseConnection.ChangeConnectionStringsAsync(branchConnectionStringBuilder.ConnectionString, branchConnectionStringBuilder.ConnectionString);
 
-            // Get all tables that don't start with an underscore (wiser tables never start with an underscore and we often use that for temporary or backup tables).
+            // Get all tables that don't start with an underscore (wiser tables never start with an underscore, and we often use that for temporary or backup tables).
             // Handle the wiser_itemfile tables as last to ensure all other tables are copied first.
             var query = $"""
                          SELECT *
@@ -1139,7 +1139,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET total_items = ?totalItems, items_processed = 0 WHERE id = ?queueId");
 
             // Set saveHistory and username parameters for all queries.
-            var queryPrefix = "SET @saveHistory = TRUE; SET @_username = ?username; ";
+            const string queryPrefix = "SET @saveHistory = TRUE; SET @_username = ?username; ";
             var username = $"{dataRowWithSettings.Field<string>("added_by")} (Sync from {branchDatabase})";
             if (username.Length > 50)
             {
@@ -1692,6 +1692,13 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 tablesToLock.Add($"{linkData.Value.DestinationTablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix}");
                             }
                         }
+
+                        // TODO: If linkData is null, look if the source and destinaition items exist in the default wiser_item or wiser_item_archive tables.
+                        // TODO: If we do find something, then get the entity type from those items and use those to see if we can find the link type that way from "settings.LinkTypes" and store that into "linkTypeSettings".
+                        // TODO: If linkTypeSettings is still null after that, then we know that this is a link type that hasn't been added to the settings yet.
+                        // TODO: In that case, we should log a warning and then check if either the source entity or the destination entity has been selected to be merged in "settings.Entities".
+                        // TODO: If that is the case, then merge the link change as well, otherwise skip it.
+                        // TODO: The GCL has a similar fallback mechanism, this way we can still merge those unspecified link types.
 
                         // Lock the tables again when we're done.
                         await LockTablesAsync(productionConnection, tablesToLock, false);
@@ -2378,6 +2385,12 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             await using var productionCommand = productionConnection.CreateCommand();
                             AddParametersToCommand(sqlParameters, productionCommand);
 
+                            // TODO: Dynamically look up if the current table has a unique index, and if so, generate a unique value for each column from that index.
+                            // TODO: Then we can get rid of these if-else statements and make this code more generic.
+                            // TODO: Afterwards, look up all values from the columns of this index, by using the newId variable and looking up the row in the current table in the branch.
+                            // TODO: Then look in production to see if it already has a row with the same values. If so, map the newId to the ID of the row in production and skip the insert statement.
+                            // TODO: Then all follow up update/delete statements should update the correct row in production and no longer cause duplicate key exceptions if someone has already added this row manually on production before the merge.
+
                             if (tableName.Equals(WiserTableNames.WiserEntity, StringComparison.OrdinalIgnoreCase))
                             {
                                 productionCommand.CommandText = $"""
@@ -2948,6 +2961,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     private static async Task<(string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)?> GetEntityTypesOfLinkAsync(ulong sourceId, ulong destinationId, int linkType, MySqlConnection mySqlConnection, IWiserItemsService wiserItemsService, List<LinkSettingsModel> allLinkTypeSettings, Dictionary<string, EntitySettingsModel> allEntityTypeSettings)
     {
         var currentLinkTypeSettings = allLinkTypeSettings.Where(l => l.Type == linkType);
+
         await using var command = mySqlConnection.CreateCommand();
         command.Parameters.AddWithValue("sourceId", sourceId);
         command.Parameters.AddWithValue("destinationId", destinationId);
