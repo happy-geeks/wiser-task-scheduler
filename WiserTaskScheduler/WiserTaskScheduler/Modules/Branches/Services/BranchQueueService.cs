@@ -1203,6 +1203,13 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         objectId = $"{originalItemId}_{dataRow["oldvalue"]}_{linkType}";
                         break;
                     }
+                    case "INSERT_PERMISSION":
+                    {
+                        // With INSERT_PERMISSION actions, we need to look up the highest role ID to create a temporary unique ID for the role.
+                        // So we need to lock the wiser_roles table, otherwise we can't query it later.
+                        tablesToLock.Add(WiserTableNames.WiserRoles);
+                        break;
+                    }
                 }
 
                 BranchesHelpers.TrackObjectAction(objectsCreatedInBranch, action, objectId, tableName);
@@ -2420,6 +2427,26 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                                                  {queryPrefix}
                                                                  INSERT INTO `{tableName}` (id, `type`, `destination_entity_type`, `connected_entity_type`) 
                                                                  VALUES (?newId, 0, ?guid, ?guid2)
+                                                                 """;
+                            }
+                            else if (tableName.Equals(WiserTableNames.WiserPermission, StringComparison.OrdinalIgnoreCase))
+                            {
+                                // The table wiser_permission has a unique index on all columns, so we need to temporarily use a role ID that doesn't exist yet, to prevent duplicate index errors when multiple permissions are added in a row.
+                                // This query first gets the maximum role ID from the table, and then adds 1 to it, so that we can be sure that we have ID of a role that doesn't exist.
+                                // Then it checks the highest role_id from the wiser_permission table, and if that is higher than the one we just generated, we add 1 to that one and use that as the temporary ID.
+                                // This all is to prevent duplicate index errors and also to prevent accidentally overwriting someone's permissions.
+                                // Lastly, it also adds temporary non-existing values to most other columns, to prevent duplicate index errors when the role_id gets updated in an "UPDATE_PERMISSION" action.
+                                productionCommand.CommandText = $"""
+                                                                 {queryPrefix}
+                                                                 SET @temporaryRoleId = (SELECT IFNULL(MAX(id), 0) + 1 FROM `{WiserTableNames.WiserRoles}`);
+                                                                 SET @temporaryRoleId = (SELECT IF(MAX(role_id) >= @temporaryRoleId, MAX(role_id) + 1, @temporaryRoleId) FROM `{tableName}`);
+                                                                 SET @temporaryItemId = (SELECT IFNULL(MAX(item_id), 0) + 1 FROM `{tableName}`);
+                                                                 SET @temporaryEntityPropertyId = (SELECT IFNULL(MAX(entity_property_id), 0) + 1 FROM `{tableName}`);
+                                                                 SET @temporaryModuleId = (SELECT IFNULL(MAX(module_id), 0) + 1 FROM `{tableName}`);
+                                                                 SET @temporaryQueryId = (SELECT IFNULL(MAX(query_id), 0) + 1 FROM `{tableName}`);
+                                                                 SET @temporaryDataSelectorId = (SELECT IFNULL(MAX(data_selector_id), 0) + 1 FROM `{tableName}`);
+                                                                 INSERT INTO `{tableName}` (id, `role_id`, `item_id`, `entity_property_id`, `module_id`, `query_id`, `data_selector_id`)
+                                                                 VALUES (?newId, @temporaryRoleId, @temporaryItemId, @temporaryEntityPropertyId, @temporaryModuleId, @temporaryQueryId, @temporaryDataSelectorId)
                                                                  """;
                             }
                             else
