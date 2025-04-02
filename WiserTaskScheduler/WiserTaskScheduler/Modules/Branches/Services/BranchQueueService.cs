@@ -1120,6 +1120,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             var branchDatabaseConnection = branchScope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
             await branchDatabaseConnection.ChangeConnectionStringsAsync(connectionStringBuilder.ConnectionString, connectionStringBuilder.ConnectionString);
             var branchDatabaseHelpersService = branchScope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+            var branchLinkTypesService = branchScope.ServiceProvider.GetRequiredService<ILinkTypesService>();
+            var branchEntityTypesService = branchScope.ServiceProvider.GetRequiredService<IEntityTypesService>();
 
             // Create the wiser_id_mappings table, in the selected branch, if it doesn't exist yet.
             // We need it to map IDs of the selected environment to IDs of the production environment, because they are not always the same.
@@ -1174,7 +1176,10 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 if (isWiserItemChange && originalItemId > 0 && !tablesToLock.Contains(wiserItemTableName) && !tableName.Contains(WiserTableNames.WiserItemLink))
                 {
                     tablesToLock.Add(wiserItemTableName);
-                    tablesToLock.Add($"{wiserItemTableName}{WiserTableNames.ArchiveSuffix}");
+                    if (WiserTableNames.TablesWithArchive.Any(table => tableName.EndsWith(wiserItemTableName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        tablesToLock.Add($"{wiserItemTableName}{WiserTableNames.ArchiveSuffix}");
+                    }
                 }
 
                 var action = dataRow.Field<string>("action").ToUpperInvariant();
@@ -1230,7 +1235,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             }
 
             // Fetch Link settings before we lock the tables.
-            var allLinkTypeSettings = await wiserItemsService.GetAllLinkTypeSettingsAsync();
+            var allLinkTypeSettings = await branchLinkTypesService.GetAllLinkTypeSettingsAsync();
 
             // Lock the tables we're going to use, to be sure that other processes don't mess up our synchronisation.
             await LockTablesAsync(productionConnection, tablesToLock, false);
@@ -1670,7 +1675,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         branchCommand.CommandText = "UNLOCK TABLES";
                         await branchCommand.ExecuteNonQueryAsync();
 
-                        linkData = await GetEntityTypesOfLinkAsync(originalItemId, originalDestinationItemId, linkType.Value, branchConnection, wiserItemsService, allLinkTypeSettings, allEntityTypeSettings);
+                        linkData = await GetEntityTypesOfLinkAsync(originalItemId, originalDestinationItemId, linkType.Value, branchConnection, branchEntityTypesService, allLinkTypeSettings, allEntityTypeSettings);
                         if (linkData.HasValue)
                         {
                             linkTypeSettings = settings.LinkTypes.SingleOrDefault(s => s.Type == linkType.Value && String.Equals(s.SourceEntityType, linkData.Value.SourceType) && String.Equals(s.DestinationEntityType, linkData.Value.DestinationType));
@@ -2954,11 +2959,11 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     /// <param name="destinationId">The ID of the destination item.</param>
     /// <param name="linkType">The link type number.</param>
     /// <param name="mySqlConnection">The connection to the database.</param>
-    /// <param name="wiserItemsService">An instance of the <see cref="IWiserItemsService"/>.</param>
+    /// <param name="branchEntityTypesService">An instance of the <see cref="IEntityTypesService"/> with a database connection to the branch database.</param>
     /// <param name="allLinkTypeSettings">The list with all link type settings.</param>
     /// <param name="allEntityTypeSettings">The dictionary with settings for each entity type. This function will add items to this dictionary if they don't exist yet.</param>
     /// <returns>A named tuple with the entity types and table prefixes for both the source and the destination.</returns>
-    private static async Task<(string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)?> GetEntityTypesOfLinkAsync(ulong sourceId, ulong destinationId, int linkType, MySqlConnection mySqlConnection, IWiserItemsService wiserItemsService, List<LinkSettingsModel> allLinkTypeSettings, Dictionary<string, EntitySettingsModel> allEntityTypeSettings)
+    private static async Task<(string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)?> GetEntityTypesOfLinkAsync(ulong sourceId, ulong destinationId, int linkType, MySqlConnection mySqlConnection, IEntityTypesService branchEntityTypesService, List<LinkSettingsModel> allLinkTypeSettings, Dictionary<string, EntitySettingsModel> allEntityTypeSettings)
     {
         var currentLinkTypeSettings = allLinkTypeSettings.Where(l => l.Type == linkType);
 
@@ -2972,19 +2977,19 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             // Get settings entity settings from cache if we have them, otherwise get them from database and add to cache.
             if (!allEntityTypeSettings.TryGetValue(linkTypeSettings.SourceEntityType, out var sourceEntityTypeSettings))
             {
-                sourceEntityTypeSettings = await wiserItemsService.GetEntityTypeSettingsAsync(linkTypeSettings.SourceEntityType);
+                sourceEntityTypeSettings = await branchEntityTypesService.GetEntityTypeSettingsAsync(linkTypeSettings.SourceEntityType);
                 allEntityTypeSettings.Add(linkTypeSettings.SourceEntityType, sourceEntityTypeSettings);
             }
 
-            if (!allEntityTypeSettings.TryGetValue(linkTypeSettings.SourceEntityType, out var destinationEntityTypeSettings))
+            if (!allEntityTypeSettings.TryGetValue(linkTypeSettings.DestinationEntityType, out var destinationEntityTypeSettings))
             {
-                destinationEntityTypeSettings = await wiserItemsService.GetEntityTypeSettingsAsync(linkTypeSettings.DestinationEntityType);
+                destinationEntityTypeSettings = await branchEntityTypesService.GetEntityTypeSettingsAsync(linkTypeSettings.DestinationEntityType);
                 allEntityTypeSettings.Add(linkTypeSettings.DestinationEntityType, destinationEntityTypeSettings);
             }
 
             // Get the table prefixes we need from the entity settings.
-            var sourceTablePrefix = wiserItemsService.GetTablePrefixForEntity(sourceEntityTypeSettings);
-            var destinationTablePrefix = wiserItemsService.GetTablePrefixForEntity(destinationEntityTypeSettings);
+            var sourceTablePrefix = branchEntityTypesService.GetTablePrefixForEntity(sourceEntityTypeSettings);
+            var destinationTablePrefix = branchEntityTypesService.GetTablePrefixForEntity(destinationEntityTypeSettings);
 
             // Check if the source item exists in this table.
             command.CommandText = $"""
