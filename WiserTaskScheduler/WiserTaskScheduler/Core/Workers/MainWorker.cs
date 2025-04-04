@@ -42,7 +42,7 @@ public class MainWorker : BaseWorker
         this.logger = logger;
         this.slackChatService = slackChatService;
 
-        wtsName = wtsSettings.Value.Name;
+        wtsName = $"{Environment.MachineName} - {wtsSettings.Value.Name}";
 
         this.mainService.LogSettings = RunScheme.LogSettings;
 

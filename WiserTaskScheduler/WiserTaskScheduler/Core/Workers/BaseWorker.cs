@@ -61,7 +61,7 @@ public abstract class BaseWorker(IBaseWorkerDependencyAggregate baseWorkerDepend
             return;
         }
 
-        Name = $"{name} ({wtsSettings.Name})";
+        Name = $"{name} ({Environment.MachineName} - {wtsSettings.Name})";
         RunScheme = runScheme;
         RunImmediately = runImmediately;
         ConfigurationName = configurationName;
@@ -165,7 +165,7 @@ public abstract class BaseWorker(IBaseWorkerDependencyAggregate baseWorkerDepend
                         updateSucceeded = await wiserDashboardService.UpdateServiceAsync(ConfigurationName ?? Name, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme), lastRun: DateTime.Now, runTime: stopWatch.Elapsed, state: state, extraRun: false);
                         if (!updateSucceeded)
                         {
-                            await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} of Wiser Task Scheduler '{wtsSettings.Name}' status save failed.", $"Wiser Task Scheduler '{wtsSettings.Name}' failed to save the service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} state of the last run, which is '{state}', to the database. The service will continue running and the next run will attempt a new state save. Until then, the service state in the database will be incorrect.", RunScheme.LogSettings, LogScopes.RunBody, ConfigurationName ?? Name);
+                            await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} of Wiser Task Scheduler '{Environment.MachineName} - {wtsSettings.Name}' status save failed.", $"Wiser Task Scheduler '{Environment.MachineName} - {wtsSettings.Name}' failed to save the service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} state of the last run, which is '{state}', to the database. The service will continue running and the next run will attempt a new state save. Until then, the service state in the database will be incorrect.", RunScheme.LogSettings, LogScopes.RunBody, ConfigurationName ?? Name);
                         }
                     }
                     else
@@ -183,7 +183,7 @@ public abstract class BaseWorker(IBaseWorkerDependencyAggregate baseWorkerDepend
                         updateSucceeded = await wiserDashboardService.UpdateServiceAsync(ConfigurationName, RunScheme.TimeId, nextRun: runSchemesService.GetDateTimeTillNextRun(RunScheme), lastRun: DateTime.Now, runTime: stopWatch.Elapsed, state: state, extraRun: false);
                         if (!updateSucceeded)
                         {
-                            await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} of Wiser Task Scheduler '{wtsSettings.Name}' status save failed.", $"Wiser Task Scheduler '{wtsSettings.Name}' failed to save the service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} state of the last run, which is '{state}', to the database a second time. Since this was a single run configuration, no more attempts will be made to correct this. The service state will now permanently be incorrect until it is manually updated.", RunScheme.LogSettings, LogScopes.RunStartAndStop, ConfigurationName ?? Name);
+                            await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} of Wiser Task Scheduler '{Environment.MachineName} - {wtsSettings.Name}' status save failed.", $"Wiser Task Scheduler '{Environment.MachineName} - {wtsSettings.Name}' failed to save the service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} state of the last run, which is '{state}', to the database a second time. Since this was a single run configuration, no more attempts will be made to correct this. The service state will now permanently be incorrect until it is manually updated.", RunScheme.LogSettings, LogScopes.RunStartAndStop, ConfigurationName ?? Name);
                         }
                     }
 
@@ -202,7 +202,7 @@ public abstract class BaseWorker(IBaseWorkerDependencyAggregate baseWorkerDepend
         {
             await logService.LogCritical(logger, LogScopes.StartAndStop, RunScheme.LogSettings, $"{ConfigurationName ?? Name} stopped with exception {exception}", ConfigurationName ?? Name, RunScheme.TimeId);
             await wiserDashboardService.UpdateServiceAsync(ConfigurationName ?? Name, RunScheme.TimeId, state: "crashed");
-            await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} of Wiser Task Scheduler '{wtsSettings.Name}' crashed.", $"Wiser Task Scheduler '{wtsSettings.Name}' crashed while executing the service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} and is therefore shutdown. Please check the logs for more details. A restart is required to start the service again.", RunScheme.LogSettings, LogScopes.StartAndStop, ConfigurationName ?? Name);
+            await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} of Wiser Task Scheduler '{Environment.MachineName} - {wtsSettings.Name}' crashed.", $"Wiser Task Scheduler '{Environment.MachineName} - {wtsSettings.Name}' crashed while executing the service '{ConfigurationName ?? Name}'{(RunScheme.TimeId > 0 ? $" with time ID '{RunScheme.TimeId}'" : "")} and is therefore shutdown. Please check the logs for more details. A restart is required to start the service again.", RunScheme.LogSettings, LogScopes.StartAndStop, ConfigurationName ?? Name);
         }
     }
 

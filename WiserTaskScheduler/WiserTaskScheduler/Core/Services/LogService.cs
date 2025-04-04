@@ -126,7 +126,7 @@ public class LogService(IServiceProvider serviceProvider, ISlackChatService slac
                         var linebreakIndex = message.IndexOf(Environment.NewLine, StringComparison.InvariantCulture);
                         var title = linebreakIndex >= 0 ? message[..linebreakIndex] : message;
                         var slackMessage = $"""
-                                            Server: {settings.Name}
+                                            Server: {Environment.MachineName} - {settings.Name}
                                             Log level: {logLevel}
                                             Configuration: '{configurationName}'
                                             Time ID: '{timeId}'

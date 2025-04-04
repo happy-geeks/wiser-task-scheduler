@@ -21,7 +21,7 @@ namespace WiserTaskScheduler.Core.Services;
 /// </summary>
 public class CleanupService(IOptions<WtsSettings> wtsSettings, IServiceProvider serviceProvider, ILogService logService, ILogger<CleanupService> logger) : ICleanupService, ISingletonService
 {
-    private readonly string logName = $"CleanupService ({wtsSettings.Value.Name})";
+    private readonly string logName = $"CleanupService ({Environment.MachineName} - {wtsSettings.Value.Name})";
 
     private readonly CleanupServiceSettings cleanupServiceSettings = wtsSettings.Value.CleanupService;
 

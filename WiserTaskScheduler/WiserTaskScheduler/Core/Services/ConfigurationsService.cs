@@ -213,7 +213,7 @@ public class ConfigurationsService(
         catch (Exception exception)
         {
             await logService.LogCritical(logger, LogScopes.StartAndStop, LogSettings, $"Aborted {configurationServiceName} due to exception in time ID '{timeId}' and order '{currentOrder}', will try again next time. Exception {exception}", configurationServiceName, timeId, currentOrder);
-            await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{configurationServiceName}' with time ID '{timeId}' of Wiser Task Scheduler '{wtsSettings.Name}' failed.", $"Wiser Task Scheduler '{wtsSettings.Name}' failed during the executing of service '{configurationServiceName}' with time ID '{timeId}' and has therefore been aborted. Please check the logs for more details. A new attempt will be made during the next run.", LogSettings, LogScopes.RunStartAndStop, configurationServiceName);
+            await errorNotificationService.NotifyOfErrorByEmailAsync(serviceFailedNotificationEmails, $"Service '{configurationServiceName}' with time ID '{timeId}' of Wiser Task Scheduler '{wtsSettings.Name}' failed.", $"Wiser Task Scheduler '{Environment.MachineName} - {wtsSettings.Name}' failed during the executing of service '{configurationServiceName}' with time ID '{timeId}' and has therefore been aborted. Please check the logs for more details. A new attempt will be made during the next run.", LogSettings, LogScopes.RunStartAndStop, configurationServiceName);
         }
     }
 
