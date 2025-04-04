@@ -1,0 +1,12 @@
+﻿services:
+  wisertaskscheduler:
+    image: wisertaskscheduler
+    build:
+      context: .
+      dockerfile: WiserTaskScheduler/Dockerfile
+    volumes:
+      - WtsData:/WtsData
+
+volumes:
+    WtsData:
+      external: true

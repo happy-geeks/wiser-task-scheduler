@@ -5,6 +5,7 @@ using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.Ftps.Handlers;
+using GeeksCoreLibrary.Modules.GclConverters.EvoPdf.Extensions;
 using GeeksCoreLibrary.Modules.Payments.Interfaces;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,8 +22,12 @@ applicationBuilder.Environment.ContentRootPath = AppContext.BaseDirectory;
 applicationBuilder.Services.AddWindowsService(options => { options.ServiceName = "Wiser Task Scheduler"; });
 
 // Configure the app settings.
-var wtSettings = applicationBuilder.Configuration.GetSection("Wts").Get<WtsSettings>();
-applicationBuilder.Configuration.AddJsonFile(Path.Combine(wtSettings.SecretsBaseDirectory, "wts-appsettings-secrets.json"), false, false);
+var wtsSettings = applicationBuilder.Configuration.GetSection("Wts").Get<WtsSettings>();
+if (!String.IsNullOrWhiteSpace(wtsSettings.SecretsBaseDirectory))
+{
+    applicationBuilder.Configuration.AddJsonFile(Path.Combine(wtsSettings.SecretsBaseDirectory, "wts-appsettings-secrets.json"), false, false);
+}
+
 applicationBuilder.Configuration.AddJsonFile($"appsettings.{applicationBuilder.Environment.EnvironmentName}.json", true, true);
 
 // Add our settings to the IOptions pattern.
@@ -30,14 +35,14 @@ applicationBuilder.Services.Configure<GclSettings>(applicationBuilder.Configurat
 applicationBuilder.Services.Configure<WtsSettings>(applicationBuilder.Configuration.GetSection("Wts"));
 
 // Reload the settings after adding the secret files.
-wtSettings = applicationBuilder.Configuration.GetSection("Wts").Get<WtsSettings>();
+wtsSettings = applicationBuilder.Configuration.GetSection("Wts").Get<WtsSettings>();
 
 // Add the main background workers.
 applicationBuilder.Services.AddHostedService<MainWorker>();
 applicationBuilder.Services.AddHostedService<CleanupWorker>();
 applicationBuilder.Services.AddHostedService<UpdateParentsWorker>();
 
-if (wtSettings.AutoProjectDeploy.IsEnabled)
+if (wtsSettings.AutoProjectDeploy.IsEnabled)
 {
     // Only add the auto project deploy worker if it is enabled.
     applicationBuilder.Services.AddHostedService<AutoProjectDeployWorker>();
@@ -47,13 +52,14 @@ if (wtSettings.AutoProjectDeploy.IsEnabled)
 applicationBuilder.Services.AddScoped<ConfigurationsWorker>();
 
 applicationBuilder.Services.AddGclServices(applicationBuilder.Configuration, false, false, false);
+applicationBuilder.Services.AddEvoPdfHtmlToPdfConverterService();
 
 // Services for the FTP handler factory from the GCL.
 applicationBuilder.Services.AddScoped<FtpsHandler>();
 applicationBuilder.Services.AddScoped<SftpHandler>();
 
 // If there is a bot token provided for Slack, add the service.
-var slackBotToken = wtSettings.SlackSettings.BotToken;
+var slackBotToken = wtsSettings.SlackSettings.BotToken;
 if (!String.IsNullOrWhiteSpace(slackBotToken))
 {
     applicationBuilder.Services.AddSingleton(new SlackEndpointConfiguration());
