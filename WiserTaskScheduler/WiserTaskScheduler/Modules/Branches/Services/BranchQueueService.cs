@@ -33,7 +33,7 @@ using WiserTaskScheduler.Modules.Wiser.Interfaces;
 namespace WiserTaskScheduler.Modules.Branches.Services;
 
 /// <inheritdoc cref="IBranchQueueService" />
-public class BranchQueueService(ILogService logService, ILogger<BranchQueueService> logger, IServiceProvider serviceProvider, IOptions<GclSettings> gclSettings) : IBranchQueueService, IActionsService, IScopedService
+public class BranchQueueService(ILogService logService, ILogger<BranchQueueService> logger, IServiceProvider serviceProvider, IOptions<GclSettings> gclSettings, IBranchBatchLoggerService branchBatchLoggerService) : IBranchQueueService, IActionsService, IScopedService
 {
     private const string CreateBranchSubject = "Branch with the name '{name}' [if({errorCount}=0)]has been created successfully[else]could not be created[endif] on {date:DateTime(dddd\\, dd MMMM yyyy,en-US)}";
     private const string CreateBranchTemplate = "<p>The branch creation started on {startDate:DateTime(HH\\:mm\\:ss)} and finished on {endDate:DateTime(HH\\:mm\\:ss)}. The creation took a total of {hours} hour(s), {minutes} minute(s) and {seconds} second(s).</p>[if({errorCount}!0)] <br /><br />The following errors occurred during the creation of the branch: {errors:Raw}[endif]";
@@ -1067,6 +1067,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         var stopwatch = new Stopwatch();
         stopwatch.Start();
         var queueId = dataRowWithSettings.Field<int>("id");
+        var queueName = dataRowWithSettings.Field<string>("name");
+        var branchId = dataRowWithSettings.Field<int>("branch_id");
         databaseConnection.AddParameter("queueId", queueId);
         databaseConnection.AddParameter("now", startDate);
         await databaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET started_on = ?now WHERE id = ?queueId");
@@ -1076,7 +1078,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         if (settings is not {Id: > 0} || String.IsNullOrWhiteSpace(settings.DatabaseName))
         {
             await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to merge a branch, but it either had invalid settings, or the branch ID was empty, or the database name was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-            errors.Add($"Trying to merge a branch, but it either had invalid settings, or the branch ID was empty, or the database name was empty. Queue ID was: {queueId}");
+            errors.Add($"Trying to merge a branch, but it either had invalid settings, the branch ID was empty, or the database name was empty. Queue ID was: {queueId}");
 
             await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, databaseConnection, wiserItemsService, taskAlertsService, errors, stopwatch, startDate, branchQueue.MergedBranchTemplateId, MergeBranchSubject, MergeBranchTemplate);
             return result;
@@ -1321,69 +1323,74 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             foreach (DataRow dataRow in dataTable.Rows)
             {
                 var historyId = Convert.ToUInt64(dataRow["id"]);
+                var action = dataRow.Field<string>("action").ToUpperInvariant();
+                var tableName = dataRow.Field<string>("tablename") ?? "";
+                var fieldName = dataRow.Field<string>("field");
 
-                // If this history item has a conflict and it's not accepted, skip and delete this history record.
+                var actionData = new BranchMergeLogModel(queueId, queueName, branchId, historyId, tableName, action, fieldName, branchConnection.ConnectionString);
+
                 var conflict = settings.ConflictSettings.SingleOrDefault(setting => setting.Id == historyId);
-                if (conflict != null && conflict.AcceptChange.HasValue && !conflict.AcceptChange.Value)
+                actionData.UsedConflictSettings = conflict;
+
+                // If this history item has a conflict, and it's not accepted, skip and delete this history record.
+                if (conflict is {AcceptChange: not null} && !conflict.AcceptChange.Value)
                 {
                     historyItemsSynchronised.Add(historyId);
                     itemsProcessed++;
                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
+                    actionData.Status = ObjectMergeStatuses.Skipped;
+                    actionData.MessageBuilder.AppendLine("User indicated to skip this change, because there was a conflict.");
+                    branchBatchLoggerService.LogMergeAction(actionData);
+
                     continue;
                 }
 
-                var action = dataRow.Field<string>("action").ToUpperInvariant();
-                var tableName = dataRow.Field<string>("tablename") ?? "";
                 // For ID mappings, if we have a row for wiser_itemdetail or wiser_itemlink, we want to check the ID of the item itself, not the ID of the detail or link.
                 // So we need to use the wiser_item table for that, not the wiser_itemdetail or wiser_itemlink table.
-                var itemTableName = tableName;
-                var destinationItemTableName = tableName;
                 var originalObjectId = Convert.ToUInt64(dataRow["item_id"]);
-                var objectId = originalObjectId;
-                var originalItemId = originalObjectId;
-                var itemId = originalObjectId;
-                var field = dataRow.Field<string>("field");
-                var oldValue = dataRow.Field<string>("oldvalue");
-                var newValue = dataRow.Field<string>("newvalue");
+                actionData.ObjectIdOriginal = originalObjectId;
+                actionData.ObjectIdMapped = originalObjectId;
+                actionData.OldValue = dataRow.Field<string>("oldvalue");
+                actionData.NewValue = dataRow.Field<string>("newvalue");
+
+                // TODO: Set ItemIdOriginal and ItemIdMapped to the correct values for the different actions, it was originally done here, but we should do it only when applicable, to prevent bad logs.
+                //actionData.ItemIdOriginal = originalObjectId;
+                //actionData.ItemIdMapped = originalObjectId;
+
                 var languageCode = dataRow.Field<string>("language_code") ?? "";
                 var groupName = dataRow.Field<string>("groupname") ?? "";
                 var targetId = dataTable.Columns.Contains("target_id") ? dataRow.Field<ulong>("target_id") : 0;
                 ulong? mappedTargetId = null;
                 var originalTargetId = targetId;
-                ulong? linkId = null;
-                ulong? originalLinkId;
-                ulong? originalFileId = null;
-                ulong? fileId = null;
                 var entityType = "";
-                int? linkType = null;
                 int? linkOrdering = null;
-                BranchMergeLinkCacheModel linkCacheData = null;
 
                 // Variables for item link changes.
-                var destinationItemId = 0UL;
                 ulong? oldItemId = null;
                 ulong? oldDestinationItemId = null;
                 (string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)? linkData = null;
                 LinkTypeMergeSettingsModel linkTypeSettings = null;
 
-                var idForComparison = originalItemId.ToString();
+                var idForComparison = actionData.ItemIdOriginal.ToString();
                 switch (action)
                 {
                     case "ADD_LINK":
                     {
                         // With ADD_LINK actions, the ID of the link itself isn't saved in wiser_history, so we need to use the concat the destination item ID (which is saved in "item_id"),
                         // the source item ID (which is saved in "newvalue") and the link type (which is saved in "field", together with the ordering) to get a unique ID for the link.
-                        var type = field?.Split(",").FirstOrDefault() ?? "0";
-                        idForComparison = $"{originalItemId}_{newValue}_{type}";
+                        var type = actionData.Field?.Split(",").FirstOrDefault() ?? "0";
+                        idForComparison = $"{actionData.ObjectIdOriginal}_{actionData.NewValue}_{type}";
+                        actionData.MessageBuilder.AppendLine($"Generated the following value for later checks if the link was created and deleted in the branch: {idForComparison}");
                         break;
                     }
                     case "REMOVE_LINK":
                     {
                         // With REMOVE_LINK actions, the ID of the link itself isn't saved in wiser_history, so we need to use the concat the destination item ID (which is saved in "item_id"),
                         // the source item ID (which is saved in "oldvalue") and the link type (which is saved in "field") to get a unique ID for the link.
-                        var type = field ?? "0";
-                        idForComparison = $"{originalItemId}_{oldValue}_{type}";
+                        var type = actionData.Field ?? "0";
+                        idForComparison = $"{actionData.ObjectIdOriginal}_{actionData.OldValue}_{type}";
+                        actionData.MessageBuilder.AppendLine($"Generated the following value for later checks if the link was created and deleted in the branch: {idForComparison}");
                         break;
                     }
                 }
@@ -1398,42 +1405,57 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     historyItemsSynchronised.Add(historyId);
                     itemsProcessed++;
                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
+                    actionData.Status = ObjectMergeStatuses.Skipped;
+                    actionData.MessageBuilder.AppendLine("The current row was skipped, because the object was both created and deleted in the branch, which means that there is no point in merging that.");
+                    branchBatchLoggerService.LogMergeAction(actionData);
                     continue;
                 }
 
-                var (tablePrefix, _) = BranchesHelpers.GetTablePrefix(tableName, originalItemId);
+                var (tablePrefix, _) = BranchesHelpers.GetTablePrefix(tableName, actionData.ObjectIdOriginal);
+                actionData.MessageBuilder.AppendLine($"Table prefix for original object is: '{tablePrefix}'");
                 if (!itemsCache.TryGetValue(tablePrefix, out var listOfItems))
                 {
                     listOfItems = [];
                     itemsCache.Add(tablePrefix, listOfItems);
+                    actionData.MessageBuilder.AppendLine("This was a new table prefix, so we added it to the items cache dictionary.");
                 }
 
                 try
                 {
                     // Make sure we have the correct item ID. For some actions the item id is saved in a different column.
+                    BranchMergeLinkCacheModel linkCacheData;
                     switch (action)
                     {
                         case "REMOVE_LINK":
                         {
-                            destinationItemId = itemId;
-                            itemId = Convert.ToUInt64(oldValue);
-                            originalItemId = itemId;
-                            linkType = Int32.Parse(field);
+                            // In the REMOVE_LINK action, the destination item ID is saved in the item_id column of wiser_history.
+                            actionData.LinkDestinationItemIdOriginal = actionData.ObjectIdOriginal;
+                            actionData.LinkDestinationItemIdMapped = actionData.ObjectIdMapped;
+
+                            // In the REMOVE_LINK action, the source item ID is saved in the old value column of wiser_history.
+                            actionData.ItemIdOriginal = Convert.ToUInt64(actionData.OldValue);
+                            actionData.ItemIdMapped = actionData.ItemIdOriginal;
+                            actionData.OldValue = null;
+
+                            // In the REMOVE_LINK action, the link type is saved in the field column of wiser_history.
+                            actionData.LinkType = Int32.Parse(actionData.Field);
+                            actionData.Field = String.Empty;
 
                             break;
                         }
                         case "UPDATE_ITEMLINKDETAIL":
                         case "CHANGE_LINK":
                         {
-                            linkId = itemId;
-                            originalLinkId = linkId;
+                            actionData.LinkIdOriginal = actionData.ObjectIdOriginal;
+                            actionData.LinkIdMapped = actionData.ObjectIdMapped;
 
                             // When a link has been changed, it's possible that the ID of one of the items is changed.
                             // It's also possible that this is a new link that the production database didn't have yet (and so the ID of the link will most likely be different).
                             // Therefor we need to find the original item and destination IDs, so that we can use those to update the link in the production database.
-                            sqlParameters["linkId"] = linkId;
+                            sqlParameters["linkId"] = actionData.LinkIdMapped;
 
-                            linkCacheData = linksCache.FirstOrDefault(link => link.Id == linkId);
+                            linkCacheData = linksCache.FirstOrDefault(link => link.Id == actionData.LinkIdMapped);
                             if (linkCacheData != null)
                             {
                                 if (linkCacheData.IsDeleted)
@@ -1441,32 +1463,38 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                     historyItemsSynchronised.Add(historyId);
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
+                                    actionData.Status = ObjectMergeStatuses.Skipped;
+                                    actionData.MessageBuilder.AppendLine("The current row was skipped, because the object was both created and deleted in the branch, which means that there is no point in merging that.");
+                                    branchBatchLoggerService.LogMergeAction(actionData);
                                     continue;
                                 }
 
                                 if (linkCacheData.ItemId.HasValue && linkCacheData.DestinationItemId.HasValue && linkCacheData.Type.HasValue)
                                 {
-                                    itemId = linkCacheData.ItemId.Value;
-                                    originalItemId = itemId;
-                                    destinationItemId = linkCacheData.DestinationItemId.Value;
-                                    linkType = linkCacheData.Type;
+                                    actionData.ItemIdOriginal = linkCacheData.ItemId.Value;
+                                    actionData.ItemIdMapped = linkCacheData.ItemId.Value;
+                                    actionData.LinkDestinationItemIdOriginal = linkCacheData.DestinationItemId.Value;
+                                    actionData.LinkDestinationItemIdMapped = linkCacheData.DestinationItemId.Value;
+                                    actionData.LinkType = linkCacheData.Type ?? 0;
 
-                                    switch (field)
+                                    switch (actionData.Field)
                                     {
                                         case "destination_item_id":
-                                            oldDestinationItemId = Convert.ToUInt64(oldValue);
-                                            destinationItemId = Convert.ToUInt64(newValue);
-                                            oldItemId = itemId;
+                                            oldDestinationItemId = Convert.ToUInt64(actionData.OldValue);
+                                            actionData.LinkDestinationItemIdOriginal = Convert.ToUInt64(actionData.NewValue);
+                                            actionData.LinkDestinationItemIdMapped = actionData.LinkDestinationItemIdOriginal;
+                                            oldItemId = actionData.ItemIdOriginal;
                                             break;
                                         case "item_id":
-                                            oldItemId = Convert.ToUInt64(oldValue);
-                                            itemId = Convert.ToUInt64(newValue);
-                                            originalItemId = itemId;
-                                            oldDestinationItemId = destinationItemId;
+                                            oldItemId = Convert.ToUInt64(actionData.OldValue);
+                                            actionData.ItemIdOriginal = Convert.ToUInt64(actionData.NewValue);
+                                            actionData.ItemIdMapped = actionData.ItemIdOriginal;
+                                            oldDestinationItemId = actionData.LinkDestinationItemIdOriginal;
                                             break;
                                         default:
-                                            oldItemId = itemId;
-                                            oldDestinationItemId = destinationItemId;
+                                            oldItemId = actionData.ItemIdOriginal;
+                                            oldDestinationItemId = actionData.LinkDestinationItemIdOriginal;
                                             break;
                                     }
 
@@ -1477,7 +1505,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             {
                                 linkCacheData = new BranchMergeLinkCacheModel
                                 {
-                                    Id = linkId.Value
+                                    Id = actionData.LinkIdOriginal
                                 };
                                 linksCache.Add(linkCacheData);
                             }
@@ -1486,51 +1514,58 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             AddParametersToCommand(sqlParameters, branchCommand);
 
                             // Replace wiser_itemlinkdetail with wiser_itemlink because we need to get the source and destination from [prefix]wiser_itemlink, even if this is an update for [prefix]wiser_itemlinkdetail.
-                            branchCommand.CommandText = $"SELECT type, item_id, destination_item_id FROM `{tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink)}` WHERE id = ?linkId";
+                            var itemLinkTableName = tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink);
+                            branchCommand.CommandText = $"SELECT type, item_id, destination_item_id FROM `{itemLinkTableName}` WHERE id = ?linkId";
                             var linkDataTable = new DataTable();
                             using var branchAdapter = new MySqlDataAdapter(branchCommand);
                             branchAdapter.Fill(linkDataTable);
                             if (linkDataTable.Rows.Count == 0)
                             {
-                                branchCommand.CommandText = $"SELECT type, item_id, destination_item_id FROM `{tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink)}{WiserTableNames.ArchiveSuffix}` WHERE id = ?linkId";
+                                branchCommand.CommandText = $"SELECT type, item_id, destination_item_id FROM `{itemLinkTableName}{WiserTableNames.ArchiveSuffix}` WHERE id = ?linkId";
                                 branchAdapter.Fill(linkDataTable);
                                 if (linkDataTable.Rows.Count == 0)
                                 {
                                     // This should never happen, but just in case the ID somehow doesn't exist anymore, log a warning and continue on to the next item.
-                                    await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find link with id '{linkId}' in database '{branchDatabase}'. Skipping this history record in synchronisation to production.", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                                    await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find link with id '{actionData.LinkIdOriginal}' in database '{branchDatabase}'. Skipping this history record in synchronisation to production.", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                                     historyItemsSynchronised.Add(historyId);
                                     linkCacheData.IsDeleted = true;
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
+                                    actionData.Status = ObjectMergeStatuses.Skipped;
+                                    actionData.MessageBuilder.AppendLine($"The current row was skipped, because the link with ID '{actionData.LinkIdOriginal} was not found in the branch database, in the table '{itemLinkTableName}'.");
+                                    branchBatchLoggerService.LogMergeAction(actionData);
                                     continue;
                                 }
                             }
 
-                            itemId = Convert.ToUInt64(linkDataTable.Rows[0]["item_id"]);
-                            originalItemId = itemId;
-                            destinationItemId = Convert.ToUInt64(linkDataTable.Rows[0]["destination_item_id"]);
-                            linkType = Convert.ToInt32(linkDataTable.Rows[0]["type"]);
+                            actionData.ItemIdOriginal = Convert.ToUInt64(linkDataTable.Rows[0]["item_id"]);
+                            actionData.ItemIdMapped = actionData.ItemIdOriginal;
+                            actionData.LinkDestinationItemIdOriginal = Convert.ToUInt64(linkDataTable.Rows[0]["destination_item_id"]);
+                            actionData.LinkDestinationItemIdMapped = actionData.LinkDestinationItemIdOriginal;
+                            actionData.LinkType = Convert.ToInt32(linkDataTable.Rows[0]["type"]);
 
-                            linkCacheData.Type = linkType.Value;
-                            linkCacheData.ItemId = itemId;
-                            linkCacheData.DestinationItemId = destinationItemId;
+                            linkCacheData.Type = actionData.LinkType;
+                            linkCacheData.ItemId = actionData.ItemIdOriginal;
+                            linkCacheData.DestinationItemId = actionData.LinkDestinationItemIdOriginal;
 
-                            switch (field)
+                            switch (actionData.Field)
                             {
                                 case "destination_item_id":
-                                    oldDestinationItemId = Convert.ToUInt64(oldValue);
-                                    destinationItemId = Convert.ToUInt64(newValue);
-                                    oldItemId = itemId;
+                                    oldDestinationItemId = Convert.ToUInt64(actionData.OldValue);
+                                    actionData.LinkDestinationItemIdOriginal = Convert.ToUInt64(actionData.NewValue);
+                                    actionData.LinkDestinationItemIdMapped = actionData.LinkDestinationItemIdOriginal;
+                                    oldItemId = actionData.ItemIdOriginal;
                                     break;
                                 case "item_id":
-                                    oldItemId = Convert.ToUInt64(oldValue);
-                                    itemId = Convert.ToUInt64(newValue);
-                                    originalItemId = itemId;
-                                    oldDestinationItemId = destinationItemId;
+                                    oldItemId = Convert.ToUInt64(actionData.OldValue);
+                                    actionData.ItemIdOriginal = Convert.ToUInt64(actionData.NewValue);
+                                    actionData.ItemIdMapped = actionData.ItemIdOriginal;
+                                    oldDestinationItemId = actionData.LinkDestinationItemIdOriginal;
                                     break;
                                 default:
-                                    oldItemId = itemId;
-                                    oldDestinationItemId = destinationItemId;
+                                    oldItemId = actionData.ItemIdOriginal;
+                                    oldDestinationItemId = actionData.LinkDestinationItemIdOriginal;
                                     break;
                             }
 
@@ -1538,12 +1573,13 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         }
                         case "ADD_LINK":
                         {
-                            destinationItemId = itemId;
-                            itemId = Convert.ToUInt64(newValue);
-                            originalItemId = itemId;
+                            actionData.LinkDestinationItemIdOriginal = actionData.ObjectIdOriginal;
+                            actionData.LinkDestinationItemIdMapped = actionData.LinkDestinationItemIdOriginal;
+                            actionData.ItemIdOriginal = Convert.ToUInt64(actionData.NewValue);
+                            actionData.ItemIdMapped = actionData.ItemIdOriginal;
 
-                            var split = field.Split(',');
-                            linkType = Int32.Parse(split[0]);
+                            var split = actionData.Field.Split(',');
+                            actionData.LinkType = Int32.Parse(split[0]);
                             linkOrdering = split.Length > 1 ? Int32.Parse(split[1]) : 0;
 
                             break;
@@ -1551,22 +1587,29 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "ADD_FILE":
                         case "DELETE_FILE":
                         {
-                            itemTableName = tableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItem);
-                            fileId = itemId;
-                            originalFileId = fileId;
-                            itemId = String.Equals(oldValue, "item_id", StringComparison.OrdinalIgnoreCase) ? UInt64.Parse(newValue) : 0;
-                            originalItemId = itemId;
-                            linkId = String.Equals(oldValue, "itemlink_id", StringComparison.OrdinalIgnoreCase) ? UInt64.Parse(newValue) : 0;
-                            originalLinkId = linkId;
+                            actionData.ItemTableName = tableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItem);
+                            actionData.FileIdOriginal = actionData.ObjectIdOriginal;
+                            actionData.FileIdMapped = actionData.ObjectIdMapped;
 
-                            if (linkId > 0)
+                            // The ADD_FILE and DELETE_FILE use the old value column to indicate whether it's a file for a link or for an item. The new value column is the ID of the link or item.
+                            actionData.ItemIdOriginal = String.Equals(actionData.OldValue?.ToString(), "item_id", StringComparison.OrdinalIgnoreCase) ? Convert.ToUInt64(actionData.NewValue) : 0;
+                            actionData.LinkIdOriginal = String.Equals(actionData.OldValue?.ToString(), "itemlink_id", StringComparison.OrdinalIgnoreCase) ? Convert.ToUInt64(actionData.NewValue) : 0;
+
+                            actionData.ItemIdMapped = actionData.ItemIdOriginal;
+                            actionData.LinkIdMapped = actionData.LinkIdOriginal;
+
+                            if (actionData.LinkIdOriginal > 0)
                             {
-                                linkCacheData = await GetLinkDataAsync(linkId, sqlParameters, tableName, branchConnection, linksCache);
+                                linkCacheData = await GetLinkDataAsync(actionData.LinkIdOriginal, sqlParameters, tableName, branchConnection, linksCache);
                                 if (linkCacheData.IsDeleted)
                                 {
                                     historyItemsSynchronised.Add(historyId);
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
+                                    actionData.Status = ObjectMergeStatuses.Skipped;
+                                    actionData.MessageBuilder.AppendLine("The current row was skipped, because the file is linked to an item link that is both created and then deleted in the branch, which means that there is no point in merging that.");
+                                    branchBatchLoggerService.LogMergeAction(actionData);
                                     continue;
                                 }
                             }
@@ -1575,18 +1618,19 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         }
                         case "UPDATE_FILE":
                         {
-                            itemTableName = tableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItem);
-                            fileId = itemId;
-                            originalFileId = fileId;
-                            sqlParameters["fileId"] = fileId;
+                            actionData.ItemTableName = tableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItem);
+                            actionData.FileIdOriginal = actionData.ObjectIdOriginal;
+                            actionData.FileIdMapped = actionData.ObjectIdMapped;
+                            sqlParameters["fileId"] = actionData.FileIdOriginal;
 
                             if (!filesCache.TryGetValue(tablePrefix, out var listOfFiles))
                             {
                                 listOfFiles = [];
                                 filesCache.Add(tablePrefix, listOfFiles);
+                                actionData.MessageBuilder.AppendLine($"New table prefix found ('{tablePrefix}'), so we added it to the files cache dictionary.");
                             }
 
-                            var fileData = listOfFiles.FirstOrDefault(file => file.Id == fileId);
+                            var fileData = listOfFiles.FirstOrDefault(file => file.Id == actionData.FileIdOriginal);
                             if (fileData != null)
                             {
                                 if (fileData.IsDeleted)
@@ -1594,15 +1638,19 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                     historyItemsSynchronised.Add(historyId);
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
+                                    actionData.Status = ObjectMergeStatuses.Skipped;
+                                    actionData.MessageBuilder.AppendLine("The current row was skipped, because the object was both created and deleted in the branch, which means that there is no point in merging that.");
+                                    branchBatchLoggerService.LogMergeAction(actionData);
                                     continue;
                                 }
 
                                 if (fileData.ItemId.HasValue && fileData.LinkId.HasValue)
                                 {
-                                    itemId = fileData.ItemId.Value;
-                                    originalItemId = itemId;
-                                    linkId = fileData.LinkId.Value;
-                                    originalLinkId = linkId;
+                                    actionData.ItemIdOriginal = fileData.ItemId.Value;
+                                    actionData.ItemIdMapped = actionData.ItemIdOriginal;
+                                    actionData.LinkIdOriginal = fileData.LinkId.Value;
+                                    actionData.LinkIdMapped = actionData.LinkIdOriginal;
                                     break;
                                 }
                             }
@@ -1610,7 +1658,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             {
                                 fileData = new BranchMergeFileCacheModel
                                 {
-                                    Id = fileId.Value
+                                    Id = actionData.FileIdOriginal
                                 };
                                 listOfFiles.Add(fileData);
                             }
@@ -1632,22 +1680,30 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 fileData.IsDeleted = true;
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
+                                actionData.Status = ObjectMergeStatuses.Skipped;
+                                actionData.MessageBuilder.AppendLine($"The current row was skipped, because the file was was not found in the table '{tableName}'.");
+                                branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
 
-                            itemId = Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]);
-                            originalItemId = itemId;
-                            linkId = Convert.ToUInt64(fileDataTable.Rows[0]["itemlink_id"]);
-                            originalLinkId = linkId;
+                            actionData.ItemIdOriginal = Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]);
+                            actionData.ItemIdMapped = actionData.ItemIdOriginal;
+                            actionData.LinkIdOriginal = Convert.ToUInt64(fileDataTable.Rows[0]["itemlink_id"]);
+                            actionData.LinkIdMapped = actionData.LinkIdOriginal;
 
-                            if (linkId > 0)
+                            if (actionData.LinkIdOriginal > 0)
                             {
-                                linkCacheData = await GetLinkDataAsync(linkId, sqlParameters, tableName, branchConnection, linksCache);
+                                linkCacheData = await GetLinkDataAsync(actionData.LinkIdOriginal, sqlParameters, tableName, branchConnection, linksCache);
                                 if (linkCacheData.IsDeleted)
                                 {
                                     historyItemsSynchronised.Add(historyId);
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
+                                    actionData.Status = ObjectMergeStatuses.Skipped;
+                                    actionData.MessageBuilder.AppendLine("The current row was skipped, because the file is linked to an item link that is both created and then deleted in the branch, which means that there is no point in merging that.");
+                                    branchBatchLoggerService.LogMergeAction(actionData);
                                     continue;
                                 }
                             }
@@ -1657,21 +1713,20 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "DELETE_ITEM":
                         case "UNDELETE_ITEM":
                         {
-                            entityType = field;
+                            entityType = actionData.Field;
+                            actionData.Field = String.Empty;
                             break;
                         }
                         case "UPDATE_ITEM":
                         case "UPDATE_ITEM_DETAIL":
                         {
-                            itemTableName = tableName.Replace(WiserTableNames.WiserItemDetail, WiserTableNames.WiserItem);
+                            actionData.ItemTableName = tableName.Replace(WiserTableNames.WiserItemDetail, WiserTableNames.WiserItem);
                             break;
                         }
                     }
 
-                    // Did we map the item ID to something else? Then use that new ID.
-                    var originalDestinationItemId = destinationItemId;
-
-                    if (action is "ADD_LINK" or "CHANGE_LINK" or "REMOVE_LINK" || (action is "ADD_FILE" or "UPDATE_FILE" or "DELETE_FILE" && linkId > 0 && linkType is > 0))
+                    // Get information we need for Wiser item links.
+                    if (action is "ADD_LINK" or "CHANGE_LINK" or "REMOVE_LINK" || (action is "ADD_FILE" or "UPDATE_FILE" or "DELETE_FILE" && actionData.LinkIdOriginal > 0 && actionData.LinkType is > 0))
                     {
                         // Unlock the tables temporarily so that we can call GetEntityTypesOfLinkAsync, which calls wiserItemsService.GetTablePrefixForEntityAsync, since that method doesn't use our custom database connection.
                         await using var productionCommand = productionConnection.CreateCommand();
@@ -1682,13 +1737,13 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         branchCommand.CommandText = "UNLOCK TABLES";
                         await branchCommand.ExecuteNonQueryAsync();
 
-                        linkData = await GetEntityTypesOfLinkAsync(originalItemId, originalDestinationItemId, linkType.Value, branchConnection, branchEntityTypesService, allLinkTypeSettings, allEntityTypeSettings);
+                        linkData = await GetEntityTypesOfLinkAsync(actionData.ItemIdOriginal, actionData.LinkDestinationItemIdOriginal, actionData.LinkType, branchConnection, branchEntityTypesService, allLinkTypeSettings, allEntityTypeSettings);
                         if (linkData.HasValue)
                         {
-                            linkTypeSettings = settings.LinkTypes.SingleOrDefault(s => s.Type == linkType.Value && String.Equals(s.SourceEntityType, linkData.Value.SourceType) && String.Equals(s.DestinationEntityType, linkData.Value.DestinationType));
+                            linkTypeSettings = settings.LinkTypes.SingleOrDefault(s => s.Type == actionData.LinkType && String.Equals(s.SourceEntityType, linkData.Value.SourceType) && String.Equals(s.DestinationEntityType, linkData.Value.DestinationType));
 
-                            itemTableName = $"{linkData.Value.SourceTablePrefix}{WiserTableNames.WiserItem}";
-                            destinationItemTableName = $"{linkData.Value.DestinationTablePrefix}{WiserTableNames.WiserItem}";
+                            actionData.ItemTableName = $"{linkData.Value.SourceTablePrefix}{WiserTableNames.WiserItem}";
+                            actionData.LinkDestinationItemTableName = $"{linkData.Value.DestinationTablePrefix}{WiserTableNames.WiserItem}";
 
                             entityType = linkData.Value.SourceType;
 
@@ -1717,23 +1772,23 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         await LockTablesAsync(branchConnection, tablesToLock, true);
                     }
 
-                    itemId = GetMappedId(itemTableName, idMapping, itemId).Value;
-                    destinationItemId = GetMappedId(destinationItemTableName, idMapping, destinationItemId).Value;
-                    oldItemId = GetMappedId(itemTableName, idMapping, oldItemId);
-                    oldDestinationItemId = GetMappedId(destinationItemTableName, idMapping, oldDestinationItemId);
-                    linkId = GetMappedId(tableName, idMapping, linkId);
-                    fileId = GetMappedId(tableName, idMapping, fileId);
-                    objectId = GetMappedId(tableName, idMapping, objectId) ?? 0;
+                    actionData.ItemIdMapped = GetMappedId(actionData.ItemTableName, idMapping, actionData.ItemIdOriginal).Value;
+                    actionData.LinkDestinationItemIdMapped = GetMappedId(actionData.LinkDestinationItemTableName, idMapping, actionData.LinkDestinationItemIdOriginal).Value;
+                    oldItemId = GetMappedId(actionData.ItemTableName, idMapping, oldItemId);
+                    oldDestinationItemId = GetMappedId(actionData.LinkDestinationItemTableName, idMapping, oldDestinationItemId);
+                    actionData.LinkIdMapped = GetMappedId(tableName, idMapping, actionData.LinkIdOriginal).Value;
+                    actionData.FileIdMapped = GetMappedId(tableName, idMapping, actionData.FileIdOriginal).Value;
+                    actionData.ObjectIdMapped = GetMappedId(tableName, idMapping, actionData.ObjectIdOriginal).Value;
                     mappedTargetId = GetMappedId(tableName, idMapping, targetId, true);
                     targetId = mappedTargetId ?? targetId;
-                    var linkSourceItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalItemId.ToString() && String.Equals(i.TableName, $"{linkData?.SourceTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
-                    var linkDestinationItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == originalDestinationItemId.ToString() && String.Equals(i.TableName, $"{linkData?.DestinationTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
+                    var linkSourceItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == actionData.ItemIdOriginal.ToString() && String.Equals(i.TableName, $"{linkData?.SourceTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
+                    var linkDestinationItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == actionData.LinkDestinationItemIdOriginal.ToString() && String.Equals(i.TableName, $"{linkData?.DestinationTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
 
-                    var (_, isWiserItemChange) = BranchesHelpers.GetTablePrefix(tableName, originalItemId);
-                    var itemData = listOfItems.FirstOrDefault(item => item.Id == itemId);
+                    var (_, isWiserItemChange) = BranchesHelpers.GetTablePrefix(tableName, actionData.ItemIdOriginal);
+                    var itemData = listOfItems.FirstOrDefault(item => item.Id == actionData.ItemIdMapped);
                     if (itemData == null)
                     {
-                        itemData = new BranchMergeItemCacheModel {Id = itemId};
+                        itemData = new BranchMergeItemCacheModel {Id = actionData.ItemIdMapped};
                         listOfItems.Add(itemData);
                     }
 
@@ -1748,6 +1803,10 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         historyItemsSynchronised.Add(historyId);
                         itemsProcessed++;
                         await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
+                        actionData.Status = ObjectMergeStatuses.Skipped;
+                        actionData.MessageBuilder.AppendLine("The current row was skipped, because this is an item that we already deleted in production via a previous history row.");
+                        branchBatchLoggerService.LogMergeAction(actionData);
                         continue;
                     }
 
@@ -1759,7 +1818,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     }
                     else if (String.IsNullOrWhiteSpace(entityType))
                     {
-                        if (action is "ADD_LINK" or "CHANGE_LINK" or "REMOVE_LINK" || (action is "ADD_FILE" or "UPDATE_FILE" or "DELETE_FILE" && linkId > 0 && linkType is > 0))
+                        if (action is "ADD_LINK" or "CHANGE_LINK" or "REMOVE_LINK" || (action is "ADD_FILE" or "UPDATE_FILE" or "DELETE_FILE" && actionData.LinkIdMapped > 0 && actionData.LinkType is > 0))
                         {
                             // If we couldn't find any link data, then most likely one of the items doesn't exist anymore, so skip this history record.
                             // The other reason could be that the link type is not configured (correctly), in that case we also can't do anything, so skip it as well.
@@ -1768,6 +1827,10 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 historyItemsSynchronised.Add(historyId);
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
+                                actionData.Status = ObjectMergeStatuses.Skipped;
+                                actionData.MessageBuilder.AppendLine("The current row was skipped, because this is a link change (or something related to a link) and we couldn't find any information about this link type. This most likely means that one of the linked items doesn't exist anymore, or that the link type is not configured (correctly).");
+                                branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
                         }

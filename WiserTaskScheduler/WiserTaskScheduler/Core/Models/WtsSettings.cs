@@ -4,6 +4,8 @@ using WiserTaskScheduler.Core.Models.AutoProjectDeploy;
 using WiserTaskScheduler.Core.Models.Cleanup;
 using WiserTaskScheduler.Core.Models.ParentsUpdate;
 using WiserTaskScheduler.Core.Services;
+using WiserTaskScheduler.Modules.Branches.Models;
+using WiserTaskScheduler.Modules.Branches.Services;
 using WiserTaskScheduler.Modules.Wiser.Models;
 
 namespace WiserTaskScheduler.Core.Models;
@@ -58,6 +60,11 @@ public class WtsSettings
     /// Gets or sets the <see cref="AutoProjectDeploy"/> used by the <see cref="AutoProjectDeployService"/>.
     /// </summary>
     public AutoProjectDeploySettings AutoProjectDeploy { get; init; } = new();
+
+    /// <summary>
+    /// Gets or sets the <see cref="BatchLoggerOptions"/> used by the <see cref="BranchBatchLoggerService"/>.
+    /// </summary>
+    public BatchLoggerOptions BatchLoggerOptions { get; init; } = new();
 
     /// <summary>
     /// A semicolon (;) seperated list of email addresses to notify when a core service failed during execution.
