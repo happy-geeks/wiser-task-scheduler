@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Worker">
+<Project Sdk="Microsoft.NET.Sdk.Worker">
 
     <PropertyGroup>
         <TargetFramework>net9.0</TargetFramework>
@@ -19,7 +19,7 @@
         <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.3" />
         <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.3" />
         <PackageReference Include="Serilog.AspNetCore" Version="9.0.0"/>
-        <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="9.0.3" />
+        <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="9.0.4" />
         <PackageReference Include="SlackNet.AspNetCore" Version="0.15.5"/>
     </ItemGroup>
 
