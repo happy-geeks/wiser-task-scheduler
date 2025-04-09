@@ -2,6 +2,7 @@
 using System.Text;
 using System.Text.Json.Serialization;
 using GeeksCoreLibrary.Modules.Branches.Models;
+using MySqlConnector;
 using WiserTaskScheduler.Modules.Branches.Enums;
 using WiserTaskScheduler.Modules.Branches.Services;
 
@@ -12,44 +13,44 @@ namespace WiserTaskScheduler.Modules.Branches.Models;
 /// <summary>
 /// A model to store information that can then be added to the branch merge log table.
 /// </summary>
-public class BranchMergeLogModel(int queueId, string queueName, int branchId, ulong historyId, string tableName, string action, string field, string branchDatabaseConnectionString)
+public class BranchMergeLogModel(int queueId, string queueName, int branchId, ulong historyId, string tableName, string action, string field, MySqlConnectionStringBuilder productionDatabaseConnectionString, MySqlConnectionStringBuilder branchDatabaseConnectionString)
 {
     #region Basic information
 
     /// <summary>
     /// The ID of the merge action from the wiser_branches_queue table in the production database.
     /// </summary>
-    public int QueueId { get; set; } = queueId;
+    public int QueueId { get; } = queueId;
 
     /// <summary>
     /// The name of the merge action from the wiser_branches_queue table in the production database.
     /// </summary>
-    public string QueueName { get; set; } = queueName;
+    public string QueueName { get; } = queueName;
 
     /// <summary>
     /// The tenant ID of the branch, from the easy_customers table of the main Wiser database.
     /// </summary>
-    public int BranchId { get; set; } = branchId;
+    public int BranchId { get; } = branchId;
 
     /// <summary>
     /// The date and time that the current action was executed.
     /// </summary>
-    public DateTime DateTime { get; set; } = DateTime.Now;
+    public DateTime DateTime { get; } = DateTime.Now;
 
     /// <summary>
     /// The ID from the wiser_history table in the branch database that was being merged.
     /// </summary>
-    public ulong HistoryId { get; set; } = historyId;
+    public ulong HistoryId { get; } = historyId;
 
     /// <summary>
     /// The table name as it was stored in the wiser_history table of the branch database.
     /// </summary>
-    public string TableName { get; set; } = tableName;
+    public string TableName { get; } = tableName;
 
     /// <summary>
     /// The action as it was stored in the wiser_history table of the branch database.
     /// </summary>
-    public string Action { get; set; } = action;
+    public string Action { get; } = action;
 
     /// <summary>
     /// The field name as it was stored in the wiser_history table of the branch database.
@@ -60,12 +61,12 @@ public class BranchMergeLogModel(int queueId, string queueName, int branchId, ul
     /// <summary>
     /// The value as it was before the change.
     /// </summary>
-    public object? OldValue { get; set; }
+    public string? OldValue { get; set; }
 
     /// <summary>
     /// The value that it was changed to in the branch database, which we attempted to merge to the production database.
     /// </summary>
-    public object? NewValue { get; set; }
+    public string? NewValue { get; set; }
 
     /// <summary>
     /// The id of the object in the branch database. This is the original value of the column `item_id` from wiser_history.
@@ -82,7 +83,7 @@ public class BranchMergeLogModel(int queueId, string queueName, int branchId, ul
     /// This is used for logging the merge action to the branch database, via the <see cref="BranchBatchLoggerService"/>.
     /// </summary>
     [JsonIgnore]
-    internal string BranchDatabaseConnectionString { get; set; } = branchDatabaseConnectionString;
+    internal string BranchDatabaseConnectionString { get; } = branchDatabaseConnectionString.ConnectionString;
 
     #endregion
 
@@ -99,6 +100,12 @@ public class BranchMergeLogModel(int queueId, string queueName, int branchId, ul
     /// If this is a change for a link, this is the ID of the source item.
     /// </summary>
     public ulong ItemIdMapped { get; set; }
+
+    /// <summary>
+    /// If this change was for a Wiser item or something related to a Wiser item (such as a link), then this will contain the entity type of that item, as we found it.
+    /// If this is a change for a link, this is the entity type of the source item.
+    /// </summary>
+    public string ItemEntityType { get; set; } = String.Empty;
 
     /// <summary>
     /// If this change was for a Wiser item or something related to a Wiser item (such as a link), then this will contain the full name of the `wiser_item` table that we used.
@@ -131,6 +138,11 @@ public class BranchMergeLogModel(int queueId, string queueName, int branchId, ul
     public ulong LinkDestinationItemIdMapped { get; set; }
 
     /// <summary>
+    /// If this is a change for a link, this is the entity type of the destination Wiser item of that link.
+    /// </summary>
+    public string LinkDestinationItemEntityType { get; set; } = String.Empty;
+
+    /// <summary>
     /// If this is a change for a link, this is the table name of the destination Wiser item of that link.
     /// </summary>
     public string LinkDestinationItemTableName { get; set; } = tableName;
@@ -139,6 +151,11 @@ public class BranchMergeLogModel(int queueId, string queueName, int branchId, ul
     /// If this is a change for a link, then this is the value of the `type` column of `wiser_itemlink`.
     /// </summary>
     public int LinkType { get; set; }
+
+    /// <summary>
+    /// If this is a change for a link, then this is the value of the `ordering` column of `wiser_itemlink`.
+    /// </summary>
+    public int LinkOrdering { get; set; }
 
     #endregion
 
@@ -153,6 +170,16 @@ public class BranchMergeLogModel(int queueId, string queueName, int branchId, ul
     /// If this is a change for a Wiser item detail, this will contain the value of the `id` column of `wiser_itemdetail`, in the branch database.
     /// </summary>
     public ulong ItemDetailIdMapped { get; set; }
+
+    /// <summary>
+    /// If this is a change for a Wiser item detail, this will contain the value of the `language_code` column of `wiser_itemdetail`, in the branch database.
+    /// </summary>
+    public string ItemDetailLanguageCode { get; set; } = String.Empty;
+
+    /// <summary>
+    /// If this is a change for a Wiser item detail, this will contain the value of the `groupname` column of `wiser_itemdetail`, in the branch database.
+    /// </summary>
+    public string ItemDetailGroupName { get; set; } = String.Empty;
 
     #endregion
 
@@ -185,32 +212,32 @@ public class BranchMergeLogModel(int queueId, string queueName, int branchId, ul
     /// <summary>
     /// The hostname of the production database server.
     /// </summary>
-    public string ProductionHost { get; set; } = String.Empty;
+    public string ProductionHost { get; } = productionDatabaseConnectionString.Server;
 
     /// <summary>
     /// The name of the production database schema.
     /// </summary>
-    public string ProductionDatabase { get; set; } = String.Empty;
+    public string ProductionDatabase { get; } = productionDatabaseConnectionString.Database;
 
     /// <summary>
     /// The hostname of the branch database server.
     /// </summary>
-    public string BranchHost { get; set; } = String.Empty;
+    public string BranchHost { get; } = branchDatabaseConnectionString.Server;
 
     /// <summary>
     /// The name of the branch database schema.
     /// </summary>
-    public string BranchDatabase { get; set; } = String.Empty;
+    public string BranchDatabase { get; } = branchDatabaseConnectionString.Database;
 
     /// <summary>
     /// The merge status of this object.
     /// </summary>
-    public ObjectMergeStatuses Status { get; set; } = ObjectMergeStatuses.None;
+    public ObjectActionMergeStatuses Status { get; set; } = ObjectActionMergeStatuses.None;
 
     /// <summary>
     /// This will contain debug information that explains what happened, where information was taken from etc. If the merge failed, it will explain the reason and/or contain the error message. If the merge was skipped, it will explain why.
     /// </summary>
-    public StringBuilder MessageBuilder { get; set; } = new();
+    public StringBuilder MessageBuilder { get; } = new();
 
     /// <summary>
     /// The message that was built in the MessageBuilder. This is a string representation of the MessageBuilder.

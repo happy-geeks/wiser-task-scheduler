@@ -29,6 +29,15 @@ public class BranchBatchLoggerService(IOptions<WtsSettings> wtsOptions, ILogger<
     }
 
     /// <inheritdoc />
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        // Override StopAsync to wait for the log queue to be completely flushed before shutdown.
+        logger.LogInformation("BatchLogger is stopping. Flushing remaining logs.");
+        await FlushUntilEmptyAsync();
+        await base.StopAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Continuously flush log entries until cancellation is requested.
@@ -49,14 +58,10 @@ public class BranchBatchLoggerService(IOptions<WtsSettings> wtsOptions, ILogger<
         await FlushUntilEmptyAsync();
     }
 
-    // Override StopAsync to wait for the log queue to be completely flushed before shutdown.
-    public override async Task StopAsync(CancellationToken cancellationToken)
-    {
-        logger.LogInformation("BatchLogger is stopping. Flushing remaining logs.");
-        await FlushUntilEmptyAsync();
-        await base.StopAsync(cancellationToken);
-    }
-
+    /// <summary>
+    /// Method to flush the log queue until it is empty.
+    /// This should be called when the application is stopping to ensure all logs are written before the application is closed.
+    /// </summary>
     private async Task FlushUntilEmptyAsync()
     {
         // Loop until the queue is empty or no new logs are added.
@@ -66,15 +71,28 @@ public class BranchBatchLoggerService(IOptions<WtsSettings> wtsOptions, ILogger<
         }
     }
 
+    /// <summary>
+    /// Flush the next batch of log entries to the database.
+    /// </summary>
     private async Task FlushAsync()
     {
+        // Create a list for the next batch of logs.
         var entriesToInsert = new List<BranchMergeLogModel>();
+        string branchDatabaseConnectionString = null;
 
-        while (entriesToInsert.Count < options.BatchSize && mergeLogQueue.TryDequeue(out var logEntry))
+        // Try to dequeue log entries from the queue until we reach the batch size, or the connection string changes or the queue is empty.
+        while (entriesToInsert.Count < options.BatchSize
+               && (
+                   branchDatabaseConnectionString == null
+                   || (mergeLogQueue.TryPeek(out var logEntry) && branchDatabaseConnectionString != logEntry.BranchDatabaseConnectionString)
+               )
+               && mergeLogQueue.TryDequeue(out logEntry))
         {
+            branchDatabaseConnectionString = logEntry.BranchDatabaseConnectionString;
             entriesToInsert.Add(logEntry);
         }
 
+        // If there are no entries to insert, return early.
         if (entriesToInsert.Count == 0)
         {
             return;
@@ -82,6 +100,7 @@ public class BranchBatchLoggerService(IOptions<WtsSettings> wtsOptions, ILogger<
 
         try
         {
+            // Use the connection string from the first entry in the batch to create a MySQL connection.
             await using var mySqlConnection = new MySqlConnection(entriesToInsert.First().BranchDatabaseConnectionString);
             await mySqlConnection.OpenAsync();
             await using var mySqlCommand = mySqlConnection.CreateCommand();
@@ -90,7 +109,7 @@ public class BranchBatchLoggerService(IOptions<WtsSettings> wtsOptions, ILogger<
             var values = new List<string>();
             for (var i = 0; i < entriesToInsert.Count; i++)
             {
-                values.Add($"(?QueueId{i}, ?QueueName{i}, ?BranchId{i}, ?DateTime{i}, ?HistoryId{i}, ?TableName{i}, ?Field{i}, ?Action{i}, ?OldValue{i}, ?NewValue{i}, ?ObjectIdOriginal{i}, ?ObjectIdMapped{i}, ?ItemIdOriginal{i}, ?ItemIdMapped{i}, ?ItemTableName{i}, ?LinkIdOriginal{i}, ?LinkIdMapped{i}, ?LinkDestinationItemIdOriginal{i}, ?LinkDestinationItemIdMapped{i}, ?LinkDestinationItemTableName{i}, ?LinkType{i}, ?ItemDetailIdOriginal{i}, ?ItemDetailIdMapped{i}, ?FileIdOriginal{i}, ?FileIdMapped{i}, ?UsedMergeSettings{i}, ?UsedConflictSettings{i}, ?ProductionHost{i}, ?ProductionDatabase{i}, ?BranchHost{i}, ?BranchDatabase{i}, ?Status{i}, ?Message{i})");
+                values.Add($"(?QueueId{i}, ?QueueName{i}, ?BranchId{i}, ?DateTime{i}, ?HistoryId{i}, ?TableName{i}, ?Field{i}, ?Action{i}, ?OldValue{i}, ?NewValue{i}, ?ObjectIdOriginal{i}, ?ObjectIdMapped{i}, ?ItemIdOriginal{i}, ?ItemIdMapped{i}, ?ItemEntityType{i}, ?ItemTableName{i}, ?LinkIdOriginal{i}, ?LinkIdMapped{i}, ?LinkDestinationItemIdOriginal{i}, ?LinkDestinationItemIdMapped{i}, ?LinkDestinationItemEntityType{i}, ?LinkDestinationItemTableName{i}, ?LinkType{i}, ?LinkOrdering{i}, ?ItemDetailIdOriginal{i}, ?ItemDetailIdMapped{i}, ?ItemDetailLanguageCode{i}, ?ItemDetailGroupName{i}, ?FileIdOriginal{i}, ?FileIdMapped{i}, ?UsedMergeSettings{i}, ?UsedConflictSettings{i}, ?ProductionHost{i}, ?ProductionDatabase{i}, ?BranchHost{i}, ?BranchDatabase{i}, ?Status{i}, ?Message{i})");
                 mySqlCommand.Parameters.AddWithValue($"QueueId{i}", entriesToInsert[i].QueueId);
                 mySqlCommand.Parameters.AddWithValue($"QueueName{i}", entriesToInsert[i].QueueName);
                 mySqlCommand.Parameters.AddWithValue($"BranchId{i}", entriesToInsert[i].BranchId);
@@ -99,25 +118,30 @@ public class BranchBatchLoggerService(IOptions<WtsSettings> wtsOptions, ILogger<
                 mySqlCommand.Parameters.AddWithValue($"TableName{i}", entriesToInsert[i].TableName);
                 mySqlCommand.Parameters.AddWithValue($"Field{i}", entriesToInsert[i].Field);
                 mySqlCommand.Parameters.AddWithValue($"Action{i}", entriesToInsert[i].Action);
-                mySqlCommand.Parameters.AddWithValue($"OldValue{i}", entriesToInsert[i].OldValue);
-                mySqlCommand.Parameters.AddWithValue($"NewValue{i}", entriesToInsert[i].NewValue);
+                mySqlCommand.Parameters.AddWithValue($"OldValue{i}", entriesToInsert[i].OldValue ?? String.Empty);
+                mySqlCommand.Parameters.AddWithValue($"NewValue{i}", entriesToInsert[i].NewValue ?? String.Empty);
                 mySqlCommand.Parameters.AddWithValue($"ObjectIdOriginal{i}", entriesToInsert[i].ObjectIdOriginal);
                 mySqlCommand.Parameters.AddWithValue($"ObjectIdMapped{i}", entriesToInsert[i].ObjectIdMapped);
                 mySqlCommand.Parameters.AddWithValue($"ItemIdOriginal{i}", entriesToInsert[i].ItemIdOriginal);
                 mySqlCommand.Parameters.AddWithValue($"ItemIdMapped{i}", entriesToInsert[i].ItemIdMapped);
+                mySqlCommand.Parameters.AddWithValue($"ItemEntityType{i}", entriesToInsert[i].ItemEntityType);
                 mySqlCommand.Parameters.AddWithValue($"ItemTableName{i}", entriesToInsert[i].ItemTableName);
                 mySqlCommand.Parameters.AddWithValue($"LinkIdOriginal{i}", entriesToInsert[i].LinkIdOriginal);
                 mySqlCommand.Parameters.AddWithValue($"LinkIdMapped{i}", entriesToInsert[i].LinkIdMapped);
                 mySqlCommand.Parameters.AddWithValue($"LinkDestinationItemIdOriginal{i}", entriesToInsert[i].LinkDestinationItemIdOriginal);
                 mySqlCommand.Parameters.AddWithValue($"LinkDestinationItemIdMapped{i}", entriesToInsert[i].LinkDestinationItemIdMapped);
+                mySqlCommand.Parameters.AddWithValue($"LinkDestinationItemEntityType{i}", entriesToInsert[i].LinkDestinationItemEntityType);
                 mySqlCommand.Parameters.AddWithValue($"LinkDestinationItemTableName{i}", entriesToInsert[i].LinkDestinationItemTableName);
                 mySqlCommand.Parameters.AddWithValue($"LinkType{i}", entriesToInsert[i].LinkType);
+                mySqlCommand.Parameters.AddWithValue($"LinkOrdering{i}", entriesToInsert[i].LinkOrdering);
                 mySqlCommand.Parameters.AddWithValue($"ItemDetailIdOriginal{i}", entriesToInsert[i].ItemDetailIdOriginal);
                 mySqlCommand.Parameters.AddWithValue($"ItemDetailIdMapped{i}", entriesToInsert[i].ItemDetailIdMapped);
+                mySqlCommand.Parameters.AddWithValue($"ItemDetailLanguageCode{i}", entriesToInsert[i].ItemDetailLanguageCode);
+                mySqlCommand.Parameters.AddWithValue($"ItemDetailGroupName{i}", entriesToInsert[i].ItemDetailGroupName);
                 mySqlCommand.Parameters.AddWithValue($"FileIdOriginal{i}", entriesToInsert[i].FileIdOriginal);
                 mySqlCommand.Parameters.AddWithValue($"FileIdMapped{i}", entriesToInsert[i].FileIdMapped);
-                mySqlCommand.Parameters.AddWithValue($"UsedMergeSettings{i}", entriesToInsert[i].UsedMergeSettings == null ? String.Empty : JsonConvert.SerializeObject(entriesToInsert[i].UsedMergeSettings));
-                mySqlCommand.Parameters.AddWithValue($"UsedConflictSettings{i}", entriesToInsert[i].UsedConflictSettings == null ? String.Empty : JsonConvert.SerializeObject(entriesToInsert[i].UsedConflictSettings));
+                mySqlCommand.Parameters.AddWithValue($"UsedMergeSettings{i}", entriesToInsert[i].UsedMergeSettings == null ? null : JsonConvert.SerializeObject(entriesToInsert[i].UsedMergeSettings));
+                mySqlCommand.Parameters.AddWithValue($"UsedConflictSettings{i}", entriesToInsert[i].UsedConflictSettings == null ? null : JsonConvert.SerializeObject(entriesToInsert[i].UsedConflictSettings));
                 mySqlCommand.Parameters.AddWithValue($"ProductionHost{i}", entriesToInsert[i].ProductionHost);
                 mySqlCommand.Parameters.AddWithValue($"ProductionDatabase{i}", entriesToInsert[i].ProductionDatabase);
                 mySqlCommand.Parameters.AddWithValue($"BranchHost{i}", entriesToInsert[i].BranchHost);
@@ -143,15 +167,20 @@ public class BranchBatchLoggerService(IOptions<WtsSettings> wtsOptions, ILogger<
                                             object_id_mapped,   
                                             item_id_original,
                                             item_id_mapped,
+                                            item_entity_type,
                                             item_table_name,
                                             link_id_original,
                                             link_id_mapped,
                                             link_destination_item_id_original,
                                             link_destination_item_id_mapped,
+                                            link_destination_item_entity_type,
                                             link_destination_item_table_name,
                                             link_type,
+                                            link_ordering,
                                             item_detail_id_original,
                                             item_detail_id_mapped,
+                                            item_detail_language_code,
+                                            item_detail_group_name,
                                             file_id_original,
                                             file_id_mapped,
                                             used_merge_settings,
