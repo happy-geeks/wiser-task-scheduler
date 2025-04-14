@@ -3,6 +3,7 @@ using System.IO;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Models;
+using GeeksCoreLibrary.Modules.Amazon.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.Ftps.Handlers;
 using GeeksCoreLibrary.Modules.GclConverters.EvoPdf.Extensions;
@@ -23,11 +24,18 @@ applicationBuilder.Environment.ApplicationName = "Wiser Task Scheduler";
 applicationBuilder.Environment.ContentRootPath = AppContext.BaseDirectory;
 applicationBuilder.Services.AddWindowsService(options => { options.ServiceName = "Wiser Task Scheduler"; });
 
-// Configure the app settings.
+// Configure the app settings from a local secrets file if provided.
 var wtsSettings = applicationBuilder.Configuration.GetSection("Wts").Get<WtsSettings>();
 if (!String.IsNullOrWhiteSpace(wtsSettings.SecretsBaseDirectory))
 {
     applicationBuilder.Configuration.AddJsonFile(Path.Combine(wtsSettings.SecretsBaseDirectory, "wts-appsettings-secrets.json"), false, false);
+}
+
+// Configure the app settings from AWS Secrets Manager if provided.
+var awsSecretsManagerConfiguration = applicationBuilder.Configuration.GetSection("GCL").GetSection("AwsSecretsManagerSettings").Get<AwsSecretsManagerSettings>();
+if (!String.IsNullOrWhiteSpace(awsSecretsManagerConfiguration?.BaseDirectory))
+{
+    await applicationBuilder.Configuration.GetAppSecretsFromAwsAsync(awsSecretsManagerConfiguration);
 }
 
 applicationBuilder.Configuration.AddJsonFile($"appsettings.{applicationBuilder.Environment.EnvironmentName}.json", true, true);
