@@ -1365,6 +1365,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 // Variables for item link changes.
                 ulong? oldItemId = null;
                 ulong? oldDestinationItemId = null;
+                string columnNameForFileLink = null;
                 (string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)? linkData = null;
                 LinkTypeMergeSettingsModel linkTypeSettings = null;
 
@@ -1451,118 +1452,42 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             // Therefor we need to find the original item and destination IDs, so that we can use those to update the link in the production database.
                             sqlParameters["linkId"] = actionData.LinkIdMapped;
 
-                            linkCacheData = linksCache.FirstOrDefault(link => link.Id == actionData.LinkIdMapped);
-                            if (linkCacheData != null)
+                            linkCacheData = await GetLinkDataAsync(actionData.LinkIdMapped, sqlParameters, tableName, branchConnection, linksCache, actionData);
+                            if (linkCacheData.IsDeleted)
                             {
-                                if (linkCacheData.IsDeleted)
-                                {
-                                    historyItemsSynchronised.Add(historyId);
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+                                historyItemsSynchronised.Add(historyId);
+                                itemsProcessed++;
+                                await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
-                                    actionData.Status = ObjectActionMergeStatuses.SkippedAndRemoved;
-                                    actionData.MessageBuilder.AppendLine("The current row was skipped and removed, because the object was both created and deleted in the branch, which means that there is no point in merging that.");
-                                    branchBatchLoggerService.LogMergeAction(actionData);
-                                    continue;
-                                }
-
-                                if (linkCacheData.ItemId.HasValue && linkCacheData.DestinationItemId.HasValue && linkCacheData.Type.HasValue)
-                                {
-                                    actionData.ItemIdOriginal = linkCacheData.ItemId.Value;
-                                    actionData.ItemIdMapped = linkCacheData.ItemId.Value;
-                                    actionData.LinkDestinationItemIdOriginal = linkCacheData.DestinationItemId.Value;
-                                    actionData.LinkDestinationItemIdMapped = linkCacheData.DestinationItemId.Value;
-                                    actionData.LinkType = linkCacheData.Type ?? 0;
-
-                                    switch (actionData.Field)
-                                    {
-                                        case "destination_item_id":
-                                            oldDestinationItemId = Convert.ToUInt64(actionData.OldValue);
-                                            actionData.LinkDestinationItemIdOriginal = Convert.ToUInt64(actionData.NewValue);
-                                            actionData.LinkDestinationItemIdMapped = actionData.LinkDestinationItemIdOriginal;
-                                            oldItemId = actionData.ItemIdOriginal;
-                                            break;
-                                        case "item_id":
-                                            oldItemId = Convert.ToUInt64(actionData.OldValue);
-                                            actionData.ItemIdOriginal = Convert.ToUInt64(actionData.NewValue);
-                                            actionData.ItemIdMapped = actionData.ItemIdOriginal;
-                                            oldDestinationItemId = actionData.LinkDestinationItemIdOriginal;
-                                            break;
-                                        default:
-                                            oldItemId = actionData.ItemIdOriginal;
-                                            oldDestinationItemId = actionData.LinkDestinationItemIdOriginal;
-                                            break;
-                                    }
-
-                                    break;
-                                }
-                            }
-                            else
-                            {
-                                linkCacheData = new BranchMergeLinkCacheModel
-                                {
-                                    Id = actionData.LinkIdOriginal
-                                };
-                                linksCache.Add(linkCacheData);
+                                actionData.Status = ObjectActionMergeStatuses.SkippedAndRemoved;
+                                actionData.MessageBuilder.AppendLine("The current row was skipped and removed, because the link has been deleted, which means that there is no point in merging that.");
+                                branchBatchLoggerService.LogMergeAction(actionData);
+                                continue;
                             }
 
-                            await using var branchCommand = branchConnection.CreateCommand();
-                            AddParametersToCommand(sqlParameters, branchCommand);
-
-                            // Replace wiser_itemlinkdetail with wiser_itemlink because we need to get the source and destination from [prefix]wiser_itemlink, even if this is an update for [prefix]wiser_itemlinkdetail.
-                            var itemLinkTableName = tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink);
-                            branchCommand.CommandText = $"SELECT type, item_id, destination_item_id FROM `{itemLinkTableName}` WHERE id = ?linkId";
-                            var linkDataTable = new DataTable();
-                            using var branchAdapter = new MySqlDataAdapter(branchCommand);
-                            branchAdapter.Fill(linkDataTable);
-                            if (linkDataTable.Rows.Count == 0)
+                            if (linkCacheData.Id > 0)
                             {
-                                branchCommand.CommandText = $"SELECT type, item_id, destination_item_id FROM `{itemLinkTableName}{WiserTableNames.ArchiveSuffix}` WHERE id = ?linkId";
-                                branchAdapter.Fill(linkDataTable);
-                                if (linkDataTable.Rows.Count == 0)
+                                actionData.ItemIdOriginal = linkCacheData.ItemId ?? 0;
+                                actionData.ItemIdMapped = linkCacheData.ItemId ?? 0;
+                                actionData.LinkDestinationItemIdOriginal = linkCacheData.DestinationItemId ?? 0;
+                                actionData.LinkDestinationItemIdMapped = linkCacheData.DestinationItemId ?? 0;
+                                actionData.LinkType = linkCacheData.Type ?? 0;
+
+                                switch (actionData.Field)
                                 {
-                                    // This should never happen, but just in case the ID somehow doesn't exist anymore, log a warning and continue on to the next item.
-                                    await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find link with id '{actionData.LinkIdOriginal}' in database '{branchDatabase}'. Skipping this history record in synchronisation to production.", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                                    historyItemsSynchronised.Add(historyId);
-                                    linkCacheData.IsDeleted = true;
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-
-                                    actionData.Status = ObjectActionMergeStatuses.SkippedAndRemoved;
-                                    actionData.MessageBuilder.AppendLine($"The current row was skipped and removed, because the link with ID '{actionData.LinkIdOriginal} was not found in the branch database, in the table '{itemLinkTableName}'.");
-                                    branchBatchLoggerService.LogMergeAction(actionData);
-                                    continue;
+                                    case "destination_item_id":
+                                        oldDestinationItemId = Convert.ToUInt64(actionData.OldValue);
+                                        oldItemId = actionData.ItemIdOriginal;
+                                        break;
+                                    case "item_id":
+                                        oldItemId = Convert.ToUInt64(actionData.OldValue);
+                                        oldDestinationItemId = actionData.LinkDestinationItemIdOriginal;
+                                        break;
+                                    default:
+                                        oldItemId = actionData.ItemIdOriginal;
+                                        oldDestinationItemId = actionData.LinkDestinationItemIdOriginal;
+                                        break;
                                 }
-                            }
-
-                            actionData.ItemIdOriginal = Convert.ToUInt64(linkDataTable.Rows[0]["item_id"]);
-                            actionData.ItemIdMapped = actionData.ItemIdOriginal;
-                            actionData.LinkDestinationItemIdOriginal = Convert.ToUInt64(linkDataTable.Rows[0]["destination_item_id"]);
-                            actionData.LinkDestinationItemIdMapped = actionData.LinkDestinationItemIdOriginal;
-                            actionData.LinkType = Convert.ToInt32(linkDataTable.Rows[0]["type"]);
-
-                            linkCacheData.Type = actionData.LinkType;
-                            linkCacheData.ItemId = actionData.ItemIdOriginal;
-                            linkCacheData.DestinationItemId = actionData.LinkDestinationItemIdOriginal;
-
-                            switch (actionData.Field)
-                            {
-                                case "destination_item_id":
-                                    oldDestinationItemId = Convert.ToUInt64(actionData.OldValue);
-                                    actionData.LinkDestinationItemIdOriginal = Convert.ToUInt64(actionData.NewValue);
-                                    actionData.LinkDestinationItemIdMapped = actionData.LinkDestinationItemIdOriginal;
-                                    oldItemId = actionData.ItemIdOriginal;
-                                    break;
-                                case "item_id":
-                                    oldItemId = Convert.ToUInt64(actionData.OldValue);
-                                    actionData.ItemIdOriginal = Convert.ToUInt64(actionData.NewValue);
-                                    actionData.ItemIdMapped = actionData.ItemIdOriginal;
-                                    oldDestinationItemId = actionData.LinkDestinationItemIdOriginal;
-                                    break;
-                                default:
-                                    oldItemId = actionData.ItemIdOriginal;
-                                    oldDestinationItemId = actionData.LinkDestinationItemIdOriginal;
-                                    break;
                             }
 
                             break;
@@ -1573,6 +1498,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             actionData.LinkDestinationItemIdMapped = actionData.LinkDestinationItemIdOriginal;
                             actionData.ItemIdOriginal = Convert.ToUInt64(actionData.NewValue);
                             actionData.ItemIdMapped = actionData.ItemIdOriginal;
+                            actionData.NewValue = null;
 
                             var split = actionData.Field.Split(',');
                             actionData.LinkType = Int32.Parse(split[0]);
@@ -1590,15 +1516,34 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             // The ADD_FILE and DELETE_FILE use the old value column to indicate whether it's a file for a link or for an item. The new value column is the ID of the link or item.
                             actionData.ItemIdOriginal = String.Equals(actionData.OldValue, "item_id", StringComparison.OrdinalIgnoreCase) ? Convert.ToUInt64(actionData.NewValue) : 0;
                             actionData.LinkIdOriginal = String.Equals(actionData.OldValue, "itemlink_id", StringComparison.OrdinalIgnoreCase) ? Convert.ToUInt64(actionData.NewValue) : 0;
+                            columnNameForFileLink = actionData.OldValue;
+                            actionData.OldValue = null;
+                            actionData.NewValue = null;
 
                             actionData.ItemIdMapped = actionData.ItemIdOriginal;
                             actionData.LinkIdMapped = actionData.LinkIdOriginal;
 
+                            // If we have a table prefix, then we need to check if it's a valid link type.
+                            if (Int32.TryParse(tablePrefix.TrimEnd('_'), out var linkTypeFromTablePrefix) && allLinkTypeSettings.Any(t => t.UseDedicatedTable && t.Type == linkTypeFromTablePrefix))
+                            {
+                                actionData.LinkType = linkTypeFromTablePrefix;
+                            }
+
+                            var fileData = await GetFileDataAsync(actionData.FileIdOriginal, sqlParameters, tableName, tablePrefix, branchConnection, filesCache, actionData);
+                            if (fileData.IsDeleted)
+                            {
+                                // If the file is deleted, we can use the item id and link id from wiser_history.
+                                fileData.ItemId = actionData.ItemIdOriginal;
+                                fileData.LinkId = actionData.LinkIdOriginal;
+                            }
+
+                            // If the file is linked to a link, then we need to find the data of that link.
                             if (actionData.LinkIdOriginal > 0)
                             {
                                 linkCacheData = await GetLinkDataAsync(actionData.LinkIdOriginal, sqlParameters, tableName, branchConnection, linksCache, actionData);
                                 actionData.LinkType = linkCacheData?.Type ?? 0;
 
+                                // If the link itself has been deleted, then there's no point in merging the file.
                                 if (linkCacheData.IsDeleted)
                                 {
                                     historyItemsSynchronised.Add(historyId);
@@ -1619,86 +1564,37 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             actionData.ItemTableName = tableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItem);
                             actionData.FileIdOriginal = actionData.ObjectIdOriginal;
                             actionData.FileIdMapped = actionData.ObjectIdMapped;
-                            sqlParameters["fileId"] = actionData.FileIdOriginal;
 
+                            // If we have a table prefix, then we need to check if it's a valid link type.
                             if (Int32.TryParse(tablePrefix.TrimEnd('_'), out var linkTypeFromTablePrefix) && allLinkTypeSettings.Any(t => t.UseDedicatedTable && t.Type == linkTypeFromTablePrefix))
                             {
                                 actionData.LinkType = linkTypeFromTablePrefix;
                             }
 
-                            if (!filesCache.TryGetValue(tablePrefix, out var listOfFiles))
-                            {
-                                listOfFiles = [];
-                                filesCache.Add(tablePrefix, listOfFiles);
-                                actionData.MessageBuilder.AppendLine($"New table prefix found ('{tablePrefix}'), so we added it to the files cache dictionary.");
-                            }
+                            var fileData = await GetFileDataAsync(actionData.FileIdOriginal, sqlParameters, tableName, tablePrefix, branchConnection, filesCache, actionData);
+                            actionData.ItemIdOriginal = fileData.ItemId ?? 0;
+                            actionData.ItemIdMapped = fileData.ItemId ?? 0;
+                            actionData.LinkIdOriginal = fileData.LinkId ?? 0;
+                            actionData.LinkIdMapped = fileData.LinkId ?? 0;
 
-                            var fileData = listOfFiles.FirstOrDefault(file => file.Id == actionData.FileIdOriginal);
-                            if (fileData != null)
-                            {
-                                if (fileData.IsDeleted)
-                                {
-                                    historyItemsSynchronised.Add(historyId);
-                                    itemsProcessed++;
-                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
-
-                                    actionData.Status = ObjectActionMergeStatuses.SkippedAndRemoved;
-                                    actionData.MessageBuilder.AppendLine("The current row was skipped and removed, because the object was both created and deleted in the branch, which means that there is no point in merging that.");
-                                    branchBatchLoggerService.LogMergeAction(actionData);
-                                    continue;
-                                }
-
-                                if (fileData.ItemId.HasValue && fileData.LinkId.HasValue)
-                                {
-                                    actionData.ItemIdOriginal = fileData.ItemId.Value;
-                                    actionData.ItemIdMapped = actionData.ItemIdOriginal;
-                                    actionData.LinkIdOriginal = fileData.LinkId.Value;
-                                    actionData.LinkIdMapped = actionData.LinkIdOriginal;
-                                    actionData.LinkType = linksCache.FirstOrDefault(link => link.Id == actionData.LinkIdMapped)?.Type ?? 0;
-                                    break;
-                                }
-                            }
-                            else
-                            {
-                                fileData = new BranchMergeFileCacheModel
-                                {
-                                    Id = actionData.FileIdOriginal
-                                };
-                                listOfFiles.Add(fileData);
-                            }
-
-                            await using var branchCommand = branchConnection.CreateCommand();
-                            AddParametersToCommand(sqlParameters, branchCommand);
-                            branchCommand.CommandText = $"""
-                                                         SELECT item_id, itemlink_id FROM `{tableName}` WHERE id = ?fileId
-                                                         UNION
-                                                         SELECT item_id, itemlink_id FROM `{tableName}{WiserTableNames.ArchiveSuffix}` WHERE id = ?fileId
-                                                         LIMIT 1
-                                                         """;
-                            var fileDataTable = new DataTable();
-                            using var adapter = new MySqlDataAdapter(branchCommand);
-                            adapter.Fill(fileDataTable);
-                            if (fileDataTable.Rows.Count == 0)
+                            if (fileData.IsDeleted)
                             {
                                 historyItemsSynchronised.Add(historyId);
-                                fileData.IsDeleted = true;
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
                                 actionData.Status = ObjectActionMergeStatuses.SkippedAndRemoved;
-                                actionData.MessageBuilder.AppendLine($"The current row was skipped and removed, because the file was was not found in the table '{tableName}'.");
+                                actionData.MessageBuilder.AppendLine("The current row was skipped and removed, because the object was both created and deleted in the branch, which means that there is no point in merging that.");
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
 
-                            actionData.ItemIdOriginal = Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]);
-                            actionData.ItemIdMapped = actionData.ItemIdOriginal;
-                            actionData.LinkIdOriginal = Convert.ToUInt64(fileDataTable.Rows[0]["itemlink_id"]);
-                            actionData.LinkIdMapped = actionData.LinkIdOriginal;
-
+                            // If the file is linked to a link, then we need to find the data of that link.
                             if (actionData.LinkIdOriginal > 0)
                             {
                                 linkCacheData = await GetLinkDataAsync(actionData.LinkIdOriginal, sqlParameters, tableName, branchConnection, linksCache, actionData);
+                                actionData.LinkType = linkCacheData.Type ?? 0;
+
                                 if (linkCacheData.IsDeleted)
                                 {
                                     historyItemsSynchronised.Add(historyId);
@@ -1706,7 +1602,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
                                     actionData.Status = ObjectActionMergeStatuses.SkippedAndRemoved;
-                                    actionData.MessageBuilder.AppendLine("The current row was skipped and removed, because the file is linked to an item link that is both created and then deleted in the branch, which means that there is no point in merging that.");
+                                    actionData.MessageBuilder.AppendLine("The current row was skipped and removed, because the file is linked to an item link that has been deleted in the branch, which means that there is no point in merging that.");
                                     branchBatchLoggerService.LogMergeAction(actionData);
                                     continue;
                                 }
@@ -2517,6 +2413,18 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 continue;
                             }
 
+                            if (String.IsNullOrWhiteSpace(columnNameForFileLink))
+                            {
+                                // We somehow do now have a column name for the file link, so we can't do anything with this row.
+                                itemsProcessed++;
+                                await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
+                                actionData.Status = ObjectActionMergeStatuses.Skipped;
+                                actionData.MessageBuilder.AppendLine("The current row was skipped and removed, because we have not been able to decide whether to use `item_id` or `itemlink_id` for the new file.");
+                                branchBatchLoggerService.LogMergeAction(actionData);
+                                continue;
+                            }
+
                             // oldValue contains either "item_id" or "itemlink_id", to indicate which of these columns is used for the ID that is saved in newValue.
                             actionData.FileIdMapped = await GenerateNewIdAsync(tableName, productionConnection, branchConnection, actionData);
                             sqlParameters["fileItemId"] = actionData.NewValue;
@@ -2526,7 +2434,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             AddParametersToCommand(sqlParameters, productionCommand);
                             productionCommand.CommandText = $"""
                                                              {queryPrefix}
-                                                             INSERT INTO `{tableName}` (id, `{actionData.OldValue.ToMySqlSafeValue(false)}`) 
+                                                             INSERT INTO `{tableName}` (id, `{columnNameForFileLink.ToMySqlSafeValue(false)}`) 
                                                              VALUES (?newId, ?fileItemId)
                                                              """;
                             await productionCommand.ExecuteNonQueryAsync();
@@ -3102,31 +3010,27 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     private static async Task<BranchMergeLinkCacheModel> GetLinkDataAsync(ulong linkId, Dictionary<string, object> sqlParameters, string tableName, MySqlConnection branchConnection, List<BranchMergeLinkCacheModel> linksCache, BranchMergeLogModel actionData)
     {
         actionData.MessageBuilder.AppendLine($"Attempting to get link data for link ID '{linkId}' from table '{tableName}'...");
-        var result = new BranchMergeLinkCacheModel {Id = linkId};
         if (linkId == 0)
         {
             actionData.MessageBuilder.AppendLine("--> The link ID is 0, so there is nothing to check.");
-            return result;
+            return new BranchMergeLinkCacheModel {Id = linkId};
         }
 
         var linkData = linksCache.SingleOrDefault(l => l.Id == linkId);
-        switch (linkData)
+        if (linkData != null)
         {
-            case {ItemId: not null, DestinationItemId: not null, Type: not null}:
-                actionData.MessageBuilder.AppendLine("--> We already have all the data we need in cache, so returning that.");
-                return linkData;
-            case null:
-                actionData.MessageBuilder.AppendLine("--> The link ID is not in the cache, so we need to look it up in the database.");
-                linksCache.Add(result);
-                break;
-            default:
-                actionData.MessageBuilder.AppendLine("--> The link ID is in the cache, but we don't have all the data we need yet, so we need to look it up in the database.");
-                result = linkData;
-                break;
+            actionData.MessageBuilder.AppendLine("--> The link ID was found in the cache, so we're returning the information we found.");
+            return linkData;
         }
 
+        linkData = new BranchMergeLinkCacheModel {Id = linkId};
+        linksCache.Add(linkData);
+
         sqlParameters["linkId"] = linkId;
-        var itemLinkTableName = tableName.ReplaceCaseInsensitive(WiserTableNames.WiserItemFile, WiserTableNames.WiserItemLink);
+        var itemLinkTableName = tableName
+            .Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItemLink, StringComparison.OrdinalIgnoreCase)
+            .Replace(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink, StringComparison.OrdinalIgnoreCase);
+
         await using var branchCommand = branchConnection.CreateCommand();
         AddParametersToCommand(sqlParameters, branchCommand);
         branchCommand.CommandText = $"SELECT item_id, destination_item_id, type FROM `{itemLinkTableName}` WHERE id = ?linkId LIMIT 1";
@@ -3136,15 +3040,79 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         if (fileDataTable.Rows.Count == 0)
         {
             actionData.MessageBuilder.AppendLine("--> The link ID was not found in the database, so we assume it has been deleted.");
-            result.IsDeleted = true;
-            return result;
+            linkData.IsDeleted = true;
+            return linkData;
         }
 
         actionData.MessageBuilder.AppendLine("--> The link ID was found in the database, so we're returning the information we found.");
-        result.ItemId = Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]);
-        result.DestinationItemId = Convert.ToUInt64(fileDataTable.Rows[0]["destination_item_id"]);
-        result.Type = Convert.ToInt32(fileDataTable.Rows[0]["type"]);
-        return result;
+        linkData.ItemId = Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]);
+        linkData.DestinationItemId = Convert.ToUInt64(fileDataTable.Rows[0]["destination_item_id"]);
+        linkData.Type = Convert.ToInt32(fileDataTable.Rows[0]["type"]);
+        return linkData;
+    }
+
+    /// <summary>
+    /// Find information in a wiser_itemlink table, based on the link ID.
+    /// This gets the source and destination item IDs and also checks if the link has been deleted in the branch database.
+    /// </summary>
+    /// <param name="fileId">The ID of the file to find.</param>
+    /// <param name="sqlParameters">The dictionary that contains any previously added SQL parameters.</param>
+    /// <param name="tableName">The full name of the table to find the ID in.</param>
+    /// <param name="tablePrefix">The table prefix for the wiser_itemfile table.</param>
+    /// <param name="branchConnection">The database connection to the branch database.</param>
+    /// <param name="filesCache">The cache object that is used to cache all file data.</param>
+    /// <param name="actionData">The <see cref="BranchMergeLogModel" /> where we can add log messages to.</param>
+    /// <returns>A <see cref="BranchMergeFileCacheModel" /> with the link data we found.</returns>
+    private static async Task<BranchMergeFileCacheModel> GetFileDataAsync(ulong fileId, Dictionary<string, object> sqlParameters, string tableName, string tablePrefix, MySqlConnection branchConnection, Dictionary<string, List<BranchMergeFileCacheModel>> filesCache, BranchMergeLogModel actionData)
+    {
+        actionData.MessageBuilder.AppendLine($"Attempting to get file data for file ID '{fileId}' from table '{tableName}'...");
+        if (fileId == 0)
+        {
+            actionData.MessageBuilder.AppendLine("--> The file ID is 0, so there is nothing to check.");
+            return new BranchMergeFileCacheModel {Id = fileId};
+        }
+
+        if (!filesCache.TryGetValue(tablePrefix, out var listOfFiles))
+        {
+            listOfFiles = [];
+            filesCache.Add(tablePrefix, listOfFiles);
+            actionData.MessageBuilder.AppendLine($"--> New table prefix found ('{tablePrefix}'), so we added it to the files cache dictionary.");
+        }
+
+        var fileData = listOfFiles.SingleOrDefault(file => file.Id == fileId);
+        if (fileData != null)
+        {
+            actionData.MessageBuilder.AppendLine("--> The file ID was found in the cache, so we're returning the information we found.");
+            return fileData;
+        }
+
+        sqlParameters["fileId"] = fileId;
+        fileData = new BranchMergeFileCacheModel {Id = fileId};
+        listOfFiles.Add(fileData);
+
+        // If the code reaches this point, it means that we don't know the item ID and/or item link ID of the file yet, so look it up in the database.
+        await using var branchCommand = branchConnection.CreateCommand();
+        AddParametersToCommand(sqlParameters, branchCommand);
+        branchCommand.CommandText = $"""
+                                     SELECT item_id, itemlink_id FROM `{tableName}` WHERE id = ?fileId
+                                     UNION
+                                     SELECT item_id, itemlink_id FROM `{tableName}{WiserTableNames.ArchiveSuffix}` WHERE id = ?fileId
+                                     LIMIT 1
+                                     """;
+        var fileDataTable = new DataTable();
+        using var adapter = new MySqlDataAdapter(branchCommand);
+        adapter.Fill(fileDataTable);
+        if (fileDataTable.Rows.Count == 0)
+        {
+            actionData.MessageBuilder.AppendLine("--> The link ID was not found in the database, so we assume it has been deleted.");
+            fileData.IsDeleted = true;
+            return fileData;
+        }
+
+        actionData.MessageBuilder.AppendLine("--> The file ID was found in the database, so we're returning the information we found.");
+        fileData.ItemId = Convert.ToUInt64(fileDataTable.Rows[0]["item_id"]);
+        fileData.LinkId = Convert.ToUInt64(fileDataTable.Rows[0]["itemlink_id"]);
+        return fileData;
     }
 
     /// <summary>
