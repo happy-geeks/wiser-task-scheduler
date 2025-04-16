@@ -2066,6 +2066,17 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 continue;
                             }
 
+                            if (String.IsNullOrWhiteSpace(actionData.Field))
+                            {
+                                itemsProcessed++;
+                                await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
+                                actionData.Status = ObjectActionMergeStatuses.Failed;
+                                actionData.MessageBuilder.AppendLine($"For an {action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
+                                branchBatchLoggerService.LogMergeAction(actionData);
+                                continue;
+                            }
+
                             sqlParameters["itemId"] = actionData.ItemIdMapped;
                             sqlParameters["newValue"] = actionData.NewValue;
 
@@ -2094,6 +2105,17 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 actionData.MessageBuilder.AppendLine($"The current row was skipped, because the user indicated that they don't want to merge update actions of items of type '{entityTypeMergeSettings.Type}'.");
+                                branchBatchLoggerService.LogMergeAction(actionData);
+                                continue;
+                            }
+
+                            if (String.IsNullOrWhiteSpace(actionData.Field))
+                            {
+                                itemsProcessed++;
+                                await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
+                                actionData.Status = ObjectActionMergeStatuses.Failed;
+                                actionData.MessageBuilder.AppendLine($"For an {action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
@@ -2302,6 +2324,17 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 };
 
                                 actionData.MessageBuilder.AppendLine($"The current row was skipped and removed, because {text}, so we don't need to do anything..");
+                                branchBatchLoggerService.LogMergeAction(actionData);
+                                continue;
+                            }
+
+                            if (String.IsNullOrWhiteSpace(actionData.Field))
+                            {
+                                itemsProcessed++;
+                                await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
+                                actionData.Status = ObjectActionMergeStatuses.Failed;
+                                actionData.MessageBuilder.AppendLine($"For an {action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
@@ -2552,6 +2585,17 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             }
                             else
                             {
+                                if (String.IsNullOrWhiteSpace(actionData.Field))
+                                {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
+                                    actionData.Status = ObjectActionMergeStatuses.Failed;
+                                    actionData.MessageBuilder.AppendLine($"For an {action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
+                                    branchBatchLoggerService.LogMergeAction(actionData);
+                                    continue;
+                                }
+
                                 sqlParameters["newValue"] = actionData.NewValue;
 
                                 await using var productionCommand = productionConnection.CreateCommand();
@@ -2772,6 +2816,17 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 actionData.MessageBuilder.AppendLine($"The current row was skipped, because the user indicated that they don't want to merge update actions from '{tableName}'.");
+                                branchBatchLoggerService.LogMergeAction(actionData);
+                                continue;
+                            }
+
+                            if (String.IsNullOrWhiteSpace(actionData.Field))
+                            {
+                                itemsProcessed++;
+                                await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
+
+                                actionData.Status = ObjectActionMergeStatuses.Failed;
+                                actionData.MessageBuilder.AppendLine($"For an {action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
