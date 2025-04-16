@@ -1744,7 +1744,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     }
 
                     // Get information we need for Wiser item links.
-                    if (action is "ADD_LINK" or "CHANGE_LINK" or "REMOVE_LINK" || (action is "ADD_FILE" or "UPDATE_FILE" or "DELETE_FILE" && actionData.LinkIdOriginal > 0 && actionData.LinkType > 0))
+                    if (action is "ADD_LINK" or "CHANGE_LINK" or "REMOVE_LINK" or "UPDATE_ITEMLINKDETAIL" || (action is "ADD_FILE" or "UPDATE_FILE" or "DELETE_FILE" && actionData.LinkIdOriginal > 0 && actionData.LinkType > 0))
                     {
                         // Unlock the tables temporarily so that we can call GetEntityTypesOfLinkAsync, which calls wiserItemsService.GetTablePrefixForEntityAsync, since that method doesn't use our custom database connection.
                         await using var productionCommand = productionConnection.CreateCommand();
@@ -1841,7 +1841,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     }
                     else if (String.IsNullOrWhiteSpace(actionData.ItemEntityType))
                     {
-                        if (action is "ADD_LINK" or "CHANGE_LINK" or "REMOVE_LINK" || (action is "ADD_FILE" or "UPDATE_FILE" or "DELETE_FILE" && actionData.LinkIdMapped > 0 && actionData.LinkType > 0))
+                        if (action is "ADD_LINK" or "CHANGE_LINK" or "REMOVE_LINK" or "UPDATE_ITEMLINKDETAIL" || (action is "ADD_FILE" or "UPDATE_FILE" or "DELETE_FILE" && actionData.LinkIdMapped > 0 && actionData.LinkType > 0))
                         {
                             // If we couldn't find any link data, then most likely one of the items doesn't exist anymore, so skip this history record.
                             // The other reason could be that the link type is not configured (correctly), in that case we also can't do anything, so skip it as well.

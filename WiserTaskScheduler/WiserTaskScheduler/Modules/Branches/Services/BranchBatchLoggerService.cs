@@ -80,7 +80,7 @@ public class BranchBatchLoggerService(IOptions<WtsSettings> wtsOptions, ILogger<
         var entriesToInsert = new List<BranchMergeLogModel>();
         string branchDatabaseConnectionString = null;
 
-        // Try to dequeue log entries from the queue until we reach the batch size, or the connection string changes or the queue is empty.
+        // Try to dequeue log entries from the queue until we reach the batch size, or the connection string changes, or the queue is empty.
         while (entriesToInsert.Count < options.BatchSize
                && (
                    branchDatabaseConnectionString == null
