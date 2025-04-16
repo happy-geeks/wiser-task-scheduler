@@ -84,7 +84,7 @@ public class BranchBatchLoggerService(IOptions<WtsSettings> wtsOptions, ILogger<
         while (entriesToInsert.Count < options.BatchSize
                && (
                    branchDatabaseConnectionString == null
-                   || (mergeLogQueue.TryPeek(out var logEntry) && branchDatabaseConnectionString != logEntry.BranchDatabaseConnectionString)
+                   || (mergeLogQueue.TryPeek(out var logEntry) && branchDatabaseConnectionString == logEntry.BranchDatabaseConnectionString)
                )
                && mergeLogQueue.TryDequeue(out logEntry))
         {
@@ -192,7 +192,7 @@ public class BranchBatchLoggerService(IOptions<WtsSettings> wtsOptions, ILogger<
                                             status,
                                             message
                                         )
-                                        VALUES {String.Join(Environment.NewLine, values)}
+                                        VALUES {String.Join($",{Environment.NewLine}\t", values)}
                                         """;
 
             await mySqlCommand.ExecuteNonQueryAsync();
