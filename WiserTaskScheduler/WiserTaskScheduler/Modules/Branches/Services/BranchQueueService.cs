@@ -567,7 +567,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                     break;
                                 }
 
-                                var prefix = tableName.Replace(WiserTableNames.WiserItem, "");
+                                var prefix = tableName.Replace(WiserTableNames.WiserItem, "", StringComparison.OrdinalIgnoreCase);
                                 var ids = items.Rows.Cast<DataRow>().Select(x => x.Field<ulong>("id")).ToList();
                                 if (!copiedItemIds.TryAdd(prefix, ids))
                                 {
@@ -592,7 +592,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     // We order tables by table name, this means wiser_item always comes before wiser_itemdetail.
                     // So we can be sure that we already copied the items to the new branch, and we can use the IDs of those items to copy the details of those items.
                     // This way, we don't need to create the entire WHERE statement again based on the entity settings, like we did above for wiser_item.
-                    var prefix = tableName.Replace(WiserTableNames.WiserItemDetail, "");
+                    var prefix = tableName.Replace(WiserTableNames.WiserItemDetail, "", StringComparison.OrdinalIgnoreCase);
 
                     // We need to get all columns of the wiser_itemdetail table like this, instead of using SELECT *,
                     // because they can have virtual columns and you can't manually insert values into those.
@@ -646,7 +646,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     // The wiser_itemfile tables are handled last, this means wiser_item and wiser_itemlink always comes before wiser_itemfile.
                     // So we can be sure that we already copied the items to the new branch, and we can use the IDs of those items to copy the details of those items.
                     // This way, we don't need to create the entire WHERE statement again based on the entity settings, like we did above for wiser_item.
-                    var prefix = tableName.Replace(WiserTableNames.WiserItemFile, "");
+                    var prefix = tableName.Replace(WiserTableNames.WiserItemFile, "", StringComparison.OrdinalIgnoreCase);
 
                     if (await databaseHelpersService.TableExistsAsync($"{prefix}{WiserTableNames.WiserItem}"))
                     {
@@ -862,7 +862,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                         if (tableName.EndsWith(WiserTableNames.WiserItemLink))
                         {
-                            var prefix = tableName.Replace(WiserTableNames.WiserItem, "");
+                            var prefix = tableName.Replace(WiserTableNames.WiserItemLink, "", StringComparison.OrdinalIgnoreCase);
                             var ids = items.Rows.Cast<DataRow>().Select(x => Convert.ToUInt64(x["id"])).ToList();
                             if (!copiedItemLinks.TryAdd(prefix, ids))
                             {
@@ -1393,9 +1393,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 }
 
                 // Treat details as items during the check for deleted items.
-                var tableNameForDeletedItemCheck = tableName.Replace(WiserTableNames.WiserItemDetail, WiserTableNames.WiserItem);
-
-                var objectCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == idForComparison && String.Equals(i.TableName, tableNameForDeletedItemCheck, StringComparison.OrdinalIgnoreCase));
+                var objectCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == idForComparison && String.Equals(i.TableName, actionData.ItemTableName, StringComparison.OrdinalIgnoreCase));
                 if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
                 {
                     // This item was created and then deleted in the branch, so we don't need to do anything.
@@ -1429,6 +1427,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             // In the REMOVE_LINK action, the destination item ID is saved in the item_id column of wiser_history.
                             actionData.LinkDestinationItemIdOriginal = actionData.ObjectIdOriginal;
                             actionData.LinkDestinationItemIdMapped = actionData.ObjectIdMapped;
+                            actionData.LinkTableName = tableName;
 
                             // In the REMOVE_LINK action, the source item ID is saved in the old value column of wiser_history.
                             actionData.ItemIdOriginal = Convert.ToUInt64(actionData.OldValue);
@@ -1446,11 +1445,12 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         {
                             actionData.LinkIdOriginal = actionData.ObjectIdOriginal;
                             actionData.LinkIdMapped = actionData.ObjectIdMapped;
+                            actionData.LinkTableName = tableName.Replace(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink, StringComparison.OrdinalIgnoreCase);
 
                             // When a link has been changed, it's possible that the ID of one of the items is changed.
                             // It's also possible that this is a new link that the production database didn't have yet (and so the ID of the link will most likely be different).
                             // Therefor we need to find the original item and destination IDs, so that we can use those to update the link in the production database.
-                            linkCacheData = await GetLinkDataAsync(actionData.LinkIdOriginal, sqlParameters, tableName, branchConnection, linksCache, actionData);
+                            linkCacheData = await GetLinkDataAsync(actionData.LinkIdOriginal, sqlParameters, actionData.LinkTableName, branchConnection, linksCache, actionData);
                             if (linkCacheData.IsDeleted)
                             {
                                 historyItemsSynchronised.Add(historyId);
@@ -1497,6 +1497,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             actionData.ItemIdOriginal = Convert.ToUInt64(actionData.NewValue);
                             actionData.ItemIdMapped = actionData.ItemIdOriginal;
                             actionData.NewValue = null;
+                            actionData.LinkTableName = tableName;
 
                             var split = actionData.Field.Split(',');
                             actionData.LinkType = Int32.Parse(split[0]);
@@ -1507,7 +1508,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "ADD_FILE":
                         case "DELETE_FILE":
                         {
-                            actionData.ItemTableName = tableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItem);
                             actionData.FileIdOriginal = actionData.ObjectIdOriginal;
                             actionData.FileIdMapped = actionData.ObjectIdMapped;
 
@@ -1538,7 +1538,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             // If the file is linked to a link, then we need to find the data of that link.
                             if (actionData.LinkIdOriginal > 0)
                             {
-                                linkCacheData = await GetLinkDataAsync(actionData.LinkIdOriginal, sqlParameters, tableName, branchConnection, linksCache, actionData);
+                                actionData.LinkTableName = tableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItemLink, StringComparison.OrdinalIgnoreCase);
+                                linkCacheData = await GetLinkDataAsync(actionData.LinkIdOriginal, sqlParameters, actionData.LinkTableName, branchConnection, linksCache, actionData);
                                 actionData.ItemIdOriginal = linkCacheData.ItemId ?? 0;
                                 actionData.ItemIdMapped = linkCacheData.ItemId ?? 0;
                                 actionData.LinkDestinationItemIdOriginal = linkCacheData.DestinationItemId ?? 0;
@@ -1559,11 +1560,12 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 }
                             }
 
+                            actionData.ItemTableName = tableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase);
+
                             break;
                         }
                         case "UPDATE_FILE":
                         {
-                            actionData.ItemTableName = tableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItem);
                             actionData.FileIdOriginal = actionData.ObjectIdOriginal;
                             actionData.FileIdMapped = actionData.ObjectIdMapped;
 
@@ -1594,7 +1596,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             // If the file is linked to a link, then we need to find the data of that link.
                             if (actionData.LinkIdOriginal > 0)
                             {
-                                linkCacheData = await GetLinkDataAsync(actionData.LinkIdOriginal, sqlParameters, tableName, branchConnection, linksCache, actionData);
+                                actionData.LinkTableName = tableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItemLink, StringComparison.OrdinalIgnoreCase);
+                                linkCacheData = await GetLinkDataAsync(actionData.LinkIdOriginal, sqlParameters, actionData.LinkTableName, branchConnection, linksCache, actionData);
                                 actionData.ItemIdOriginal = linkCacheData.ItemId ?? 0;
                                 actionData.ItemIdMapped = linkCacheData.ItemId ?? 0;
                                 actionData.LinkDestinationItemIdOriginal = linkCacheData.DestinationItemId ?? 0;
@@ -1614,6 +1617,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 }
                             }
 
+                            actionData.ItemTableName = tableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase);
+
                             break;
                         }
                         case "DELETE_ITEM":
@@ -1623,6 +1628,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             actionData.ItemIdMapped = actionData.ObjectIdMapped;
                             actionData.ItemEntityType = actionData.Field;
                             actionData.Field = String.Empty;
+                            actionData.ItemTableName = tableName;
                             break;
                         }
                         case "UPDATE_ITEM_DETAIL":
@@ -1630,7 +1636,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         {
                             actionData.ItemIdOriginal = actionData.ObjectIdOriginal;
                             actionData.ItemIdMapped = actionData.ObjectIdMapped;
-                            actionData.ItemTableName = tableName.Replace(WiserTableNames.WiserItemDetail, WiserTableNames.WiserItem);
+                            actionData.ItemTableName = tableName.Replace(WiserTableNames.WiserItemDetail, WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase);
                             actionData.ItemDetailIdOriginal = targetId;
                             actionData.ItemDetailIdMapped = targetId;
                             break;
@@ -1710,7 +1716,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     // Get mapped IDs for everything.
                     actionData.ItemIdMapped = GetMappedId(actionData.ItemTableName, idMapping, actionData.ItemIdOriginal, actionData).Value;
                     actionData.LinkDestinationItemIdMapped = GetMappedId(actionData.LinkDestinationItemTableName, idMapping, actionData.LinkDestinationItemIdOriginal, actionData).Value;
-                    actionData.LinkIdMapped = GetMappedId(tableName, idMapping, actionData.LinkIdOriginal, actionData).Value;
+                    actionData.LinkIdMapped = GetMappedId(actionData.LinkTableName, idMapping, actionData.LinkIdOriginal, actionData).Value;
                     actionData.FileIdMapped = GetMappedId(tableName, idMapping, actionData.FileIdOriginal, actionData).Value;
                     actionData.ObjectIdMapped = GetMappedId(tableName, idMapping, actionData.ObjectIdOriginal, actionData).Value;
 
@@ -1727,14 +1733,14 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     // Find and/or cache the entity type of the source item.
                     if (actionData.ItemIdOriginal > 0)
                     {
-                        var itemData = await GetOrAddItemDataAsync(actionData.ItemIdOriginal, sqlParameters, tableName, tablePrefix, branchConnection, itemsCache, actionData, actionData.ItemEntityType);
+                        var itemData = await GetOrAddItemDataAsync(actionData.ItemIdOriginal, sqlParameters, actionData.ItemTableName, tablePrefix, branchConnection, itemsCache, actionData, actionData.ItemEntityType);
                         actionData.ItemEntityType = itemData.EntityType;
                     }
 
                     // Find and/or cache the entity type of the destination item.
                     if (actionData.LinkDestinationItemIdOriginal > 0)
                     {
-                        var itemData = await GetOrAddItemDataAsync(actionData.LinkDestinationItemIdOriginal, sqlParameters, tableName, tablePrefix, branchConnection, itemsCache, actionData, actionData.LinkDestinationItemEntityType);
+                        var itemData = await GetOrAddItemDataAsync(actionData.LinkDestinationItemIdOriginal, sqlParameters, actionData.LinkDestinationItemTableName, tablePrefix, branchConnection, itemsCache, actionData, actionData.LinkDestinationItemEntityType);
                         actionData.LinkDestinationItemEntityType = itemData.EntityType;
                     }
 
@@ -1857,7 +1863,10 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                                                      AND groupname = ?groupName
                                                                      """;
                                     existingId = Convert.ToUInt64(await productionCommand.ExecuteScalarAsync() ?? 0);
-                                    actionData.MessageBuilder.AppendLine($"Did not find the current item detail in the mappings, but we found it in the table '{tableName}' in production, based on item_id, key, language_code and groupname. The ID for that item detail in production is '{existingId}'.");
+                                    var text = existingId == 0
+                                        ? $"and also did not found it in the table '{tableName}' in production (based on item_id, key, language_code and groupname). So we will add a new row."
+                                        : $"but we found it in the table '{tableName}' in production, based on item_id, key, language_code and groupname. The ID for that item detail in production is '{existingId}'";
+                                    actionData.MessageBuilder.AppendLine($"Did not find the current item detail in the mappings, {text}.");
                                 }
 
                                 if (existingId > 0)
@@ -3431,7 +3440,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 sourceEntityTypeSettings = await branchEntityTypesService.GetEntityTypeSettingsAsync(linkTypeSettings.SourceEntityType);
                 allEntityTypeSettings.Add(linkTypeSettings.SourceEntityType, sourceEntityTypeSettings);
 
-                actionData.MessageBuilder.AppendLine($"----> We did not find the source entity type settings in the cache, so we fetched them from the database.");
+                actionData.MessageBuilder.AppendLine("----> We did not find the source entity type settings in the cache, so we fetched them from the database.");
             }
             else
             {
@@ -3443,7 +3452,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 destinationEntityTypeSettings = await branchEntityTypesService.GetEntityTypeSettingsAsync(linkTypeSettings.DestinationEntityType);
                 allEntityTypeSettings.Add(linkTypeSettings.DestinationEntityType, destinationEntityTypeSettings);
 
-                actionData.MessageBuilder.AppendLine($"----> We did not find the destination entity type settings in the cache, so we fetched them from the database.");
+                actionData.MessageBuilder.AppendLine("----> We did not find the destination entity type settings in the cache, so we fetched them from the database.");
             }
             else
             {

@@ -109,7 +109,7 @@ public class BranchBatchLoggerService(IOptions<WtsSettings> wtsOptions, ILogger<
             var values = new List<string>();
             for (var i = 0; i < entriesToInsert.Count; i++)
             {
-                values.Add($"(?QueueId{i}, ?QueueName{i}, ?BranchId{i}, ?DateTime{i}, ?HistoryId{i}, ?TableName{i}, ?Field{i}, ?Action{i}, ?OldValue{i}, ?NewValue{i}, ?ObjectIdOriginal{i}, ?ObjectIdMapped{i}, ?ItemIdOriginal{i}, ?ItemIdMapped{i}, ?ItemEntityType{i}, ?ItemTableName{i}, ?LinkIdOriginal{i}, ?LinkIdMapped{i}, ?LinkDestinationItemIdOriginal{i}, ?LinkDestinationItemIdMapped{i}, ?LinkDestinationItemEntityType{i}, ?LinkDestinationItemTableName{i}, ?LinkType{i}, ?LinkOrdering{i}, ?ItemDetailIdOriginal{i}, ?ItemDetailIdMapped{i}, ?ItemDetailLanguageCode{i}, ?ItemDetailGroupName{i}, ?FileIdOriginal{i}, ?FileIdMapped{i}, ?UsedMergeSettings{i}, ?UsedConflictSettings{i}, ?ProductionHost{i}, ?ProductionDatabase{i}, ?BranchHost{i}, ?BranchDatabase{i}, ?Status{i}, ?Message{i})");
+                values.Add($"(?QueueId{i}, ?QueueName{i}, ?BranchId{i}, ?DateTime{i}, ?HistoryId{i}, ?TableName{i}, ?Field{i}, ?Action{i}, ?OldValue{i}, ?NewValue{i}, ?ObjectIdOriginal{i}, ?ObjectIdMapped{i}, ?ItemIdOriginal{i}, ?ItemIdMapped{i}, ?ItemEntityType{i}, ?ItemTableName{i}, ?LinkIdOriginal{i}, ?LinkIdMapped{i}, ?LinkDestinationItemIdOriginal{i}, ?LinkDestinationItemIdMapped{i}, ?LinkDestinationItemEntityType{i}, ?LinkDestinationItemTableName{i}, ?LinkType{i}, ?LinkOrdering{i}, ?LinkTableName{i}, ?ItemDetailIdOriginal{i}, ?ItemDetailIdMapped{i}, ?ItemDetailLanguageCode{i}, ?ItemDetailGroupName{i}, ?FileIdOriginal{i}, ?FileIdMapped{i}, ?UsedMergeSettings{i}, ?UsedConflictSettings{i}, ?ProductionHost{i}, ?ProductionDatabase{i}, ?BranchHost{i}, ?BranchDatabase{i}, ?Status{i}, ?Message{i})");
                 mySqlCommand.Parameters.AddWithValue($"QueueId{i}", entriesToInsert[i].QueueId);
                 mySqlCommand.Parameters.AddWithValue($"QueueName{i}", entriesToInsert[i].QueueName);
                 mySqlCommand.Parameters.AddWithValue($"BranchId{i}", entriesToInsert[i].BranchId);
@@ -134,6 +134,7 @@ public class BranchBatchLoggerService(IOptions<WtsSettings> wtsOptions, ILogger<
                 mySqlCommand.Parameters.AddWithValue($"LinkDestinationItemTableName{i}", entriesToInsert[i].LinkDestinationItemTableName);
                 mySqlCommand.Parameters.AddWithValue($"LinkType{i}", entriesToInsert[i].LinkType);
                 mySqlCommand.Parameters.AddWithValue($"LinkOrdering{i}", entriesToInsert[i].LinkOrdering);
+                mySqlCommand.Parameters.AddWithValue($"LinkTableName{i}", entriesToInsert[i].LinkTableName);
                 mySqlCommand.Parameters.AddWithValue($"ItemDetailIdOriginal{i}", entriesToInsert[i].ItemDetailIdOriginal);
                 mySqlCommand.Parameters.AddWithValue($"ItemDetailIdMapped{i}", entriesToInsert[i].ItemDetailIdMapped);
                 mySqlCommand.Parameters.AddWithValue($"ItemDetailLanguageCode{i}", entriesToInsert[i].ItemDetailLanguageCode);
@@ -177,6 +178,7 @@ public class BranchBatchLoggerService(IOptions<WtsSettings> wtsOptions, ILogger<
                                             link_destination_item_table_name,
                                             link_type,
                                             link_ordering,
+                                            link_table_name,
                                             item_detail_id_original,
                                             item_detail_id_mapped,
                                             item_detail_language_code,

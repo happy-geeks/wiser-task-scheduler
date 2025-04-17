@@ -111,7 +111,7 @@ public class BranchMergeLogModel(int queueId, string queueName, int branchId, ul
     /// If this change was for a Wiser item or something related to a Wiser item (such as a link), then this will contain the full name of the `wiser_item` table that we used.
     /// If this is a change for a link, this is the table of the source item.
     /// </summary>
-    public string ItemTableName { get; set; } = tableName;
+    public string ItemTableName { get; set; } = String.Empty;
 
     #endregion
 
@@ -145,7 +145,7 @@ public class BranchMergeLogModel(int queueId, string queueName, int branchId, ul
     /// <summary>
     /// If this is a change for a link, this is the table name of the destination Wiser item of that link.
     /// </summary>
-    public string LinkDestinationItemTableName { get; set; } = tableName;
+    public string LinkDestinationItemTableName { get; set; } = String.Empty;
 
     /// <summary>
     /// If this is a change for a link, then this is the value of the `type` column of `wiser_itemlink`.
@@ -156,6 +156,11 @@ public class BranchMergeLogModel(int queueId, string queueName, int branchId, ul
     /// If this is a change for a link, then this is the value of the `ordering` column of `wiser_itemlink`.
     /// </summary>
     public int LinkOrdering { get; set; }
+
+    /// <summary>
+    /// If this is a change for a link, or something related to a link, then this is the full table name of the link table that we used.
+    /// </summary>
+    public string LinkTableName { get; set; } = String.Empty;
 
     #endregion
 
