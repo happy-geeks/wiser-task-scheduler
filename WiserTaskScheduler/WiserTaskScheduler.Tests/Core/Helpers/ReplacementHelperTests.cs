@@ -39,6 +39,7 @@ public class ReplacementHelperTests
         ["RawBody"] = "<html><body><h1>Test</h1></body></html>"
     };
 
+    [Test]
     [TestCaseSource(typeof(TestCases), nameof(TestCases.GetValue_ValidPath_ReturnsCorrectValue_TestCases))]
     public void GetValue_ValidPath_ReturnsCorrectValue(string key, List<int> rows, bool htmlEncode, string expectedValue)
     {
