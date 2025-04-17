@@ -13,6 +13,8 @@ using Serilog;
 using SlackNet.AspNetCore;
 using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Core.Workers;
+using WiserTaskScheduler.Modules.Branches.Interfaces;
+using WiserTaskScheduler.Modules.Branches.Services;
 
 // Configure the application itself.
 var applicationBuilder = Host.CreateApplicationBuilder(args);
@@ -36,6 +38,9 @@ wtSettings = applicationBuilder.Configuration.GetSection("Wts").Get<WtsSettings>
 applicationBuilder.Services.AddHostedService<MainWorker>();
 applicationBuilder.Services.AddHostedService<CleanupWorker>();
 applicationBuilder.Services.AddHostedService<UpdateParentsWorker>();
+
+applicationBuilder.Services.AddSingleton<IBranchBatchLoggerService, BranchBatchLoggerService>();
+applicationBuilder.Services.AddHostedService(provider => (BranchBatchLoggerService)provider.GetRequiredService<IBranchBatchLoggerService>());
 
 if (wtSettings.AutoProjectDeploy.IsEnabled)
 {
