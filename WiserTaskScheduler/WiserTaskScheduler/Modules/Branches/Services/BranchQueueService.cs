@@ -2406,7 +2406,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                             // oldValue contains either "item_id" or "itemlink_id", to indicate which of these columns is used for the ID that is saved in newValue.
                             actionData.FileIdMapped = await GenerateNewIdAsync(tableName, productionConnection, branchConnection, actionData);
-                            sqlParameters["fileItemId"] = actionData.NewValue;
+                            sqlParameters["fileItemId"] = String.Equals(columnNameForFileLink, "itemlink_id", StringComparison.OrdinalIgnoreCase) ? actionData.LinkIdMapped : actionData.ItemIdMapped;
                             sqlParameters["newId"] = actionData.FileIdMapped;
 
                             await using var productionCommand = productionConnection.CreateCommand();
@@ -3477,7 +3477,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             sourceAdapter.Fill(sourceDataTable);
             if (sourceDataTable.Rows.Count == 0)
             {
-                actionData.MessageBuilder.AppendLine($"----> Did not find any item with ID '{sourceId}' in table '{sourceTableName}'. So this cannot be the correct link type.");
+                actionData.MessageBuilder.AppendLine($"----> Did not find any item with ID '{sourceId}' in table '{sourceTableName}'. So this cannot be the correct link type, or the item has been deleted in the branch.");
                 continue;
             }
 
@@ -3500,7 +3500,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             destinationAdapter.Fill(destinationDataTable);
             if (destinationDataTable.Rows.Count == 0)
             {
-                actionData.MessageBuilder.AppendLine($"----> Did not find any item with ID '{destinationId}' in table '{destinationTableName}'. So this cannot be the correct link type.");
+                actionData.MessageBuilder.AppendLine($"----> Did not find any item with ID '{destinationId}' in table '{destinationTableName}'. So this cannot be the correct link type, or the item has been deleted in the branch.");
                 continue;
             }
 
