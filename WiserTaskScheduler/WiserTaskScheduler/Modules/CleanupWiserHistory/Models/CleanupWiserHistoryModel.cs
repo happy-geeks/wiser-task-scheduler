@@ -15,6 +15,11 @@ public class CleanupWiserHistoryModel : ActionModel
     public string EntityName { get; set; }
 
     /// <summary>
+    /// Gets or sets if all entities need to be cleaned instead of a specific one.
+    /// </summary>
+    public bool CleanupAllEntities { get; set; }
+
+    /// <summary>
     /// Gets or sets the time the history of the given entity needs to be stored.
     /// </summary>
     [XmlIgnore]

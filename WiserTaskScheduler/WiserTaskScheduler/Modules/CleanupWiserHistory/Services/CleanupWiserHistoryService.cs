@@ -41,9 +41,9 @@ public class CleanupWiserHistoryService(IServiceProvider serviceProvider, ILogSe
     {
         var cleanupWiserHistory = (CleanupWiserHistoryModel) action;
 
-        if (String.IsNullOrWhiteSpace(cleanupWiserHistory.EntityName))
+        if (String.IsNullOrWhiteSpace(cleanupWiserHistory.EntityName) && !cleanupWiserHistory.CleanupAllEntities)
         {
-            await logService.LogWarning(logger, LogScopes.RunStartAndStop, cleanupWiserHistory.LogSettings, "No entity provided to clean the history from. Please provide a name of an entity.", configurationServiceName, cleanupWiserHistory.TimeId, cleanupWiserHistory.Order);
+            await logService.LogWarning(logger, LogScopes.RunStartAndStop, cleanupWiserHistory.LogSettings, $"No entity provided to clean the history from. Please provide a name of an entity or mark that all entities need to be cleaned in {WiserTableNames.WiserHistory}.", configurationServiceName, cleanupWiserHistory.TimeId, cleanupWiserHistory.Order);
 
             return new JObject
             {
@@ -84,21 +84,27 @@ public class CleanupWiserHistoryService(IServiceProvider serviceProvider, ILogSe
         databaseConnection.AddParameter("cleanupDate", cleanupDate);
         databaseConnection.AddParameter("tableName", $"{tablePrefix}{WiserTableNames.WiserItem}");
 
-        var historyRowsDeleted = await databaseConnection.ExecuteAsync($"""
+        // TODO: Check if we have a specific entity or need to clean the full history.
+        // TODO: Get IDs from history table and then delete in a separate query to optimize performance.
+        var historyRowsDeleted = 0;
+        if (!String.IsNullOrWhiteSpace(cleanupWiserHistory.EntityName))
+        {
+            historyRowsDeleted = await databaseConnection.ExecuteAsync($"""
 
-                                                                        DELETE history.*
-                                                                        FROM {tablePrefix}{WiserTableNames.WiserItem} AS item
-                                                                        JOIN {WiserTableNames.WiserHistory} AS history ON history.item_id = item.id AND history.tablename LIKE CONCAT(?tableName, '%') AND history.changed_on < ?cleanupDate
-                                                                        WHERE item.entity_type = ?entityName
-                                                                        """);
+                                                                            DELETE history.*
+                                                                            FROM {tablePrefix}{WiserTableNames.WiserItem} AS item
+                                                                            JOIN {WiserTableNames.WiserHistory} AS history ON history.item_id = item.id AND history.tablename LIKE CONCAT(?tableName, '%') AND history.changed_on < ?cleanupDate
+                                                                            WHERE item.entity_type = ?entityName
+                                                                            """);
 
-        historyRowsDeleted += await databaseConnection.ExecuteAsync($"""
+            historyRowsDeleted += await databaseConnection.ExecuteAsync($"""
 
-                                                                     DELETE history.*
-                                                                     FROM {tablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} AS item
-                                                                     JOIN {WiserTableNames.WiserHistory} AS history ON history.item_id = item.id AND history.tablename LIKE CONCAT(?tableName, '%') AND history.changed_on < ?cleanupDate
-                                                                     WHERE item.entity_type = ?entityName
-                                                                     """);
+                                                                         DELETE history.*
+                                                                         FROM {tablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} AS item
+                                                                         JOIN {WiserTableNames.WiserHistory} AS history ON history.item_id = item.id AND history.tablename LIKE CONCAT(?tableName, '%') AND history.changed_on < ?cleanupDate
+                                                                         WHERE item.entity_type = ?entityName
+                                                                         """);
+        }
 
         await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupWiserHistory.LogSettings, $"'{historyRowsDeleted}' {(historyRowsDeleted == 1 ? "row has" : "rows have")} been deleted from the history of items of entity '{cleanupWiserHistory.EntityName}'.", configurationServiceName, cleanupWiserHistory.TimeId, cleanupWiserHistory.Order);
 
