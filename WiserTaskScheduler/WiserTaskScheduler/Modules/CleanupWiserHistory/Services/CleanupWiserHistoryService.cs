@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
+using System.Linq;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Interfaces;
@@ -67,7 +69,7 @@ public class CleanupWiserHistoryService(IServiceProvider serviceProvider, ILogSe
             };
         }
 
-        await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupWiserHistory.LogSettings, $"Starting cleanup for history of entity '{cleanupWiserHistory.EntityName}' that are older than '{cleanupWiserHistory.TimeToStore}'.", configurationServiceName, cleanupWiserHistory.TimeId, cleanupWiserHistory.Order);
+        await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupWiserHistory.LogSettings, $"Starting cleanup for history entries{(String.IsNullOrWhiteSpace(cleanupWiserHistory.EntityName) ? "" : $" of entity '{cleanupWiserHistory.EntityName}'")} that are older than '{cleanupWiserHistory.TimeToStore}'.", configurationServiceName, cleanupWiserHistory.TimeId, cleanupWiserHistory.Order);
 
         using var scope = serviceProvider.CreateScope();
         await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
@@ -76,37 +78,60 @@ public class CleanupWiserHistoryService(IServiceProvider serviceProvider, ILogSe
         await databaseConnection.ChangeConnectionStringsAsync(connectionStringToUse, connectionStringToUse);
         databaseConnection.ClearParameters();
 
-        var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
-        var tablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(cleanupWiserHistory.EntityName);
-
         var cleanupDate = DateTime.Now.Subtract(cleanupWiserHistory.TimeToStore);
-        databaseConnection.AddParameter("entityName", cleanupWiserHistory.EntityName);
         databaseConnection.AddParameter("cleanupDate", cleanupDate);
-        databaseConnection.AddParameter("tableName", $"{tablePrefix}{WiserTableNames.WiserItem}");
 
-        // TODO: Check if we have a specific entity or need to clean the full history.
-        // TODO: Get IDs from history table and then delete in a separate query to optimize performance.
-        var historyRowsDeleted = 0;
+        var historyEntriesToDelete = new List<ulong>();
+
         if (!String.IsNullOrWhiteSpace(cleanupWiserHistory.EntityName))
         {
-            historyRowsDeleted = await databaseConnection.ExecuteAsync($"""
+            var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
+            var tablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(cleanupWiserHistory.EntityName);
 
-                                                                            DELETE history.*
-                                                                            FROM {tablePrefix}{WiserTableNames.WiserItem} AS item
-                                                                            JOIN {WiserTableNames.WiserHistory} AS history ON history.item_id = item.id AND history.tablename LIKE CONCAT(?tableName, '%') AND history.changed_on < ?cleanupDate
-                                                                            WHERE item.entity_type = ?entityName
-                                                                            """);
+            databaseConnection.AddParameter("entityName", cleanupWiserHistory.EntityName);
+            databaseConnection.AddParameter("tableName", $"{tablePrefix}{WiserTableNames.WiserItem}");
 
-            historyRowsDeleted += await databaseConnection.ExecuteAsync($"""
+            var dataTable = await databaseConnection.GetAsync($"""
+                                                               SELECT CAST(history.id AS UNSIGNED) AS id
+                                                               FROM {tablePrefix}{WiserTableNames.WiserItem} AS item
+                                                               JOIN {WiserTableNames.WiserHistory} AS history ON history.item_id = item.id AND history.tablename LIKE CONCAT(?tableName, '%') AND history.changed_on < ?cleanupDate
+                                                               WHERE item.entity_type = ?entityName
+                                                               """);
 
-                                                                         DELETE history.*
-                                                                         FROM {tablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} AS item
-                                                                         JOIN {WiserTableNames.WiserHistory} AS history ON history.item_id = item.id AND history.tablename LIKE CONCAT(?tableName, '%') AND history.changed_on < ?cleanupDate
-                                                                         WHERE item.entity_type = ?entityName
-                                                                         """);
+            historyEntriesToDelete.AddRange(from DataRow row in dataTable.Rows select row.Field<ulong>("id"));
+
+            dataTable = await databaseConnection.GetAsync($"""
+                                                           SELECT CAST(history.id AS UNSIGNED) AS id
+                                                           FROM {tablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} AS item
+                                                           JOIN {WiserTableNames.WiserHistory} AS history ON history.item_id = item.id AND history.tablename LIKE CONCAT(?tableName, '%')AND history.changed_on < ?cleanupDate
+                                                           WHERE item.entity_type = ?entityName
+                                                           """);
+
+            historyEntriesToDelete.AddRange(from DataRow row in dataTable.Rows select row.Field<ulong>("id"));
+        }
+        else if (cleanupWiserHistory.CleanupAllEntities)
+        {
+            var dataTable = await databaseConnection.GetAsync($"""
+                                                               SELECT CAST(history.id AS UNSIGNED) AS id
+                                                               FROM {WiserTableNames.WiserHistory} AS history
+                                                               WHERE history.changed_on < ?cleanupDate
+                                                               """);
+
+            historyEntriesToDelete.AddRange(from DataRow row in dataTable.Rows select row.Field<ulong>("id"));
         }
 
-        await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupWiserHistory.LogSettings, $"'{historyRowsDeleted}' {(historyRowsDeleted == 1 ? "row has" : "rows have")} been deleted from the history of items of entity '{cleanupWiserHistory.EntityName}'.", configurationServiceName, cleanupWiserHistory.TimeId, cleanupWiserHistory.Order);
+        var historyRowsDeleted = 0;
+        if (historyEntriesToDelete.Count > 0)
+        {
+            databaseConnection.ClearParameters();
+
+            historyRowsDeleted = await databaseConnection.ExecuteAsync($"""
+                                                                      DELETE FROM {WiserTableNames.WiserHistory}
+                                                                      WHERE id IN ({String.Join(", ", historyEntriesToDelete)})
+                                                                      """);
+        }
+
+        await logService.LogInformation(logger, LogScopes.RunStartAndStop, cleanupWiserHistory.LogSettings, $"'{historyRowsDeleted}' {(historyRowsDeleted == 1 ? "row has" : "rows have")} been deleted from the history{(String.IsNullOrWhiteSpace(cleanupWiserHistory.EntityName) ? "" : $" of items of entity '{cleanupWiserHistory.EntityName}'")}.", configurationServiceName, cleanupWiserHistory.TimeId, cleanupWiserHistory.Order);
 
         if (cleanupWiserHistory.OptimizeTablesAfterCleanup && historyRowsDeleted > 0)
         {
@@ -116,7 +141,7 @@ public class CleanupWiserHistoryService(IServiceProvider serviceProvider, ILogSe
         return new JObject
         {
             {"Success", true},
-            {"EntityName", cleanupWiserHistory.EntityName},
+            {"EntityName", String.IsNullOrWhiteSpace(cleanupWiserHistory.EntityName) ? "All" : cleanupWiserHistory.EntityName},
             {"CleanupDate", cleanupDate},
             {"HistoryRowsDeleted", historyRowsDeleted}
         };
