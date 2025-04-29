@@ -2,7 +2,8 @@
 The Wiser Task scheduler (WTS in short) is a .net core service which can be used to run specific tasks in various time-schedules. The WTS is configured with JSON-based configuration files. These configuration files can also be read directly from a Wiser account if Wiser is in place.
 
 ## Prerequisites
-[.NET Desktop runtime 7](https://dotnet.microsoft.com/en-us/download/dotnet/7.0) (x64) needs to be installed on the server
+- [.NET Desktop runtime 9](https://dotnet.microsoft.com/en-us/download/dotnet/9.0) (x64) needs to be installed on the server to run as a Windows service.
+- Support to host a Docker container when not running as a Windows service.
 
 ## Installation of the WTS on a Windows server
 0. Check the Prerequisites above
@@ -59,6 +60,14 @@ If the auto updater is not used or if the auto updater has indicated that a manu
 8. Update the "version.json" file in the "Update" folder;
 9. Merge to main;
 10. Create a new release in Github with the tag the version numer (e.g. v1.0.0.0). Auto generate the notes to list all changes for the new version. **Only for WTS releases, not for the auto updater.**
+
+## Docker
+1. Ensure you have a volume where logs can be written to, e.g. `WtsData`.
+1. Add secrets to the `WtsData` volume or reference the AWS Secrets Manager.
+1. Update the appsettings to reference the `WtsData` volume, e.g. `"path": "/WtsData/logs/log.txt",`.
+1. Open Powershell.
+1. Run the command `docker build --progress=plain -t wisertaskscheduler .`.
+1. Run the command `docker run --name wisertaskscheduler -v WtsData:/WtsData --stop-timeout=600 -d wisertaskscheduler`.
 
 ## Setup secrets<a name="setup-secrets"></a>
 1. Create a file named `wts-appsettings-secrets.json` somewhere outside of the project directory.
