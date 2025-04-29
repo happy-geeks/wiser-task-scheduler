@@ -59,9 +59,10 @@ public class MainWorker : BaseWorker
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "Main worker needs to stop, stopping all configuration workers.", Name, RunScheme.TimeId);
-        await slackChatService.SendChannelMessageAsync($"*Wiser Task Scheduler was shut down ({wtsName})*");
+        await slackChatService.SendChannelMessageAsync($"*Wiser Task Scheduler is shutting down ({wtsName})*");
         await mainService.StopAllConfigurationsAsync();
         await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "All configuration workers have stopped, stopping main worker.", Name, RunScheme.TimeId);
         await base.StopAsync(cancellationToken);
+        await slackChatService.SendChannelMessageAsync($"*Wiser Task Scheduler was shut down ({wtsName})*");
     }
 }
