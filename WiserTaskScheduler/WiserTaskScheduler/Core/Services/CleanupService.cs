@@ -10,6 +10,7 @@ using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
@@ -41,6 +42,7 @@ public class CleanupService(IOptions<WtsSettings> wtsSettings, IServiceProvider 
         await CleanupDatabaseRenderTimesAsync(databaseConnection, databaseHelpersService);
         await CleanupWtsServicesAsync(databaseConnection, databaseHelpersService);
 		await CleanupTemporaryWiserFilesAsync(databaseConnection, databaseHelpersService);
+        await CleanupFloatingLinksAsync(databaseConnection, databaseHelpersService);
     }
 
     /// <summary>
@@ -247,6 +249,98 @@ public class CleanupService(IOptions<WtsSettings> wtsSettings, IServiceProvider 
         catch (Exception exception)
         {
             await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during cleanup: {exception}", logName);
+        }
+    }
+
+    /// <summary>
+    /// Cleanup floating dead links in the database
+    /// </summary>
+    /// <param name="databaseConnection">The database connection to use.</param>
+    /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
+    private async Task CleanupFloatingLinksAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
+    {
+        try
+        {
+            // Retrieve the various dedicated tables for the links
+            var findDedicatedTablesQuery = $"""
+SELECT '' AS `tablePrefix`, 1 AS `isEnitityType` 
+
+UNION
+
+SELECT type AS `tablePrefix`, 0 AS `isEnitityType` FROM `wiser_link` WHERE `use_dedicated_table` = '1' GROUP BY type 
+
+UNION
+
+SELECT name AS `tablePrefix`, 1 AS `isEnitityType` FROM `wiser_entity` WHERE `use_dedicated_table` = '1' GROUP BY name 
+
+LIMIT 1000;
+""";
+            var dataTable = await databaseConnection.GetAsync(findDedicatedTablesQuery);
+
+            foreach (DataRow row in dataTable.Rows)
+            {
+                await CleanupFloatingLinksAsync(databaseConnection, databaseHelpersService, row.Field<string>("tablePrefix"), row.Field<Int64>("isEnitityType") > 0);
+            }
+        }
+        catch (Exception exception)
+        {
+            await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during cleanup: {exception}", logName);
+        }
+    }
+
+    private async Task CleanupFloatingLinksAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, string tablePrefix, bool isEnitityType = false)
+    {
+        var wiserItemLink = tablePrefix.IsNullOrEmpty() ? WiserTableNames.WiserItemLink : $"{tablePrefix}_{WiserTableNames.WiserItemLink}";
+        var wiserItem = $"{WiserTableNames.WiserItem}";
+
+        if (isEnitityType)
+        {
+            wiserItem = tablePrefix.IsNullOrEmpty() ? WiserTableNames.WiserItem : $"{tablePrefix}_{WiserTableNames.WiserItem}";
+
+            if (!await databaseHelpersService.TableExistsAsync(wiserItem, wiserItemLink))
+            {
+                // This table doest not exist, so we can skip this.
+                return;
+            }
+        }
+
+        var cleanupLinkQuery = $"""
+# Make temp table.
+DROP TEMPORARY TABLE IF EXISTS temp_CleanupFloatingLinksIds;
+CREATE TEMPORARY TABLE temp_CleanupFloatingLinksIds ( target_id BIGINT );
+
+# Insert into temp table.
+INSERT INTO temp_CleanupFloatingLinksIds (target_id)
+
+# Begin of query.
+SELECT link.id AS `linkId` FROM {wiserItemLink} link
+
+# For easy Debugging use this next line instead of the previous one:
+#SELECT link.id AS `linkId`, sourceItem.id AS `sourceItemId`, destinationItem.id AS `destinationItemId`, link.type AS `type`,link.added_on FROM {wiserItemLink} link
+
+LEFT JOIN {wiserItem} sourceItem ON sourceItem.id = link.item_id
+LEFT JOIN {wiserItem} destinationItem ON destinationItem.id = link.destination_item_id
+
+WHERE link.destination_item_id != 0
+AND (sourceItem.id IS NULL OR destinationItem.id IS NULL)
+AND type != 1
+AND link.added_on < (CURDATE() - INTERVAL 1 MONTH)
+GROUP BY link.id;
+
+# For easy Debugging uncomment the next line:
+#SELECT * from temp_cleanupFloatingLinksIds;
+
+#TODO: !!! remove this comment after initial pull request is approved !!!!! ( to reviewer: please double, tripple check, is this correct? )
+#DELETE FROM {wiserItemLink} WHERE id IN (SELECT target_id FROM temp_cleanupFloatingLinksIds);
+""";
+        try
+        {
+            var rowsDeleted = await databaseConnection.ExecuteAsync(cleanupLinkQuery);
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{wiserItemLink}'.", logName);
+        }
+        catch (Exception exception)
+        {
+            await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during cleanup of {wiserItemLink}: {exception}", logName);
         }
     }
 }
