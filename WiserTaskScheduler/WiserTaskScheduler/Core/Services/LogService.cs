@@ -104,18 +104,18 @@ public class LogService(IServiceProvider serviceProvider, ISlackChatService slac
 #if DEBUG
                         databaseConnection.AddParameter("isTest", 1);
 #else
-                            databaseConnection.AddParameter("isTest", 0);
+                        databaseConnection.AddParameter("isTest", 0);
 #endif
 
                         await databaseConnection.ExecuteAsync($"""
                                                                INSERT INTO {WiserTableNames.WtsLogs} (message, level, scope, source, configuration, time_id, `order`, added_on, is_test)
-                                                                                                                                   VALUES(?message, ?level, ?scope, ?source, ?configuration, ?timeId, ?order, ?addedOn, ?isTest)
+                                                               VALUES(?message, ?level, ?scope, ?source, ?configuration, ?timeId, ?order, ?addedOn, ?isTest)
                                                                """);
                     }
-                    catch (Exception e)
+                    catch (Exception exception)
                     {
                         // If writing to the database fails log its error.
-                        logger.Log(logLevel, $"Failed to write log to database due to exception: ${e}");
+                        logger.Log(logLevel, exception, "Failed to write log to database due to exception.");
                     }
 
                     logger.Log(logLevel, message);
@@ -136,8 +136,7 @@ public class LogService(IServiceProvider serviceProvider, ISlackChatService slac
                                             """;
 
                         // Generate SHA 256 based on configuration name, time id, order id and message
-                        using var sha256 = SHA256.Create();
-                        var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes($"{configurationName}{timeId}{order}{message}"));
+                        var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"{configurationName}{timeId}{order}{message}"));
                         var messageHash = String.Join("", hash.Select(b => b.ToString("x2")));
 
                         await slackChatService.SendChannelMessageAsync(slackMessage, [message], messageHash: messageHash);
