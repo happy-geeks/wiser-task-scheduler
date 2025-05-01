@@ -35,7 +35,7 @@ public class BranchMergeLogModel(int queueId, string queueName, int branchId, ul
     /// <summary>
     /// The date and time that the current action was executed.
     /// </summary>
-    public DateTime DateTime { get; } = DateTime.Now;
+    public DateTime DateTime { get; } = DateTime.UtcNow;
 
     /// <summary>
     /// The ID from the wiser_history table in the branch database that was being merged.

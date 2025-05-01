@@ -72,6 +72,9 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         var taskAlertsService = scope.ServiceProvider.GetRequiredService<ITaskAlertsService>();
         var branchQueue = (BranchQueueModel) action;
 
+        // Set the log settings for the batch logger queue.
+        branchBatchLoggerService.LogSettings = branchQueue.LogSettings;
+
         // Make sure we connect to the correct database.
         await databaseConnection.ChangeConnectionStringsAsync(connectionString, connectionString);
         databaseConnection.ClearParameters();
@@ -1083,21 +1086,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             return result;
         }
 
-        // Get all merge settings that we'll need later.
-        var entityMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Entity);
-        var entityPropertyMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.EntityProperty);
-        var linkMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Link);
-        var moduleMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Module);
-        var permissionMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Permission);
-        var queryMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Query);
-        var roleMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Role);
-        var apiConnectionMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.ApiConnection);
-        var dataSelectorMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.DataSelector);
-        var fieldTemplatesMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.FieldTemplates);
-        var userRoleMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.UserRole);
-        var styledOutputMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.StyledOutput);
-        var objectMergeSettings = settings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.EasyObjects);
-
         // Store database names in variables for later use and create connection string for the branch database.
         var productionConnectionStringBuilder = new MySqlConnectionStringBuilder(connectionString);
         var originalDatabase = productionConnectionStringBuilder.Database;
@@ -1326,21 +1314,16 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             var itemsProcessed = 0;
             foreach (DataRow dataRow in dataTable.Rows)
             {
-                var historyId = Convert.ToUInt64(dataRow["id"]);
-                var action = dataRow.Field<string>("action").ToUpperInvariant();
-                var tableName = dataRow.Field<string>("tablename") ?? "";
-                var fieldName = dataRow.Field<string>("field");
-
                 // Create the object that will be used to store values we will need for the merge and also to log the merge action.
-                var actionData = new BranchMergeLogModel(queueId, queueName, branchId, historyId, tableName, action, fieldName, productionConnectionStringBuilder, branchConnectionStringBuilder);
+                var actionData = new BranchMergeLogModel(queueId, queueName, branchId, Convert.ToUInt64(dataRow["id"]), dataRow.Field<string>("tablename") ?? "", dataRow.Field<string>("action").ToUpperInvariant(), dataRow.Field<string>("field"), productionConnectionStringBuilder, branchConnectionStringBuilder);
 
-                var conflict = settings.ConflictSettings.SingleOrDefault(setting => setting.Id == historyId);
+                var conflict = settings.ConflictSettings.SingleOrDefault(setting => setting.Id == actionData.HistoryId);
                 actionData.UsedConflictSettings = conflict;
 
                 // If this history item has a conflict, and it's not accepted, skip and delete this history record.
                 if (conflict is {AcceptChange: not null} && !conflict.AcceptChange.Value)
                 {
-                    historyItemsSynchronised.Add(historyId);
+                    historyItemsSynchronised.Add(actionData.HistoryId);
                     itemsProcessed++;
                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -1370,7 +1353,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 LinkTypeMergeSettingsModel linkTypeSettings = null;
 
                 var idForComparison = actionData.ItemIdOriginal.ToString();
-                switch (action)
+                switch (actionData.Action)
                 {
                     case "ADD_LINK":
                     {
@@ -1397,7 +1380,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 if (objectCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false})
                 {
                     // This item was created and then deleted in the branch, so we don't need to do anything.
-                    historyItemsSynchronised.Add(historyId);
+                    historyItemsSynchronised.Add(actionData.HistoryId);
                     itemsProcessed++;
                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -1407,7 +1390,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     continue;
                 }
 
-                var (tablePrefix, _) = BranchesHelpers.GetTablePrefix(tableName, actionData.ObjectIdOriginal);
+                var (tablePrefix, _) = BranchesHelpers.GetTablePrefix(actionData.TableName, actionData.ObjectIdOriginal);
                 actionData.MessageBuilder.AppendLine($"Table prefix for original object is: '{tablePrefix}'");
                 if (!itemsCache.TryGetValue(tablePrefix, out var listOfItems))
                 {
@@ -1420,14 +1403,14 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 {
                     // Make sure we have the correct item ID. For some actions the item id is saved in a different column.
                     BranchMergeLinkCacheModel linkCacheData;
-                    switch (action)
+                    switch (actionData.Action)
                     {
                         case "REMOVE_LINK":
                         {
                             // In the REMOVE_LINK action, the destination item ID is saved in the item_id column of wiser_history.
                             actionData.LinkDestinationItemIdOriginal = actionData.ObjectIdOriginal;
                             actionData.LinkDestinationItemIdMapped = actionData.ObjectIdMapped;
-                            actionData.LinkTableName = tableName;
+                            actionData.LinkTableName = actionData.TableName;
 
                             // In the REMOVE_LINK action, the source item ID is saved in the old value column of wiser_history.
                             actionData.ItemIdOriginal = Convert.ToUInt64(actionData.OldValue);
@@ -1445,7 +1428,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         {
                             actionData.LinkIdOriginal = actionData.ObjectIdOriginal;
                             actionData.LinkIdMapped = actionData.ObjectIdMapped;
-                            actionData.LinkTableName = tableName.Replace(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink, StringComparison.OrdinalIgnoreCase);
+                            actionData.LinkTableName = actionData.TableName.Replace(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink, StringComparison.OrdinalIgnoreCase);
 
                             // When a link has been changed, it's possible that the ID of one of the items is changed.
                             // It's also possible that this is a new link that the production database didn't have yet (and so the ID of the link will most likely be different).
@@ -1453,7 +1436,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             linkCacheData = await GetLinkDataAsync(actionData.LinkIdOriginal, sqlParameters, actionData.LinkTableName, branchConnection, linksCache, actionData);
                             if (linkCacheData.IsDeleted)
                             {
-                                historyItemsSynchronised.Add(historyId);
+                                historyItemsSynchronised.Add(actionData.HistoryId);
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -1497,7 +1480,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             actionData.ItemIdOriginal = Convert.ToUInt64(actionData.NewValue);
                             actionData.ItemIdMapped = actionData.ItemIdOriginal;
                             actionData.NewValue = null;
-                            actionData.LinkTableName = tableName;
+                            actionData.LinkTableName = actionData.TableName;
 
                             var split = actionData.Field.Split(',');
                             actionData.LinkType = Int32.Parse(split[0]);
@@ -1527,7 +1510,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.LinkType = linkTypeFromTablePrefix;
                             }
 
-                            var fileData = await GetFileDataAsync(actionData.FileIdOriginal, sqlParameters, tableName, tablePrefix, branchConnection, filesCache, actionData);
+                            var fileData = await GetFileDataAsync(actionData.FileIdOriginal, sqlParameters, actionData.TableName, tablePrefix, branchConnection, filesCache, actionData);
                             if (fileData.IsDeleted)
                             {
                                 // If the file is deleted, we can use the item id and link id from wiser_history.
@@ -1538,7 +1521,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             // If the file is linked to a link, then we need to find the data of that link.
                             if (actionData.LinkIdOriginal > 0)
                             {
-                                actionData.LinkTableName = tableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItemLink, StringComparison.OrdinalIgnoreCase);
+                                actionData.LinkTableName = actionData.TableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItemLink, StringComparison.OrdinalIgnoreCase);
                                 linkCacheData = await GetLinkDataAsync(actionData.LinkIdOriginal, sqlParameters, actionData.LinkTableName, branchConnection, linksCache, actionData);
                                 actionData.ItemIdOriginal = linkCacheData.ItemId ?? 0;
                                 actionData.ItemIdMapped = linkCacheData.ItemId ?? 0;
@@ -1549,7 +1532,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 // If the link itself has been deleted, then there's no point in merging the file.
                                 if (linkCacheData.IsDeleted)
                                 {
-                                    historyItemsSynchronised.Add(historyId);
+                                    historyItemsSynchronised.Add(actionData.HistoryId);
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -1560,7 +1543,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 }
                             }
 
-                            actionData.ItemTableName = tableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase);
+                            actionData.ItemTableName = actionData.TableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase);
 
                             break;
                         }
@@ -1575,7 +1558,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.LinkType = linkTypeFromTablePrefix;
                             }
 
-                            var fileData = await GetFileDataAsync(actionData.FileIdOriginal, sqlParameters, tableName, tablePrefix, branchConnection, filesCache, actionData);
+                            var fileData = await GetFileDataAsync(actionData.FileIdOriginal, sqlParameters, actionData.TableName, tablePrefix, branchConnection, filesCache, actionData);
                             actionData.ItemIdOriginal = fileData.ItemId ?? 0;
                             actionData.ItemIdMapped = fileData.ItemId ?? 0;
                             actionData.LinkIdOriginal = fileData.LinkId ?? 0;
@@ -1583,7 +1566,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                             if (fileData.IsDeleted)
                             {
-                                historyItemsSynchronised.Add(historyId);
+                                historyItemsSynchronised.Add(actionData.HistoryId);
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -1596,7 +1579,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             // If the file is linked to a link, then we need to find the data of that link.
                             if (actionData.LinkIdOriginal > 0)
                             {
-                                actionData.LinkTableName = tableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItemLink, StringComparison.OrdinalIgnoreCase);
+                                actionData.LinkTableName = actionData.TableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItemLink, StringComparison.OrdinalIgnoreCase);
                                 linkCacheData = await GetLinkDataAsync(actionData.LinkIdOriginal, sqlParameters, actionData.LinkTableName, branchConnection, linksCache, actionData);
                                 actionData.ItemIdOriginal = linkCacheData.ItemId ?? 0;
                                 actionData.ItemIdMapped = linkCacheData.ItemId ?? 0;
@@ -1606,7 +1589,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                                 if (linkCacheData.IsDeleted)
                                 {
-                                    historyItemsSynchronised.Add(historyId);
+                                    historyItemsSynchronised.Add(actionData.HistoryId);
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -1617,7 +1600,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 }
                             }
 
-                            actionData.ItemTableName = tableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase);
+                            actionData.ItemTableName = actionData.TableName.Replace(WiserTableNames.WiserItemFile, WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase);
 
                             break;
                         }
@@ -1628,15 +1611,15 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             actionData.ItemIdMapped = actionData.ObjectIdMapped;
                             actionData.ItemEntityType = actionData.Field;
                             actionData.Field = String.Empty;
-                            actionData.ItemTableName = tableName;
+                            actionData.ItemTableName = actionData.TableName;
                             break;
                         }
                         case "UPDATE_ITEM_DETAIL":
-                        case "UPDATE_ITEM" when tableName.EndsWith(WiserTableNames.WiserItemDetail, StringComparison.OrdinalIgnoreCase):
+                        case "UPDATE_ITEM" when actionData.TableName.EndsWith(WiserTableNames.WiserItemDetail, StringComparison.OrdinalIgnoreCase):
                         {
                             actionData.ItemIdOriginal = actionData.ObjectIdOriginal;
                             actionData.ItemIdMapped = actionData.ObjectIdMapped;
-                            actionData.ItemTableName = tableName.Replace(WiserTableNames.WiserItemDetail, WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase);
+                            actionData.ItemTableName = actionData.TableName.Replace(WiserTableNames.WiserItemDetail, WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase);
                             actionData.ItemDetailIdOriginal = targetId;
                             actionData.ItemDetailIdMapped = targetId;
                             break;
@@ -1646,13 +1629,13 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         {
                             actionData.ItemIdOriginal = actionData.ObjectIdOriginal;
                             actionData.ItemIdMapped = actionData.ObjectIdMapped;
-                            actionData.ItemTableName = tableName;
+                            actionData.ItemTableName = actionData.TableName;
                             break;
                         }
                     }
 
                     // Get information we need for Wiser item links.
-                    if (action is "ADD_LINK" or "CHANGE_LINK" or "REMOVE_LINK" or "UPDATE_ITEMLINKDETAIL" || (action is "ADD_FILE" or "UPDATE_FILE" or "DELETE_FILE" && actionData.LinkIdOriginal > 0 && actionData.LinkType > 0))
+                    if (actionData.Action is "ADD_LINK" or "CHANGE_LINK" or "REMOVE_LINK" or "UPDATE_ITEMLINKDETAIL" || (actionData.Action is "ADD_FILE" or "UPDATE_FILE" or "DELETE_FILE" && actionData.LinkIdOriginal > 0 && actionData.LinkType > 0))
                     {
                         // Unlock the tables temporarily so that we can call GetEntityTypesOfLinkAsync, which calls wiserItemsService.GetTablePrefixForEntityAsync, since that method doesn't use our custom database connection.
                         await using var productionCommand = productionConnection.CreateCommand();
@@ -1674,7 +1657,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             // TODO: In that case, we should log a warning and then check if either the source entity or the destination entity has been selected to be merged in "settings.Entities".
                             // TODO: If that is the case, then merge the link change as well, otherwise skip it.
                             // TODO: The GCL has a similar fallback mechanism, this way we can still merge those unspecified link types.
-                            historyItemsSynchronised.Add(historyId);
+                            historyItemsSynchronised.Add(actionData.HistoryId);
                             itemsProcessed++;
                             await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -1687,8 +1670,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             await LockTablesAsync(branchConnection, tablesToLock, true);
                             continue;
                         }
-
-                        linkTypeSettings = settings.LinkTypes.SingleOrDefault(s => s.Type == actionData.LinkType && String.Equals(s.SourceEntityType, linkData.Value.SourceType) && String.Equals(s.DestinationEntityType, linkData.Value.DestinationType));
 
                         actionData.ItemTableName = $"{linkData.Value.SourceTablePrefix}{WiserTableNames.WiserItem}";
                         actionData.LinkDestinationItemTableName = $"{linkData.Value.DestinationTablePrefix}{WiserTableNames.WiserItem}";
@@ -1717,12 +1698,12 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     actionData.ItemIdMapped = GetMappedId(actionData.ItemTableName, idMapping, actionData.ItemIdOriginal, actionData).Value;
                     actionData.LinkDestinationItemIdMapped = GetMappedId(actionData.LinkDestinationItemTableName, idMapping, actionData.LinkDestinationItemIdOriginal, actionData).Value;
                     actionData.LinkIdMapped = GetMappedId(actionData.LinkTableName, idMapping, actionData.LinkIdOriginal, actionData).Value;
-                    actionData.FileIdMapped = GetMappedId(tableName, idMapping, actionData.FileIdOriginal, actionData).Value;
-                    actionData.ObjectIdMapped = GetMappedId(tableName, idMapping, actionData.ObjectIdOriginal, actionData).Value;
+                    actionData.FileIdMapped = GetMappedId(actionData.TableName, idMapping, actionData.FileIdOriginal, actionData).Value;
+                    actionData.ObjectIdMapped = GetMappedId(actionData.TableName, idMapping, actionData.ObjectIdOriginal, actionData).Value;
 
                     oldItemId = GetMappedId(actionData.ItemTableName, idMapping, oldItemId, actionData);
                     oldDestinationItemId = GetMappedId(actionData.LinkDestinationItemTableName, idMapping, oldDestinationItemId, actionData);
-                    var mappedTargetId = GetMappedId(tableName, idMapping, targetId, actionData, true);
+                    var mappedTargetId = GetMappedId(actionData.TableName, idMapping, targetId, actionData, true);
                     targetId = mappedTargetId ?? targetId;
 
                     var linkSourceItemCreatedInBranch = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == actionData.ItemIdOriginal.ToString() && String.Equals(i.TableName, $"{linkData?.SourceTablePrefix}{WiserTableNames.WiserItem}", StringComparison.OrdinalIgnoreCase));
@@ -1744,15 +1725,14 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         actionData.LinkDestinationItemEntityType = itemData.EntityType;
                     }
 
-                    var entityTypeMergeSettings = settings.Entities.SingleOrDefault(e => String.Equals(e.Type, actionData.ItemEntityType, StringComparison.OrdinalIgnoreCase)) ?? new EntityMergeSettingsModel();
+                    // Set the merge settings for the action data.
+                    actionData.UsedMergeSettings = GetMergeSettings(actionData, settings, linkData);
 
                     // Update the item in the production environment.
-                    switch (action)
+                    switch (actionData.Action)
                     {
                         case "CREATE_ITEM":
                         {
-                            actionData.UsedMergeSettings = entityTypeMergeSettings;
-
                             // Check if the user requested this change to be synchronised.
                             if (actionData.UsedMergeSettings is not {Create: true})
                             {
@@ -1762,16 +1742,16 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
                                     ? $"The current row was skipped, because we were not able to find the entity type ('{actionData.ItemEntityType}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge create actions of items of type '{entityTypeMergeSettings.Type}'.";
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge create actions of items of type '{((EntityMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
 
                             // Id mapping already exists for this item, which means the item already exists in production, so no need to create it again.
-                            if (idMapping.TryGetValue(tableName, out var mapping) && mapping.ContainsKey(actionData.ItemIdOriginal))
+                            if (idMapping.TryGetValue(actionData.TableName, out var mapping) && mapping.ContainsKey(actionData.ItemIdOriginal))
                             {
-                                historyItemsSynchronised.Add(historyId);
+                                historyItemsSynchronised.Add(actionData.HistoryId);
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -1781,26 +1761,25 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 continue;
                             }
 
-                            var newItemId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection, actionData);
+                            var newItemId = await GenerateNewIdAsync(actionData.TableName, productionConnection, branchConnection, actionData);
                             sqlParameters["newId"] = newItemId;
 
                             await using var productionCommand = productionConnection.CreateCommand();
                             AddParametersToCommand(sqlParameters, productionCommand);
                             productionCommand.CommandText = $"""
                                                              {queryPrefix}
-                                                             INSERT INTO `{tableName}` (id, entity_type) VALUES (?newId, '')
+                                                             INSERT INTO `{actionData.TableName}` (id, entity_type) VALUES (?newId, '')
                                                              """;
                             await productionCommand.ExecuteNonQueryAsync();
 
                             // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                            await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, tableName, actionData.ItemIdOriginal, newItemId, branchConnection, productionConnection, actionData);
+                            await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, actionData.TableName, actionData.ItemIdOriginal, newItemId, branchConnection, productionConnection, actionData);
 
                             break;
                         }
-                        case "UPDATE_ITEM" when tableName.EndsWith(WiserTableNames.WiserItemDetail, StringComparison.OrdinalIgnoreCase):
+                        case "UPDATE_ITEM" when actionData.TableName.EndsWith(WiserTableNames.WiserItemDetail, StringComparison.OrdinalIgnoreCase):
                         {
                             actionData.ItemDetailIdMapped = targetId;
-                            actionData.UsedMergeSettings = entityTypeMergeSettings;
 
                             // Check if the user requested this change to be synchronised.
                             if (actionData.UsedMergeSettings is not {Update: true})
@@ -1811,7 +1790,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
                                     ? $"The current row was skipped, because we were not able to find the entity type ('{actionData.ItemEntityType}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of items of type '{entityTypeMergeSettings.Type}'.";
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of items of type '{((EntityMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
@@ -1827,16 +1806,16 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             productionCommand.CommandText = queryPrefix;
                             if (String.IsNullOrWhiteSpace(actionData.NewValue))
                             {
-                                actionData.MessageBuilder.AppendLine($"The new value is empty, so we will delete the item detail row from '{tableName}'.");
+                                actionData.MessageBuilder.AppendLine($"The new value is empty, so we will delete the item detail row from '{actionData.TableName}'.");
                                 productionCommand.CommandText += $"""
-                                                                  DELETE FROM `{tableName}`
+                                                                  DELETE FROM `{actionData.TableName}`
                                                                   WHERE item_id = ?itemId
                                                                   AND `key` = ?key
                                                                   AND language_code = ?languageCode
                                                                   AND groupname = ?groupName
                                                                   """;
 
-                                await RemoveIdMappingAsync(idMapping, tableName, actionData.ItemDetailIdOriginal, branchConnection, actionData);
+                                await RemoveIdMappingAsync(idMapping, actionData.TableName, actionData.ItemDetailIdOriginal, branchConnection, actionData);
                             }
                             else
                             {
@@ -1856,7 +1835,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                     // Check if this item detail already exists in production.
                                     productionCommand.CommandText = $"""
                                                                      SELECT id
-                                                                     FROM `{tableName}`
+                                                                     FROM `{actionData.TableName}`
                                                                      WHERE item_id = ?itemId
                                                                      AND `key` = ?key
                                                                      AND language_code = ?languageCode
@@ -1864,8 +1843,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                                                      """;
                                     existingId = Convert.ToUInt64(await productionCommand.ExecuteScalarAsync() ?? 0);
                                     var text = existingId == 0
-                                        ? $"and also did not found it in the table '{tableName}' in production (based on item_id, key, language_code and groupname). So we will add a new row."
-                                        : $"but we found it in the table '{tableName}' in production, based on item_id, key, language_code and groupname. The ID for that item detail in production is '{existingId}'";
+                                        ? $"and also did not found it in the table '{actionData.TableName}' in production (based on item_id, key, language_code and groupname). So we will add a new row."
+                                        : $"but we found it in the table '{actionData.TableName}' in production, based on item_id, key, language_code and groupname. The ID for that item detail in production is '{existingId}'";
                                     actionData.MessageBuilder.AppendLine($"Did not find the current item detail in the mappings, {text}.");
                                 }
 
@@ -1876,32 +1855,32 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                     sqlParameters["existingId"] = actionData.ItemDetailIdMapped;
                                     AddParametersToCommand(sqlParameters, productionCommand);
                                     productionCommand.CommandText = $"""
-                                                                     UPDATE `{tableName}` SET value = ?value, long_value = ?longValue
+                                                                     UPDATE `{actionData.TableName}` SET value = ?value, long_value = ?longValue
                                                                      WHERE id = ?existingId
                                                                      """;
 
                                     // Map the item detail ID from wiser_history to the ID of the current item detail, locally and in database.
                                     if (actionData.ItemDetailIdOriginal > 0)
                                     {
-                                        await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, tableName, actionData.ItemDetailIdOriginal, actionData.ItemDetailIdMapped, branchConnection, productionConnection, actionData);
+                                        await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, actionData.TableName, actionData.ItemDetailIdOriginal, actionData.ItemDetailIdMapped, branchConnection, productionConnection, actionData);
                                     }
                                 }
                                 else
                                 {
-                                    var newItemId = await GenerateNewIdAsync(tableName, productionConnection, branchConnection, actionData);
+                                    var newItemId = await GenerateNewIdAsync(actionData.TableName, productionConnection, branchConnection, actionData);
                                     sqlParameters["newId"] = newItemId;
 
-                                    actionData.MessageBuilder.AppendLine($"Adding a new row in '{tableName}' in production, with ID '{newItemId}'.");
+                                    actionData.MessageBuilder.AppendLine($"Adding a new row in '{actionData.TableName}' in production, with ID '{newItemId}'.");
                                     AddParametersToCommand(sqlParameters, productionCommand);
                                     productionCommand.CommandText = $"""
-                                                                     INSERT INTO `{tableName}` (id, language_code, item_id, groupname, `key`, value, long_value)
+                                                                     INSERT INTO `{actionData.TableName}` (id, language_code, item_id, groupname, `key`, value, long_value)
                                                                      VALUES (?newId, ?languageCode, ?itemId, ?groupName, ?key, ?value, ?longValue)
                                                                      """;
 
                                     // Map the item detail ID from wiser_history to the ID of the current item detail, locally and in database.
                                     if (actionData.ItemDetailIdOriginal > 0)
                                     {
-                                        await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, tableName, actionData.ItemDetailIdOriginal, newItemId, branchConnection, productionConnection, actionData);
+                                        await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, actionData.TableName, actionData.ItemDetailIdOriginal, newItemId, branchConnection, productionConnection, actionData);
                                     }
                                 }
                             }
@@ -1910,10 +1889,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                             break;
                         }
-                        case "UPDATE_ITEM" when tableName.EndsWith(WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase):
+                        case "UPDATE_ITEM" when actionData.TableName.EndsWith(WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase):
                         {
-                            actionData.UsedMergeSettings = entityTypeMergeSettings;
-
                             // Check if the user requested this change to be synchronised.
                             if (actionData.UsedMergeSettings is not {Update: true})
                             {
@@ -1923,7 +1900,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
                                     ? $"The current row was skipped, because we were not able to find the entity type ('{actionData.ItemEntityType}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of items of type '{entityTypeMergeSettings.Type}'.";
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of items of type '{((EntityMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
@@ -1935,7 +1912,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
                                 actionData.Status = ObjectActionMergeStatuses.Failed;
-                                actionData.MessageBuilder.AppendLine($"For an {action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
+                                actionData.MessageBuilder.AppendLine($"For an {actionData.Action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
@@ -1947,7 +1924,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             AddParametersToCommand(sqlParameters, productionCommand);
                             productionCommand.CommandText = $"""
                                                              {queryPrefix}
-                                                             UPDATE `{tableName}` 
+                                                             UPDATE `{actionData.TableName}` 
                                                              SET `{actionData.Field.ToMySqlSafeValue(false)}` = ?newValue
                                                              WHERE id = ?itemId
                                                              """;
@@ -1958,7 +1935,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "UPDATE_ITEM_DETAIL":
                         {
                             actionData.ItemDetailIdMapped = targetId;
-                            actionData.UsedMergeSettings = entityTypeMergeSettings;
 
                             // Check if the user requested this change to be synchronised.
                             if (actionData.UsedMergeSettings is not {Create: true})
@@ -1969,7 +1945,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
                                     ? $"The current row was skipped, because we were not able to find the entity type ('{actionData.ItemEntityType}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of items of type '{entityTypeMergeSettings.Type}'.";
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of items of type '{((EntityMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
@@ -1981,7 +1957,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
                                 actionData.Status = ObjectActionMergeStatuses.Failed;
-                                actionData.MessageBuilder.AppendLine($"For an {action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
+                                actionData.MessageBuilder.AppendLine($"For an {actionData.Action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
@@ -1994,7 +1970,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             AddParametersToCommand(sqlParameters, productionCommand);
                             productionCommand.CommandText = $"""
                                                              {queryPrefix}
-                                                             UPDATE `{tableName}` SET `{actionData.Field.ToMySqlSafeValue(false)}` = ?newValue
+                                                             UPDATE `{actionData.TableName}` SET `{actionData.Field.ToMySqlSafeValue(false)}` = ?newValue
                                                              WHERE id = ?detailId
                                                              """;
 
@@ -2004,8 +1980,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         }
                         case "DELETE_ITEM":
                         {
-                            actionData.UsedMergeSettings = entityTypeMergeSettings;
-
                             // Check if the user requested this change to be synchronised.
                             if (actionData.UsedMergeSettings is not {Delete: true})
                             {
@@ -2015,7 +1989,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
                                     ? $"The current row was skipped, because we were not able to find the entity type ('{actionData.ItemEntityType}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge delete actions of items of type '{entityTypeMergeSettings.Type}'.";
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge delete actions of items of type '{((EntityMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
@@ -2034,8 +2008,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         }
                         case "UNDELETE_ITEM":
                         {
-                            actionData.UsedMergeSettings = entityTypeMergeSettings;
-
                             // Check if the user requested this change to be synchronised.
                             if (actionData.UsedMergeSettings is not {Delete: true})
                             {
@@ -2045,7 +2017,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
                                     ? $"The current row was skipped, because we were not able to find the entity type ('{actionData.ItemEntityType}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge delete actions of items of type '{entityTypeMergeSettings.Type}'.";
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge delete actions of items of type '{((EntityMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
@@ -2064,8 +2036,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         }
                         case "ADD_LINK":
                         {
-                            actionData.UsedMergeSettings = linkTypeSettings;
-
                             // Check if the link type is in the list of changes.
                             if (actionData.UsedMergeSettings is not {Create: true})
                             {
@@ -2084,7 +2054,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             if (linkSourceItemIsCreatedAndDeletedInBranch || linkDestinationItemIsCreatedAndDeletedInBranch)
                             {
                                 // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
-                                historyItemsSynchronised.Add(historyId);
+                                historyItemsSynchronised.Add(actionData.HistoryId);
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -2112,14 +2082,14 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             await using (var environmentCommand = branchConnection.CreateCommand())
                             {
                                 AddParametersToCommand(sqlParameters, environmentCommand);
-                                environmentCommand.CommandText = $"SELECT id FROM `{tableName}` WHERE item_id = ?originalItemId AND destination_item_id = ?originalDestinationItemId AND type = ?type";
+                                environmentCommand.CommandText = $"SELECT id FROM `{actionData.TableName}` WHERE item_id = ?originalItemId AND destination_item_id = ?originalDestinationItemId AND type = ?type";
                                 var getLinkIdDataTable = new DataTable();
                                 using var environmentAdapter = new MySqlDataAdapter(environmentCommand);
                                 environmentAdapter.Fill(getLinkIdDataTable);
                                 if (getLinkIdDataTable.Rows.Count == 0)
                                 {
                                     await logService.LogWarning(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Could not find link ID with itemId = {actionData.ItemIdOriginal}, destinationItemId = {actionData.LinkDestinationItemIdOriginal} and type = {actionData.LinkType}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                                    historyItemsSynchronised.Add(historyId);
+                                    historyItemsSynchronised.Add(actionData.HistoryId);
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -2130,13 +2100,13 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 }
 
                                 actionData.LinkIdOriginal = Convert.ToUInt64(getLinkIdDataTable.Rows[0]["id"]);
-                                actionData.LinkIdMapped = await GenerateNewIdAsync(tableName, productionConnection, branchConnection, actionData);
+                                actionData.LinkIdMapped = await GenerateNewIdAsync(actionData.TableName, productionConnection, branchConnection, actionData);
                             }
 
-                            if (idMapping.TryGetValue(tableName, out var mapping) && mapping.ContainsKey(actionData.LinkIdOriginal))
+                            if (idMapping.TryGetValue(actionData.TableName, out var mapping) && mapping.ContainsKey(actionData.LinkIdOriginal))
                             {
                                 // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
-                                historyItemsSynchronised.Add(historyId);
+                                historyItemsSynchronised.Add(actionData.HistoryId);
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -2151,20 +2121,18 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             AddParametersToCommand(sqlParameters, productionCommand);
                             productionCommand.CommandText = $"""
                                                              {queryPrefix}
-                                                             INSERT IGNORE INTO `{tableName}` (id, item_id, destination_item_id, ordering, type)
+                                                             INSERT IGNORE INTO `{actionData.TableName}` (id, item_id, destination_item_id, ordering, type)
                                                              VALUES (?newId, ?itemId, ?destinationItemId, ?ordering, ?type);
                                                              """;
                             await productionCommand.ExecuteNonQueryAsync();
 
                             // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                            await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, tableName, actionData.LinkIdOriginal, actionData.LinkIdMapped, branchConnection, productionConnection, actionData);
+                            await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, actionData.TableName, actionData.LinkIdOriginal, actionData.LinkIdMapped, branchConnection, productionConnection, actionData);
 
                             break;
                         }
                         case "CHANGE_LINK":
                         {
-                            actionData.UsedMergeSettings = linkTypeSettings;
-
                             // Check if the link type is in the list of changes.
                             if (actionData.UsedMergeSettings is not {Update: true})
                             {
@@ -2183,7 +2151,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             if (linkSourceItemIsCreatedAndDeletedInBranch || linkDestinationItemIsCreatedAndDeletedInBranch)
                             {
                                 // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
-                                historyItemsSynchronised.Add(historyId);
+                                historyItemsSynchronised.Add(actionData.HistoryId);
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -2206,7 +2174,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
                                 actionData.Status = ObjectActionMergeStatuses.Failed;
-                                actionData.MessageBuilder.AppendLine($"For an {action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
+                                actionData.MessageBuilder.AppendLine($"For an {actionData.Action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
@@ -2220,7 +2188,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             AddParametersToCommand(sqlParameters, productionCommand);
                             productionCommand.CommandText = $"""
                                                              {queryPrefix}
-                                                             UPDATE `{tableName}` 
+                                                             UPDATE `{actionData.TableName}` 
                                                              SET `{actionData.Field.ToMySqlSafeValue(false)}` = ?newValue
                                                              WHERE item_id = ?oldItemId
                                                              AND destination_item_id = ?oldDestinationItemId
@@ -2231,8 +2199,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         }
                         case "REMOVE_LINK":
                         {
-                            actionData.UsedMergeSettings = linkTypeSettings;
-
                             // Check if the link type is in the list of changes.
                             if (actionData.UsedMergeSettings is not {Delete: true})
                             {
@@ -2251,7 +2217,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             if (linkSourceItemIsCreatedAndDeletedInBranch || linkDestinationItemIsCreatedAndDeletedInBranch)
                             {
                                 // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
-                                historyItemsSynchronised.Add(historyId);
+                                historyItemsSynchronised.Add(actionData.HistoryId);
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -2276,7 +2242,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             AddParametersToCommand(sqlParameters, productionCommand);
                             productionCommand.CommandText = $"""
                                                              {queryPrefix}
-                                                             DELETE FROM `{tableName}`
+                                                             DELETE FROM `{actionData.TableName}`
                                                              WHERE item_id = ?itemId
                                                              AND destination_item_id = ?destinationItemId
                                                              AND type = ?type
@@ -2286,8 +2252,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         }
                         case "UPDATE_ITEMLINKDETAIL":
                         {
-                            actionData.UsedMergeSettings = linkTypeSettings;
-
                             // Check if the user requested this change to be synchronised.
                             if (actionData.UsedMergeSettings is not {Update: true})
                             {
@@ -2306,7 +2270,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             if (linkSourceItemIsCreatedAndDeletedInBranch || linkDestinationItemIsCreatedAndDeletedInBranch)
                             {
                                 // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
-                                historyItemsSynchronised.Add(historyId);
+                                historyItemsSynchronised.Add(actionData.HistoryId);
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -2333,9 +2297,9 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             productionCommand.CommandText = queryPrefix;
                             if (String.IsNullOrWhiteSpace(actionData.NewValue))
                             {
-                                actionData.MessageBuilder.AppendLine($"The new value is empty, so we will delete the item detail row from '{tableName}'.");
+                                actionData.MessageBuilder.AppendLine($"The new value is empty, so we will delete the item detail row from '{actionData.TableName}'.");
                                 productionCommand.CommandText += $"""
-                                                                  DELETE FROM `{tableName}`
+                                                                  DELETE FROM `{actionData.TableName}`
                                                                   WHERE itemlink_id = ?linkId
                                                                   AND `key` = ?key
                                                                   AND language_code = ?languageCode
@@ -2349,7 +2313,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 sqlParameters["longValue"] = useLongValue ? actionData.NewValue : "";
 
                                 productionCommand.CommandText += $"""
-                                                                  INSERT INTO `{tableName}` (language_code, itemlink_id, groupname, `key`, value, long_value)
+                                                                  INSERT INTO `{actionData.TableName}` (language_code, itemlink_id, groupname, `key`, value, long_value)
                                                                   VALUES (?languageCode, ?linkId, ?groupName, ?key, ?value, ?longValue)
                                                                   ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), long_value = VALUES(long_value)
                                                                   """;
@@ -2362,8 +2326,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         }
                         case "ADD_FILE":
                         {
-                            actionData.UsedMergeSettings = actionData.LinkIdOriginal > 0 ? linkTypeSettings : entityTypeMergeSettings;
-
                             // Check if the user requested this change to be synchronised.
                             if (actionData.UsedMergeSettings is not {Update: true})
                             {
@@ -2373,16 +2335,16 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
                                     ? $"The current row was skipped, because we were not able to find the {(actionData.LinkIdOriginal > 0 ? "link" : "entity")} type ('{(actionData.LinkIdOriginal > 0 ? actionData.LinkType.ToString() : actionData.ItemEntityType)}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of {(actionData.LinkIdOriginal > 0 ? $"links of type '{linkMergeSettings.Type}'" : $"items of type '{entityTypeMergeSettings.Type}'")}.";
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of {(actionData.LinkIdOriginal > 0 ? $"links of type '{((LinkTypeMergeSettingsModel)actionData.UsedMergeSettings).Type}'" : $"items of type '{((EntityMergeSettingsModel)actionData.UsedMergeSettings).Type}'")}.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
 
-                            if (idMapping.TryGetValue(tableName, out var mapping) && mapping.ContainsKey(actionData.ObjectIdOriginal))
+                            if (idMapping.TryGetValue(actionData.TableName, out var mapping) && mapping.ContainsKey(actionData.ObjectIdOriginal))
                             {
                                 // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
-                                historyItemsSynchronised.Add(historyId);
+                                historyItemsSynchronised.Add(actionData.HistoryId);
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -2405,7 +2367,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             }
 
                             // oldValue contains either "item_id" or "itemlink_id", to indicate which of these columns is used for the ID that is saved in newValue.
-                            actionData.FileIdMapped = await GenerateNewIdAsync(tableName, productionConnection, branchConnection, actionData);
+                            actionData.FileIdMapped = await GenerateNewIdAsync(actionData.TableName, productionConnection, branchConnection, actionData);
                             sqlParameters["fileItemId"] = String.Equals(columnNameForFileLink, "itemlink_id", StringComparison.OrdinalIgnoreCase) ? actionData.LinkIdMapped : actionData.ItemIdMapped;
                             sqlParameters["newId"] = actionData.FileIdMapped;
 
@@ -2413,20 +2375,18 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             AddParametersToCommand(sqlParameters, productionCommand);
                             productionCommand.CommandText = $"""
                                                              {queryPrefix}
-                                                             INSERT INTO `{tableName}` (id, `{columnNameForFileLink.ToMySqlSafeValue(false)}`) 
+                                                             INSERT INTO `{actionData.TableName}` (id, `{columnNameForFileLink.ToMySqlSafeValue(false)}`) 
                                                              VALUES (?newId, ?fileItemId)
                                                              """;
                             await productionCommand.ExecuteNonQueryAsync();
 
                             // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                            await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, tableName, actionData.FileIdOriginal, actionData.FileIdMapped, branchConnection, productionConnection, actionData);
+                            await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, actionData.TableName, actionData.FileIdOriginal, actionData.FileIdMapped, branchConnection, productionConnection, actionData);
 
                             break;
                         }
                         case "UPDATE_FILE":
                         {
-                            actionData.UsedMergeSettings = actionData.LinkIdOriginal > 0 ? linkTypeSettings : entityTypeMergeSettings;
-
                             // Check if the user requested this change to be synchronised.
                             if (actionData.UsedMergeSettings is not {Update: true})
                             {
@@ -2436,7 +2396,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
                                     ? $"The current row was skipped, because we were not able to find the {(actionData.LinkIdOriginal > 0 ? "link" : "entity")} type ('{(actionData.LinkIdOriginal > 0 ? actionData.LinkType.ToString() : actionData.ItemEntityType)}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of {(actionData.LinkIdOriginal > 0 ? $"links of type '{linkMergeSettings.Type}'" : $"items of type '{entityTypeMergeSettings.Type}'")}.";
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of {(actionData.LinkIdOriginal > 0 ? $"links of type '{((LinkTypeMergeSettingsModel)actionData.UsedMergeSettings).Type}'" : $"items of type '{((EntityMergeSettingsModel)actionData.UsedMergeSettings).Type}'")}.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
@@ -2453,7 +2413,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 await using (var environmentCommand = branchConnection.CreateCommand())
                                 {
                                     AddParametersToCommand(sqlParameters, environmentCommand);
-                                    environmentCommand.CommandText = $"SELECT content FROM `{tableName}` WHERE id = ?originalFileId";
+                                    environmentCommand.CommandText = $"SELECT content FROM `{actionData.TableName}` WHERE id = ?originalFileId";
                                     await using var productionReader = await environmentCommand.ExecuteReaderAsync();
                                     if (await productionReader.ReadAsync())
                                     {
@@ -2467,7 +2427,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 AddParametersToCommand(sqlParameters, productionCommand);
                                 productionCommand.CommandText = $"""
                                                                  {queryPrefix}
-                                                                 UPDATE `{tableName}`
+                                                                 UPDATE `{actionData.TableName}`
                                                                  SET content = ?contents
                                                                  WHERE id = ?fileId
                                                                  """;
@@ -2481,7 +2441,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
                                     actionData.Status = ObjectActionMergeStatuses.Failed;
-                                    actionData.MessageBuilder.AppendLine($"For an {action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
+                                    actionData.MessageBuilder.AppendLine($"For an {actionData.Action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
                                     branchBatchLoggerService.LogMergeAction(actionData);
                                     continue;
                                 }
@@ -2492,7 +2452,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 AddParametersToCommand(sqlParameters, productionCommand);
                                 productionCommand.CommandText = $"""
                                                                  {queryPrefix}
-                                                                 UPDATE `{tableName}` 
+                                                                 UPDATE `{actionData.TableName}` 
                                                                  SET `{actionData.Field.ToMySqlSafeValue(false)}` = ?newValue
                                                                  WHERE id = ?fileId
                                                                  """;
@@ -2503,8 +2463,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         }
                         case "DELETE_FILE":
                         {
-                            actionData.UsedMergeSettings = actionData.LinkIdOriginal > 0 ? linkTypeSettings : entityTypeMergeSettings;
-
                             // Check if the user requested this change to be synchronised.
                             if (actionData.UsedMergeSettings is not {Update: true})
                             {
@@ -2514,7 +2472,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
                                     ? $"The current row was skipped, because we were not able to find the {(actionData.LinkIdOriginal > 0 ? "link" : "entity")} type ('{(actionData.LinkIdOriginal > 0 ? actionData.LinkType.ToString() : actionData.ItemEntityType)}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of {(actionData.LinkIdOriginal > 0 ? $"links of type '{linkMergeSettings.Type}'" : $"items of type '{entityTypeMergeSettings.Type}'")}.";
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of {(actionData.LinkIdOriginal > 0 ? $"links of type '{((LinkTypeMergeSettingsModel)actionData.UsedMergeSettings).Type}'" : $"items of type '{((EntityMergeSettingsModel)actionData.UsedMergeSettings).Type}'")}.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
@@ -2526,7 +2484,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             AddParametersToCommand(sqlParameters, productionCommand);
                             productionCommand.CommandText = $"""
                                                              {queryPrefix}
-                                                             DELETE FROM `{tableName}`
+                                                             DELETE FROM `{actionData.TableName}`
                                                              WHERE id = ?fileId
                                                              """;
                             await productionCommand.ExecuteNonQueryAsync();
@@ -2547,24 +2505,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "CREATE_STYLED_OUTPUT":
                         case "CREATE_EASY_OBJECT":
                         {
-                            actionData.UsedMergeSettings = tableName switch
-                            {
-                                WiserTableNames.WiserEntity => entityMergeSettings,
-                                WiserTableNames.WiserEntityProperty => entityPropertyMergeSettings,
-                                WiserTableNames.WiserQuery => queryMergeSettings,
-                                WiserTableNames.WiserModule => moduleMergeSettings,
-                                WiserTableNames.WiserDataSelector => dataSelectorMergeSettings,
-                                WiserTableNames.WiserPermission => permissionMergeSettings,
-                                WiserTableNames.WiserUserRoles => userRoleMergeSettings,
-                                WiserTableNames.WiserFieldTemplates => fieldTemplatesMergeSettings,
-                                WiserTableNames.WiserLink => linkMergeSettings,
-                                WiserTableNames.WiserApiConnection => apiConnectionMergeSettings,
-                                WiserTableNames.WiserRoles => roleMergeSettings,
-                                WiserTableNames.WiserStyledOutput => styledOutputMergeSettings,
-                                "easy_objects" => objectMergeSettings,
-                                _ => null
-                            };
-
                             // Check if the user requested this change to be synchronised.
                             if (actionData.UsedMergeSettings is not {Create: true})
                             {
@@ -2573,17 +2513,17 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
-                                    ? $"The current row was skipped, because we were not able to find the merge settings for '{tableName}' in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge create actions from '{tableName}'.";
+                                    ? $"The current row was skipped, because we were not able to find the merge settings for '{actionData.TableName}' in the settings, so we don't know if we should merge it or not."
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge create actions from '{actionData.TableName}'.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
 
-                            if (idMapping.TryGetValue(tableName, out var mapping) && mapping.ContainsKey(actionData.ObjectIdOriginal))
+                            if (idMapping.TryGetValue(actionData.TableName, out var mapping) && mapping.ContainsKey(actionData.ObjectIdOriginal))
                             {
                                 // This item was already created in an earlier merge, but somehow the history of that wasn't deleted, so skip it now.
-                                historyItemsSynchronised.Add(historyId);
+                                historyItemsSynchronised.Add(actionData.HistoryId);
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -2593,7 +2533,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 continue;
                             }
 
-                            actionData.ObjectIdMapped = await GenerateNewIdAsync(tableName, productionConnection, branchConnection, actionData);
+                            actionData.ObjectIdMapped = await GenerateNewIdAsync(actionData.TableName, productionConnection, branchConnection, actionData);
                             sqlParameters["newId"] = actionData.ObjectIdMapped;
                             sqlParameters["guid"] = Guid.NewGuid().ToString("N");
                             sqlParameters["guid2"] = Guid.NewGuid().ToString("N");
@@ -2607,36 +2547,36 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             // TODO: Then look in production to see if it already has a row with the same values. If so, map the newId to the ID of the row in production and skip the insert statement.
                             // TODO: Then all follow up update/delete statements should update the correct row in production and no longer cause duplicate key exceptions if someone has already added this row manually on production before the merge.
 
-                            if (tableName.Equals(WiserTableNames.WiserEntity, StringComparison.OrdinalIgnoreCase))
+                            if (actionData.TableName.Equals(WiserTableNames.WiserEntity, StringComparison.OrdinalIgnoreCase))
                             {
                                 productionCommand.CommandText = $"""
                                                                  {queryPrefix}
-                                                                 SET @temporaryModuleId = (SELECT IFNULL(MAX(module_id), 0) + 1 FROM `{tableName}`);
-                                                                 INSERT INTO `{tableName}` (id, `name`, `module_id`) 
+                                                                 SET @temporaryModuleId = (SELECT IFNULL(MAX(module_id), 0) + 1 FROM `{actionData.TableName}`);
+                                                                 INSERT INTO `{actionData.TableName}` (id, `name`, `module_id`) 
                                                                  VALUES (?newId, ?guid, @temporaryModuleId)
                                                                  """;
                             }
-                            else if (tableName.Equals(WiserTableNames.WiserEntityProperty, StringComparison.OrdinalIgnoreCase))
+                            else if (actionData.TableName.Equals(WiserTableNames.WiserEntityProperty, StringComparison.OrdinalIgnoreCase))
                             {
                                 // The table wiser_entityproperty has a unique index (on entity_name, property_name), so we need to temporarily generate a unique property name, to prevent duplicate index errors when multiple properties are added in a row.
                                 productionCommand.CommandText = $"""
                                                                  {queryPrefix}
-                                                                 INSERT INTO `{tableName}` (id, `entity_name`, `property_name`) 
+                                                                 INSERT INTO `{actionData.TableName}` (id, `entity_name`, `property_name`) 
                                                                  VALUES (?newId, 'temp_wts', ?guid)
                                                                  """;
                                 actionData.MessageBuilder.AppendLine($"Created a temporary property name ('{sqlParameters["guid"]}') for the entity property '{actionData.NewValue}', to prevent duplicate index errors when multiple properties are added in a row.");
                             }
-                            else if (tableName.Equals(WiserTableNames.WiserLink, StringComparison.OrdinalIgnoreCase))
+                            else if (actionData.TableName.Equals(WiserTableNames.WiserLink, StringComparison.OrdinalIgnoreCase))
                             {
                                 // The table wiser_link has a unique index (on type, desintation_entity_type, connected_entity_type), so we need to temporarily generate unique entity names, to prevent duplicate index errors when rows properties are added in a row.
                                 productionCommand.CommandText = $"""
                                                                  {queryPrefix}
-                                                                 INSERT INTO `{tableName}` (id, `type`, `destination_entity_type`, `connected_entity_type`) 
+                                                                 INSERT INTO `{actionData.TableName}` (id, `type`, `destination_entity_type`, `connected_entity_type`) 
                                                                  VALUES (?newId, 0, ?guid, ?guid2)
                                                                  """;
                                 actionData.MessageBuilder.AppendLine($"Saved temporary GUIDs in destination_entity_type ('{sqlParameters["guid"]}') and connected_entity_type ('{sqlParameters["guid2"]}'), to prevent duplicate index errors when multiple properties are added in a row.");
                             }
-                            else if (tableName.Equals(WiserTableNames.WiserPermission, StringComparison.OrdinalIgnoreCase))
+                            else if (actionData.TableName.Equals(WiserTableNames.WiserPermission, StringComparison.OrdinalIgnoreCase))
                             {
                                 // The table wiser_permission has a unique index on all columns, so we need to temporarily use a role ID that doesn't exist yet, to prevent duplicate index errors when multiple permissions are added in a row.
                                 // This query first gets the maximum role ID from the table, and then adds 1 to it, so that we can be sure that we have ID of a role that doesn't exist.
@@ -2646,13 +2586,13 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 productionCommand.CommandText = $"""
                                                                  {queryPrefix}
                                                                  SET @temporaryRoleId = (SELECT IFNULL(MAX(id), 0) + 1 FROM `{WiserTableNames.WiserRoles}`);
-                                                                 SET @temporaryRoleId = (SELECT IF(MAX(role_id) >= @temporaryRoleId, MAX(role_id) + 1, @temporaryRoleId) FROM `{tableName}`);
-                                                                 SET @temporaryItemId = (SELECT IFNULL(MAX(item_id), 0) + 1 FROM `{tableName}`);
-                                                                 SET @temporaryEntityPropertyId = (SELECT IFNULL(MAX(entity_property_id), 0) + 1 FROM `{tableName}`);
-                                                                 SET @temporaryModuleId = (SELECT IFNULL(MAX(module_id), 0) + 1 FROM `{tableName}`);
-                                                                 SET @temporaryQueryId = (SELECT IFNULL(MAX(query_id), 0) + 1 FROM `{tableName}`);
-                                                                 SET @temporaryDataSelectorId = (SELECT IFNULL(MAX(data_selector_id), 0) + 1 FROM `{tableName}`);
-                                                                 INSERT INTO `{tableName}` (id, `role_id`, `item_id`, `entity_property_id`, `module_id`, `query_id`, `data_selector_id`, `endpoint_url`)
+                                                                 SET @temporaryRoleId = (SELECT IF(MAX(role_id) >= @temporaryRoleId, MAX(role_id) + 1, @temporaryRoleId) FROM `{actionData.TableName}`);
+                                                                 SET @temporaryItemId = (SELECT IFNULL(MAX(item_id), 0) + 1 FROM `{actionData.TableName}`);
+                                                                 SET @temporaryEntityPropertyId = (SELECT IFNULL(MAX(entity_property_id), 0) + 1 FROM `{actionData.TableName}`);
+                                                                 SET @temporaryModuleId = (SELECT IFNULL(MAX(module_id), 0) + 1 FROM `{actionData.TableName}`);
+                                                                 SET @temporaryQueryId = (SELECT IFNULL(MAX(query_id), 0) + 1 FROM `{actionData.TableName}`);
+                                                                 SET @temporaryDataSelectorId = (SELECT IFNULL(MAX(data_selector_id), 0) + 1 FROM `{actionData.TableName}`);
+                                                                 INSERT INTO `{actionData.TableName}` (id, `role_id`, `item_id`, `entity_property_id`, `module_id`, `query_id`, `data_selector_id`, `endpoint_url`)
                                                                  VALUES (?newId, @temporaryRoleId, @temporaryItemId, @temporaryEntityPropertyId, @temporaryModuleId, @temporaryQueryId, @temporaryDataSelectorId, ?guid)
                                                                  """;
                                 actionData.MessageBuilder.AppendLine("Saved temporary values in most columns of wiser_permission, to prevent duplicate index errors when multiple properties are added in a row.");
@@ -2661,7 +2601,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             {
                                 productionCommand.CommandText = $"""
                                                                  {queryPrefix}
-                                                                 INSERT INTO `{tableName}` (id) 
+                                                                 INSERT INTO `{actionData.TableName}` (id) 
                                                                  VALUES (?newId)
                                                                  """;
                             }
@@ -2669,7 +2609,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             await productionCommand.ExecuteNonQueryAsync();
 
                             // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
-                            await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, tableName, actionData.ObjectIdOriginal, actionData.ObjectIdMapped, branchConnection, productionConnection, actionData);
+                            await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, actionData.TableName, actionData.ObjectIdOriginal, actionData.ObjectIdMapped, branchConnection, productionConnection, actionData);
 
                             break;
                         }
@@ -2687,24 +2627,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "UPDATE_STYLED_OUTPUT":
                         case "UPDATE_EASY_OBJECT":
                         {
-                            actionData.UsedMergeSettings = tableName switch
-                            {
-                                WiserTableNames.WiserEntity => entityMergeSettings,
-                                WiserTableNames.WiserEntityProperty => entityPropertyMergeSettings,
-                                WiserTableNames.WiserQuery => queryMergeSettings,
-                                WiserTableNames.WiserModule => moduleMergeSettings,
-                                WiserTableNames.WiserDataSelector => dataSelectorMergeSettings,
-                                WiserTableNames.WiserPermission => permissionMergeSettings,
-                                WiserTableNames.WiserUserRoles => userRoleMergeSettings,
-                                WiserTableNames.WiserFieldTemplates => fieldTemplatesMergeSettings,
-                                WiserTableNames.WiserLink => linkMergeSettings,
-                                WiserTableNames.WiserApiConnection => apiConnectionMergeSettings,
-                                WiserTableNames.WiserRoles => roleMergeSettings,
-                                WiserTableNames.WiserStyledOutput => styledOutputMergeSettings,
-                                "easy_objects" => objectMergeSettings,
-                                _ => null
-                            };
-
                             // Check if the user requested this change to be synchronised.
                             if (actionData.UsedMergeSettings is not {Update: true})
                             {
@@ -2713,8 +2635,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
-                                    ? $"The current row was skipped, because we were not able to find the merge settings for '{tableName}' in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions from '{tableName}'.";
+                                    ? $"The current row was skipped, because we were not able to find the merge settings for '{actionData.TableName}' in the settings, so we don't know if we should merge it or not."
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions from '{actionData.TableName}'.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
@@ -2726,7 +2648,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
                                 actionData.Status = ObjectActionMergeStatuses.Failed;
-                                actionData.MessageBuilder.AppendLine($"For an {action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
+                                actionData.MessageBuilder.AppendLine($"For an {actionData.Action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
@@ -2738,7 +2660,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             AddParametersToCommand(sqlParameters, productionCommand);
                             productionCommand.CommandText = $"""
                                                              {queryPrefix}
-                                                             UPDATE `{tableName}` 
+                                                             UPDATE `{actionData.TableName}` 
                                                              SET `{actionData.Field.ToMySqlSafeValue(false)}` = ?newValue
                                                              WHERE id = ?id
                                                              """;
@@ -2760,24 +2682,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "DELETE_STYLED_OUTPUT":
                         case "DELETE_EASY_OBJECT":
                         {
-                            actionData.UsedMergeSettings = tableName switch
-                            {
-                                WiserTableNames.WiserEntity => entityMergeSettings,
-                                WiserTableNames.WiserEntityProperty => entityPropertyMergeSettings,
-                                WiserTableNames.WiserQuery => queryMergeSettings,
-                                WiserTableNames.WiserModule => moduleMergeSettings,
-                                WiserTableNames.WiserDataSelector => dataSelectorMergeSettings,
-                                WiserTableNames.WiserPermission => permissionMergeSettings,
-                                WiserTableNames.WiserUserRoles => userRoleMergeSettings,
-                                WiserTableNames.WiserFieldTemplates => fieldTemplatesMergeSettings,
-                                WiserTableNames.WiserLink => linkMergeSettings,
-                                WiserTableNames.WiserApiConnection => apiConnectionMergeSettings,
-                                WiserTableNames.WiserRoles => roleMergeSettings,
-                                WiserTableNames.WiserStyledOutput => styledOutputMergeSettings,
-                                "easy_objects" => objectMergeSettings,
-                                _ => null
-                            };
-
                             // Check if the user requested this change to be synchronised.
                             if (actionData.UsedMergeSettings is not {Create: true})
                             {
@@ -2786,8 +2690,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
-                                    ? $"The current row was skipped, because we were not able to find the merge settings for '{tableName}' in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge delete actions from '{tableName}'.";
+                                    ? $"The current row was skipped, because we were not able to find the merge settings for '{actionData.TableName}' in the settings, so we don't know if we should merge it or not."
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge delete actions from '{actionData.TableName}'.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
@@ -2799,7 +2703,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             AddParametersToCommand(sqlParameters, productionCommand);
                             productionCommand.CommandText = $"""
                                                              {queryPrefix}
-                                                             DELETE FROM `{tableName}`
+                                                             DELETE FROM `{actionData.TableName}`
                                                              WHERE `id` = ?id
                                                              """;
                             await productionCommand.ExecuteNonQueryAsync();
@@ -2807,11 +2711,11 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             break;
                         }
                         default:
-                            throw new ArgumentOutOfRangeException(nameof(action), action, $"Unsupported action for history synchronisation: '{action}'");
+                            throw new ArgumentOutOfRangeException(nameof(actionData.Action), actionData.Action, $"Unsupported action for history synchronisation: '{actionData.Action}'");
                     }
 
                     successfulChanges++;
-                    historyItemsSynchronised.Add(historyId);
+                    historyItemsSynchronised.Add(actionData.HistoryId);
                     itemsProcessed++;
                     await UpdateProgressInQueue(databaseConnection, queueId, itemsProcessed);
 
@@ -2821,8 +2725,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 }
                 catch (Exception exception)
                 {
-                    await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"An error occurred while trying to synchronise history ID '{historyId}' from '{branchDatabase}' to '{originalDatabase}': {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                    errors.Add($"Het is niet gelukt om de wijziging '{action}' voor object '{actionData.ObjectIdOriginal}' over te zetten. De fout was: {exception.Message}");
+                    await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"An error occurred while trying to synchronise history ID '{actionData.HistoryId}' from '{branchDatabase}' to '{originalDatabase}': {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                    errors.Add($"Het is niet gelukt om de wijziging '{actionData.Action}' voor object '{actionData.ObjectIdOriginal}' over te zetten. De fout was: {exception.Message}");
 
                     actionData.Status = ObjectActionMergeStatuses.Failed;
                     actionData.MessageBuilder.AppendLine($"An exception occurred while trying to merge the current action: {exception}");
@@ -2917,6 +2821,62 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
         result["Success"] = !errors.Any();
         return result;
+    }
+
+    /// <summary>
+    /// Get the merge settings for the a merge action.
+    /// These merge settings are used to determine if the action should be merged or not.
+    /// </summary>
+    /// <param name="actionData">The <see cref="BranchMergeLogModel"/> of the action to get the settings for.</param>
+    /// <param name="branchMergeSettings">The <see cref="MergeBranchSettingsModel"/> with all settings for the current merge.</param>
+    /// <param name="linkData">The information about the link, if the current action is related to a link between items.</param>
+    /// <returns>The <see cref="ObjectMergeSettingsModel"/> that contain the user settings for the specified action.</returns>
+    /// <exception cref="ArgumentNullException">If <see cref="linkData"/> is <c>null</c> and the specified action is that of a link.</exception>
+    private static ObjectMergeSettingsModel GetMergeSettings(BranchMergeLogModel actionData, MergeBranchSettingsModel branchMergeSettings, (string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)? linkData)
+    {
+        switch (actionData.Action)
+        {
+            case "CREATE_ITEM":
+            case "UPDATE_ITEM":
+            case "UPDATE_ITEM_DETAIL":
+            case "DELETE_ITEM":
+            case "UNDELETE_ITEM":
+            case "ADD_FILE" when actionData.LinkIdOriginal == 0:
+            case "UPDATE_FILE" when actionData.LinkIdOriginal == 0:
+            case "DELETE_FILE" when actionData.LinkIdOriginal == 0:
+                return branchMergeSettings.Entities.SingleOrDefault(e => String.Equals(e.Type, actionData.ItemEntityType, StringComparison.OrdinalIgnoreCase));
+            case "ADD_LINK":
+            case "CHANGE_LINK":
+            case "REMOVE_LINK":
+            case "UPDATE_ITEMLINKDETAIL":
+            case "ADD_FILE" when actionData.LinkIdOriginal > 0:
+            case "UPDATE_FILE" when actionData.LinkIdOriginal > 0:
+            case "DELETE_FILE" when actionData.LinkIdOriginal > 0:
+                if (!linkData.HasValue)
+                {
+                    throw new ArgumentNullException(nameof(linkData), $"Link data is required for the {actionData.Action} action.");
+                }
+
+                return branchMergeSettings.LinkTypes.SingleOrDefault(s => s.Type == actionData.LinkType && String.Equals(s.SourceEntityType, linkData.Value.SourceType) && String.Equals(s.DestinationEntityType, linkData.Value.DestinationType));
+            default:
+                return actionData.TableName switch
+                {
+                    WiserTableNames.WiserEntity => branchMergeSettings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Entity),
+                    WiserTableNames.WiserEntityProperty => branchMergeSettings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.EntityProperty),
+                    WiserTableNames.WiserQuery => branchMergeSettings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Query),
+                    WiserTableNames.WiserModule => branchMergeSettings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Module),
+                    WiserTableNames.WiserDataSelector => branchMergeSettings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.DataSelector),
+                    WiserTableNames.WiserPermission => branchMergeSettings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Permission),
+                    WiserTableNames.WiserUserRoles => branchMergeSettings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.UserRole),
+                    WiserTableNames.WiserFieldTemplates => branchMergeSettings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.FieldTemplates),
+                    WiserTableNames.WiserLink => branchMergeSettings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Link),
+                    WiserTableNames.WiserApiConnection => branchMergeSettings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.ApiConnection),
+                    WiserTableNames.WiserRoles => branchMergeSettings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.Role),
+                    WiserTableNames.WiserStyledOutput => branchMergeSettings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.StyledOutput),
+                    "easy_objects" => branchMergeSettings.Settings.SingleOrDefault(s => s.Type == WiserSettingTypes.EasyObjects),
+                    _ => null
+                };
+        }
     }
 
     /// <summary>
@@ -3378,7 +3338,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     /// <param name="tableName">The table that the ID belongs to.</param>
     /// <param name="idMapping">The dictionary that contains all the ID mappings.</param>
     /// <param name="id">The ID to get the mapped value of.</param>
-    /// <param name="actionData"></param>
+    /// <param name="actionData">The <see cref="BranchMergeLogModel" /> where we can add log messages to.</param>
     /// <param name="returnNullIfNotFound">Optional: Whether to return <c>null</c> if no mapping was found. When <c>false</c>, we'll return the same value as the input. Default value is <c>false</c>.</param>
     /// <returns>The ID of the same item in the production environment.</returns>
     private static ulong? GetMappedId(string tableName, Dictionary<string, Dictionary<ulong, ulong>> idMapping, ulong? id, BranchMergeLogModel actionData, bool returnNullIfNotFound = false)

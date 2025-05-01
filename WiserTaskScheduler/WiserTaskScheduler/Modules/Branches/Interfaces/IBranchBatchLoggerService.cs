@@ -1,4 +1,5 @@
-﻿using WiserTaskScheduler.Modules.Branches.Models;
+﻿using WiserTaskScheduler.Core.Models;
+using WiserTaskScheduler.Modules.Branches.Models;
 
 namespace WiserTaskScheduler.Modules.Branches.Interfaces;
 
@@ -8,6 +9,11 @@ namespace WiserTaskScheduler.Modules.Branches.Interfaces;
 /// </summary>
 public interface IBranchBatchLoggerService
 {
+    /// <summary>
+    /// Gets or sets the log settings that need to be used.
+    /// </summary>
+    LogSettings LogSettings { get; set; }
+
     /// <summary>
     /// Log a merge action to the database.
     /// This will add the log to a queue and then handle that queue periodically,
