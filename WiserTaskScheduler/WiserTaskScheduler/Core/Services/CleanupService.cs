@@ -114,6 +114,50 @@ public class CleanupService(IOptions<WtsSettings> wtsSettings, IServiceProvider 
     }
 
     /// <summary>
+    /// Cleanup files in the wiser_itemfile table with property_name 'TEMPORARY_FILE_FROM_WISER' older than 24h.
+    /// Note: this does not yet support dedicated tables.
+    /// </summary>
+    /// <param name="databaseConnection">The database connection to use.</param>
+    /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
+    private async Task CleanupTemporaryWiserFilesAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
+    {
+        try
+        {
+            // Check if the table exists before trying to delete from it.
+            if (!await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserItemFile))
+            {
+                return;
+            }
+
+            // Check if the property name is set and not just whitespace(or is empty).
+            if (!string.IsNullOrWhiteSpace(cleanupServiceSettings.ProperyNameTemporaryWiserFiles))
+            {
+                return;
+            }
+
+            // Check if the number of days to store is greater than 0.
+            if (cleanupServiceSettings.NumberOfDaysToStoreTemporaryWiserFiles <= 0)
+            {
+                return;
+            }
+
+            databaseConnection.AddParameter("propertyName", cleanupServiceSettings.ProperyNameTemporaryWiserFiles);
+            databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStoreTemporaryWiserFiles));
+            var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserItemFile} WHERE property_name = ?propertyName AND added_on < ?cleanupDate", cleanUp: true);
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserItemFile}'.", logName);
+
+            if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
+            {
+                await databaseHelpersService.OptimizeTablesAsync(WiserTableNames.WiserItemFile);
+            }
+        }
+        catch (Exception exception)
+        {
+            await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during temp file cleanup: {exception}", logName);
+        }
+    }
+
+    /// <summary>
     /// Cleanup render times in the database older than the set number of days.
     /// </summary>
     /// <param name="databaseConnection">The database connection to use.</param>
@@ -192,27 +236,4 @@ public class CleanupService(IOptions<WtsSettings> wtsSettings, IServiceProvider 
             await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during cleanup: {exception}", logName);
         }
     }
-	
-	/// <summary>
-	/// Cleanup files in the wiser_itemfile table with property_name 'TEMPORARY_FILE_FROM_WISER' older than 24h.
-	/// </summary>
-	/// <param name="databaseConnection">The database connection to use.</param>
-	/// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
-	private async Task CleanupTemporaryWiserFilesAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
-	{
-		// todo prefix tables (add method in GCL?)
-
-		if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserItemFile))
-		{
-			databaseConnection.AddParameter("propertyName", cleanupServiceSettings.ProperyNameTemporaryWiserFiles);
-			databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStoreTemporaryWiserFiles));
-			var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserItemFile} WHERE property_name = ?propertyName AND added_on < ?cleanupDate", cleanUp: true);
-			await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserItemFile}'.", LogName);
-		}
-		
-		if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
-		{
-			await databaseHelpersService.OptimizeTablesAsync(WiserTableNames.WiserItemFile);
-		}
-	}
 }
