@@ -59,17 +59,15 @@ public class TaskAlertsService(
         {
             EntityType = EntityType,
             ModuleId = ModuleId,
-            PublishedEnvironment = Environments.Live,
-            Details =
-            [
-                new WiserItemDetailModel {Key = DateField, Value = DateTime.Now.ToString("yyyy-MM-dd")},
-                new WiserItemDetailModel {Key = ContentField, Value = message},
-                new WiserItemDetailModel {Key = UserIdField, Value = receiverId},
-                new WiserItemDetailModel {Key = UsernameField, Value = receiverName},
-                new WiserItemDetailModel {Key = SenderNameField, Value = senderName},
-                new WiserItemDetailModel {Key = SenderIdField, Value = senderId}
-            ]
+            PublishedEnvironment = Environments.Live
         };
+
+        taskAlert.SetDetail(new WiserItemDetailModel() {Key = DateField, Value = DateTime.Now.ToString("yyyy-MM-dd")});
+        taskAlert.SetDetail(new WiserItemDetailModel() {Key = ContentField, Value = message});
+        taskAlert.SetDetail(new WiserItemDetailModel() {Key = UserIdField, Value = receiverId});
+        taskAlert.SetDetail(new WiserItemDetailModel() {Key = UsernameField, Value = receiverName});
+        taskAlert.SetDetail(new WiserItemDetailModel() {Key = SenderNameField, Value = senderName});
+        taskAlert.SetDetail(new WiserItemDetailModel() {Key = SenderIdField, Value = senderId});
 
         await wiserItemsService.SaveAsync(taskAlert, username: senderName, userId: senderId);
 
