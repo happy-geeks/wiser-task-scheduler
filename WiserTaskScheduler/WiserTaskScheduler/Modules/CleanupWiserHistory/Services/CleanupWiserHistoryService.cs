@@ -98,7 +98,7 @@ public class CleanupWiserHistoryService(IServiceProvider serviceProvider, ILogSe
                                                                WHERE item.entity_type = ?entityName
                                                                """);
 
-            historyEntriesToDelete.AddRange(from DataRow row in dataTable.Rows select row.Field<ulong>("id"));
+            historyEntriesToDelete.AddRange(dataTable.AsEnumerable().Select(row => row.Field<ulong>("id")));
 
             dataTable = await databaseConnection.GetAsync($"""
                                                            SELECT CAST(history.id AS UNSIGNED) AS id
@@ -107,7 +107,7 @@ public class CleanupWiserHistoryService(IServiceProvider serviceProvider, ILogSe
                                                            WHERE item.entity_type = ?entityName
                                                            """);
 
-            historyEntriesToDelete.AddRange(from DataRow row in dataTable.Rows select row.Field<ulong>("id"));
+            historyEntriesToDelete.AddRange(dataTable.AsEnumerable().Select(row => row.Field<ulong>("id")));
         }
         else if (cleanupWiserHistory.CleanupAllEntities)
         {
@@ -117,7 +117,7 @@ public class CleanupWiserHistoryService(IServiceProvider serviceProvider, ILogSe
                                                                WHERE history.changed_on < ?cleanupDate
                                                                """);
 
-            historyEntriesToDelete.AddRange(from DataRow row in dataTable.Rows select row.Field<ulong>("id"));
+            historyEntriesToDelete.AddRange(dataTable.AsEnumerable().Select(row => row.Field<ulong>("id")));
         }
 
         var historyRowsDeleted = 0;
