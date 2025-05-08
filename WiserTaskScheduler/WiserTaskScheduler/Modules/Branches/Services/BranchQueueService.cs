@@ -1221,7 +1221,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 ulong? oldDestinationItemId = null;
                 string columnNameForFileLink = null;
                 (string SourceType, string SourceTablePrefix, string DestinationType, string DestinationTablePrefix)? linkData = null;
-                LinkTypeMergeSettingsModel linkTypeSettings = null;
 
                 // If the object was created and then deleted in the branch, without is being undeleted again, then we can skip this change.
                 var objectCreatedInBranch = CheckIfObjectWasCreatedInBranch(actionData, objectsCreatedInBranch);
@@ -1878,7 +1877,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
                                     ? $"The current row was skipped, because we were not able to find the link type ('{actionData.LinkType}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge create actions of links of type '{linkTypeSettings.Type}'.";
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge create actions of links of type '{((LinkTypeMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
@@ -1969,7 +1968,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
                                     ? $"The current row was skipped, because we were not able to find the link type ('{actionData.LinkType}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of links of type '{linkTypeSettings.Type}'.";
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of links of type '{((LinkTypeMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
@@ -2034,7 +2033,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
                                     ? $"The current row was skipped, because we were not able to find the link type ('{actionData.LinkType}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge delete actions of links of type '{linkTypeSettings.Type}'.";
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge delete actions of links of type '{((LinkTypeMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
@@ -2086,7 +2085,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
                                 var message = actionData.UsedMergeSettings == null
                                     ? $"The current row was skipped, because we were not able to find the link type ('{actionData.LinkType}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of links of type '{linkTypeSettings.Type}'.";
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of links of type '{((LinkTypeMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
                                 actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
@@ -3405,7 +3404,10 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         branchDatabaseConnection.AddParameter("sourceId", sourceId);
         branchDatabaseConnection.AddParameter("destinationId", destinationId);
 
+        var alreadyCheckedMainItemTable = false;
+
         // It's possible that there are multiple link types that use the same number, so we have to check all of them.
+        string query;
         foreach (var linkTypeSettings in currentLinkTypeSettings)
         {
             actionData.MessageBuilder.AppendLine($"--> Checking link type settings with ID '{linkTypeSettings.Id}', source entity type '{linkTypeSettings.SourceEntityType}' and destination entity type '{linkTypeSettings.DestinationEntityType}'...");
@@ -3441,13 +3443,20 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             var sourceTableName = $"{sourceTablePrefix}{WiserTableNames.WiserItem}";
             var destinationTableName = $"{destinationTablePrefix}{WiserTableNames.WiserItem}";
 
+            // If both the source and destination table prefixes are empty,
+            // then we're checking for both in the main `wiser_item` table and don't have to check again later.
+            if (String.IsNullOrEmpty(sourceTablePrefix) && String.IsNullOrEmpty(destinationTablePrefix))
+            {
+                alreadyCheckedMainItemTable = true;
+            }
+
             // Check if the source item exists in this table.
-            var query = $"""
-                         SELECT entity_type FROM {sourceTableName} WHERE id = ?sourceId
-                         UNION
-                         SELECT entity_type FROM {sourceTableName}{WiserTableNames.ArchiveSuffix} WHERE id = ?sourceId
-                         LIMIT 1
-                         """;
+            query = $"""
+                     SELECT entity_type FROM {sourceTableName} WHERE id = ?sourceId
+                     UNION
+                     SELECT entity_type FROM {sourceTableName}{WiserTableNames.ArchiveSuffix} WHERE id = ?sourceId
+                     LIMIT 1
+                     """;
             var sourceDataTable = await branchDatabaseConnection.GetAsync(query, skipCache: true);
             if (sourceDataTable.Rows.Count == 0)
             {
@@ -3486,6 +3495,41 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             // If we reached this point, it means we found the correct link type and entity types.
             actionData.MessageBuilder.AppendLine("----> We found both the source and destination item in the correct tables with the expected entity types, so we can use this link type.");
             return (linkTypeSettings.SourceEntityType, sourceTablePrefix, linkTypeSettings.DestinationEntityType, destinationTablePrefix);
+        }
+
+        // If we haven't found the correct link type settings yet, we have to check the main item table, unless we already did that.
+        // People sometimes forget to add link type settings. When that happens, the GCL will use type 1 and tables without prefixes.
+        if (!alreadyCheckedMainItemTable)
+        {
+            actionData.MessageBuilder.AppendLine($"--> No link type settings found, checking if we can find both items in `{WiserTableNames.WiserItem}`...");
+
+            // Check if the source item exists in this table.
+            query = $"""
+                     SELECT entity_type FROM {WiserTableNames.WiserItem} WHERE id = ?sourceId
+                     UNION
+                     SELECT entity_type FROM {WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} WHERE id = ?sourceId
+                     LIMIT 1
+                     """;
+            var sourceDataTable = await branchDatabaseConnection.GetAsync(query, skipCache: true);
+
+            // Check if the destination item exists in this table.
+            query = $"""
+                     SELECT entity_type FROM {WiserTableNames.WiserItem} WHERE id = ?destinationId
+                     UNION
+                     SELECT entity_type FROM {WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix} WHERE id = ?destinationId
+                     LIMIT 1
+                     """;
+            var destinationDataTable = await branchDatabaseConnection.GetAsync(query, skipCache: true);
+
+            var sourceEntityType = sourceDataTable.Rows.Count == 0 ? null : sourceDataTable.Rows[0].Field<string>("entity_type");
+            var destinationEntityType = destinationDataTable.Rows.Count == 0 ? null : destinationDataTable.Rows[0].Field<string>("entity_type");
+            if (!String.IsNullOrWhiteSpace(sourceEntityType) && !String.IsNullOrWhiteSpace(destinationEntityType))
+            {
+                actionData.MessageBuilder.AppendLine($"----> We found the source AND destination items in '{WiserTableNames.WiserItem}', so using this link type.");
+                return (sourceEntityType, String.Empty, destinationEntityType, String.Empty);
+            }
+
+            actionData.MessageBuilder.AppendLine($"----> We did not find the source and/or destination item in '{WiserTableNames.WiserItem}'.");
         }
 
         actionData.MessageBuilder.AppendLine("--> We were NOT able to find the correct link type settings.");
