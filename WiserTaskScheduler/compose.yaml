@@ -1,0 +1,13 @@
+﻿services:
+  wisertaskscheduler:
+    image: wisertaskscheduler
+    stop_grace_period: 600s
+    build:
+      context: .
+      dockerfile: WiserTaskScheduler/Dockerfile
+    volumes:
+      - WtsData:/WtsData
+
+volumes:
+    WtsData:
+      external: true
