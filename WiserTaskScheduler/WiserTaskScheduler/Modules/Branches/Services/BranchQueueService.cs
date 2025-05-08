@@ -1111,18 +1111,14 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         var productionDatabaseHelpersService = productionScope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
         var productionWiserItemsService = productionScope.ServiceProvider.GetRequiredService<IWiserItemsService>();
 
-        // Start database transactions, so that we can roll back if the merge fails at any point.
-        await productionDatabaseConnection.BeginTransactionAsync();
-        await branchDatabaseConnection.BeginTransactionAsync();
-
         try
         {
             // Create the wiser_id_mappings table, in the selected branch, if it doesn't exist yet.
             // We need it to map IDs of the selected environment to IDs of the production environment, because they are not always the same.
-            await branchDatabaseHelpersService.CheckAndUpdateTablesAsync([WiserTableNames.WiserIdMappings, WiserTableNames.WiserBranchMergeLog]);
+            await branchDatabaseHelpersService.CheckAndUpdateTablesAsync([WiserTableNames.WiserIdMappings]);
 
             // Empty the log table before we start, we only want to see the logs of the last merge, otherwise the table will become way too large.
-            await branchDatabaseConnection.ExecuteAsync($"TRUNCATE TABLE {WiserTableNames.WiserBranchMergeLog}");
+            await branchBatchLoggerService.PrepareMergeLogTableAsync(branchConnectionStringBuilder.ConnectionString);
 
             // Get all history since last synchronisation.
             var query = $"SELECT * FROM `{WiserTableNames.WiserHistory}` ORDER BY id ASC";
@@ -1156,6 +1152,11 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             // Lock the tables we're going to use, to be sure that other processes don't mess up our synchronisation.
             await LockTablesAsync(productionDatabaseConnection, tablesToLock, false);
             await LockTablesAsync(branchDatabaseConnection, tablesToLock, true);
+
+            // Start database transactions, so that we can roll back if the merge fails at any point.
+            // Note: This HAS to be done AFTER any truncates, locks or other changes to table structures, because those will cause implicit commits.
+            await productionDatabaseConnection.BeginTransactionAsync();
+            await branchDatabaseConnection.BeginTransactionAsync();
 
             // This is to cache some information about items, like the entity type and whether the item has been deleted.
             // By using this, we don't have to look up the entity type of an item multiple times, if an item has multiple changes in the history.

@@ -36,6 +36,24 @@ public class BranchBatchLoggerService(
     public LogSettings LogSettings { get; set; }
 
     /// <inheritdoc />
+    public async Task PrepareMergeLogTableAsync(string connectionString)
+    {
+        if (String.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new ArgumentNullException(nameof(connectionString));
+        }
+
+        await using var scope = serviceProvider.CreateAsyncScope();
+        var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        await databaseConnection.ChangeConnectionStringsAsync(connectionString);
+        var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+        await databaseHelpersService.CheckAndUpdateTablesAsync([WiserTableNames.WiserBranchMergeLog]);
+
+        // Empty the log table before we start, we only want to see the logs of the last merge, otherwise the table will become way too large.
+        await databaseConnection.ExecuteAsync($"TRUNCATE TABLE {WiserTableNames.WiserBranchMergeLog}");
+    }
+
+    /// <inheritdoc />
     public void LogMergeAction(BranchMergeLogModel logData)
     {
         mergeLogQueue.Enqueue(logData);

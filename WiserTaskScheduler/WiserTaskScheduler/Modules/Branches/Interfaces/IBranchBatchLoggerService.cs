@@ -1,4 +1,5 @@
-﻿using WiserTaskScheduler.Core.Models;
+﻿using System.Threading.Tasks;
+using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Modules.Branches.Models;
 
 namespace WiserTaskScheduler.Modules.Branches.Interfaces;
@@ -13,6 +14,12 @@ public interface IBranchBatchLoggerService
     /// Gets or sets the log settings that need to be used.
     /// </summary>
     LogSettings LogSettings { get; set; }
+
+    /// <summary>
+    /// Prepare the merge log table by making sure it exists and truncating it.
+    /// </summary>
+    /// <param name="connectionString">The connection string to the database that contains the logging table (the branch database).</param>
+    Task PrepareMergeLogTableAsync(string connectionString);
 
     /// <summary>
     /// Log a merge action to the database.
