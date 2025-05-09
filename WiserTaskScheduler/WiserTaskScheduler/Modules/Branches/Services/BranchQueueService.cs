@@ -317,6 +317,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 WiserTableNames.WtsLogs,
                 WiserTableNames.WtsServices,
                 WiserTableNames.WiserBranchesQueue,
+                WiserTableNames.WiserIdMappings,
                 "ais_logs",
                 "ais_services",
                 "jcl_email"
@@ -339,10 +340,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 var createTableResult = await databaseConnection.GetAsync($"SHOW CREATE TABLE `{tableName.ToMySqlSafeValue(false)}`", skipCache: true);
                 await branchDatabaseConnection.ExecuteAsync(createTableResult.Rows[0].Field<string>("Create table"));
             }
-
-            // Create the wiser_id_mappings table in the new branch.
-            // This is used to know which IDs are already synced to the production environment.
-            await branchDatabaseHelpersService.CheckAndUpdateTablesAsync([WiserTableNames.WiserIdMappings]);
 
             // Cache some settings that we'll need later.
             var allLinkTypes = await wiserItemsService.GetAllLinkTypeSettingsAsync();
@@ -949,6 +946,10 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     errors.Add($"Unable to create stored procedure '{dataRow.Field<string>("ROUTINE_NAME")}' in the new branch, because of the following error: {exception}");
                 }
             }
+
+            // Create the wiser_id_mappings table in the new branch.
+            // This is used to know which IDs are already synced to the production environment.
+            await branchDatabaseHelpersService.CheckAndUpdateTablesAsync([WiserTableNames.WiserIdMappings]);
         }
         catch (Exception exception)
         {
@@ -1333,6 +1334,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             var split = actionData.Field.Split(',');
                             actionData.LinkType = Int32.Parse(split[0]);
                             actionData.LinkOrdering = split.Length > 1 ? Int32.Parse(split[1]) : 0;
+                            actionData.Field = String.Empty;
 
                             break;
                         }
@@ -1491,18 +1493,12 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         // The other reason could be that the link type is not configured (correctly), in that case we also can't do anything, so skip it as well.
                         if (!linkData.HasValue)
                         {
-                            // TODO: If linkData is null, look if the source and destination items exist in the default wiser_item or wiser_item_archive tables.
-                            // TODO: If we do find something, then get the entity type from those items and use those to see if we can find the link type that way from "settings.LinkTypes" and store that into "linkTypeSettings".
-                            // TODO: If linkTypeSettings is still null after that, then we know that this is a link type that hasn't been added to the settings yet.
-                            // TODO: In that case, we should log a warning and then check if either the source entity or the destination entity has been selected to be merged in "settings.Entities".
-                            // TODO: If that is the case, then merge the link change as well, otherwise skip it.
-                            // TODO: The GCL has a similar fallback mechanism, this way we can still merge those unspecified link types.
                             historyItemsSynchronised.Add(actionData.HistoryId);
                             itemsProcessed++;
                             await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
 
                             actionData.Status = ObjectActionMergeStatuses.Skipped;
-                            actionData.MessageBuilder.AppendLine("The current row was skipped, because this is a link change (or something related to a link) and we couldn't find any information about this link type. This most likely means that one of the linked items doesn't exist anymore, or that the link type is not configured (correctly).");
+                            actionData.MessageBuilder.AppendLine("The current row was skipped, because this is a link change (or something related to a link) and we couldn't find any information about this link type. This most likely means that one of the linked items doesn't exist anymore, or that the link type is not configured (correctly) in the wiser_link table.");
                             branchBatchLoggerService.LogMergeAction(actionData);
 
                             continue;
@@ -1858,16 +1854,12 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "ADD_LINK":
                         {
                             // Check if the link type is in the list of changes.
-                            if (actionData.UsedMergeSettings is not {Create: true})
+                            if (!CheckAndLogLinkMergeSettings(actionData, mergeBranchSettings))
                             {
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
 
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
-                                var message = actionData.UsedMergeSettings == null
-                                    ? $"The current row was skipped, because we were not able to find the link type ('{actionData.LinkType}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge create actions of links of type '{((LinkTypeMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
-                                actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
@@ -1949,16 +1941,12 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "CHANGE_LINK":
                         {
                             // Check if the link type is in the list of changes.
-                            if (actionData.UsedMergeSettings is not {Update: true})
+                            if (!CheckAndLogLinkMergeSettings(actionData, mergeBranchSettings))
                             {
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
 
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
-                                var message = actionData.UsedMergeSettings == null
-                                    ? $"The current row was skipped, because we were not able to find the link type ('{actionData.LinkType}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of links of type '{((LinkTypeMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
-                                actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
@@ -2014,16 +2002,12 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "REMOVE_LINK":
                         {
                             // Check if the link type is in the list of changes.
-                            if (actionData.UsedMergeSettings is not {Delete: true})
+                            if (!CheckAndLogLinkMergeSettings(actionData, mergeBranchSettings))
                             {
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
 
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
-                                var message = actionData.UsedMergeSettings == null
-                                    ? $"The current row was skipped, because we were not able to find the link type ('{actionData.LinkType}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge delete actions of links of type '{((LinkTypeMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
-                                actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
@@ -2066,16 +2050,12 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "UPDATE_ITEMLINKDETAIL":
                         {
                             // Check if the user requested this change to be synchronised.
-                            if (actionData.UsedMergeSettings is not {Update: true})
+                            if (!CheckAndLogLinkMergeSettings(actionData, mergeBranchSettings))
                             {
                                 itemsProcessed++;
                                 await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
 
                                 actionData.Status = ObjectActionMergeStatuses.Skipped;
-                                var message = actionData.UsedMergeSettings == null
-                                    ? $"The current row was skipped, because we were not able to find the link type ('{actionData.LinkType}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of links of type '{((LinkTypeMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
-                                actionData.MessageBuilder.AppendLine(message);
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
                             }
@@ -2138,19 +2118,29 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         }
                         case "ADD_FILE":
                         {
-                            // Check if the user requested this change to be synchronised.
-                            if (actionData.UsedMergeSettings is not {Update: true})
+                            switch (actionData.LinkIdOriginal)
                             {
-                                itemsProcessed++;
-                                await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
+                                // Check if the user requested this change to be synchronised.
+                                case > 0 when !CheckAndLogLinkMergeSettings(actionData, mergeBranchSettings):
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
 
-                                actionData.Status = ObjectActionMergeStatuses.Skipped;
-                                var message = actionData.UsedMergeSettings == null
-                                    ? $"The current row was skipped, because we were not able to find the {(actionData.LinkIdOriginal > 0 ? "link" : "entity")} type ('{(actionData.LinkIdOriginal > 0 ? actionData.LinkType.ToString() : actionData.ItemEntityType)}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of {(actionData.LinkIdOriginal > 0 ? $"links of type '{((LinkTypeMergeSettingsModel)actionData.UsedMergeSettings).Type}'" : $"items of type '{((EntityMergeSettingsModel)actionData.UsedMergeSettings).Type}'")}.";
-                                actionData.MessageBuilder.AppendLine(message);
-                                branchBatchLoggerService.LogMergeAction(actionData);
-                                continue;
+                                    actionData.Status = ObjectActionMergeStatuses.Skipped;
+                                    branchBatchLoggerService.LogMergeAction(actionData);
+                                    continue;
+                                case 0 when actionData.UsedMergeSettings is not {Update: true}:
+                                {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
+
+                                    actionData.Status = ObjectActionMergeStatuses.Skipped;
+                                    var message = actionData.UsedMergeSettings == null
+                                        ? $"The current row was skipped, because we were not able to find the entity type ('{actionData.ItemEntityType}') in the settings, so we don't know if we should merge it or not."
+                                        : $"The current row was skipped, because the user indicated that they don't want to merge update actions of items of type '{((EntityMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
+                                    actionData.MessageBuilder.AppendLine(message);
+                                    branchBatchLoggerService.LogMergeAction(actionData);
+                                    continue;
+                                }
                             }
 
                             if (idMapping.TryGetValue(actionData.TableName, out var mapping) && mapping.ContainsKey(actionData.ObjectIdOriginal))
@@ -2199,18 +2189,29 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "UPDATE_FILE":
                         {
                             // Check if the user requested this change to be synchronised.
-                            if (actionData.UsedMergeSettings is not {Update: true})
+                            switch (actionData.LinkIdOriginal)
                             {
-                                itemsProcessed++;
-                                await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
+                                // Check if the user requested this change to be synchronised.
+                                case > 0 when !CheckAndLogLinkMergeSettings(actionData, mergeBranchSettings):
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
 
-                                actionData.Status = ObjectActionMergeStatuses.Skipped;
-                                var message = actionData.UsedMergeSettings == null
-                                    ? $"The current row was skipped, because we were not able to find the {(actionData.LinkIdOriginal > 0 ? "link" : "entity")} type ('{(actionData.LinkIdOriginal > 0 ? actionData.LinkType.ToString() : actionData.ItemEntityType)}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of {(actionData.LinkIdOriginal > 0 ? $"links of type '{((LinkTypeMergeSettingsModel)actionData.UsedMergeSettings).Type}'" : $"items of type '{((EntityMergeSettingsModel)actionData.UsedMergeSettings).Type}'")}.";
-                                actionData.MessageBuilder.AppendLine(message);
-                                branchBatchLoggerService.LogMergeAction(actionData);
-                                continue;
+                                    actionData.Status = ObjectActionMergeStatuses.Skipped;
+                                    branchBatchLoggerService.LogMergeAction(actionData);
+                                    continue;
+                                case 0 when actionData.UsedMergeSettings is not {Update: true}:
+                                {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
+
+                                    actionData.Status = ObjectActionMergeStatuses.Skipped;
+                                    var message = actionData.UsedMergeSettings == null
+                                        ? $"The current row was skipped, because we were not able to find the entity type ('{actionData.ItemEntityType}') in the settings, so we don't know if we should merge it or not."
+                                        : $"The current row was skipped, because the user indicated that they don't want to merge update actions of items of type '{((EntityMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
+                                    actionData.MessageBuilder.AppendLine(message);
+                                    branchBatchLoggerService.LogMergeAction(actionData);
+                                    continue;
+                                }
                             }
 
                             sqlParameters["fileId"] = actionData.FileIdMapped;
@@ -2262,18 +2263,29 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "DELETE_FILE":
                         {
                             // Check if the user requested this change to be synchronised.
-                            if (actionData.UsedMergeSettings is not {Update: true})
+                            switch (actionData.LinkIdOriginal)
                             {
-                                itemsProcessed++;
-                                await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
+                                // Check if the user requested this change to be synchronised.
+                                case > 0 when !CheckAndLogLinkMergeSettings(actionData, mergeBranchSettings):
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
 
-                                actionData.Status = ObjectActionMergeStatuses.Skipped;
-                                var message = actionData.UsedMergeSettings == null
-                                    ? $"The current row was skipped, because we were not able to find the {(actionData.LinkIdOriginal > 0 ? "link" : "entity")} type ('{(actionData.LinkIdOriginal > 0 ? actionData.LinkType.ToString() : actionData.ItemEntityType)}') in the settings, so we don't know if we should merge it or not."
-                                    : $"The current row was skipped, because the user indicated that they don't want to merge update actions of {(actionData.LinkIdOriginal > 0 ? $"links of type '{((LinkTypeMergeSettingsModel)actionData.UsedMergeSettings).Type}'" : $"items of type '{((EntityMergeSettingsModel)actionData.UsedMergeSettings).Type}'")}.";
-                                actionData.MessageBuilder.AppendLine(message);
-                                branchBatchLoggerService.LogMergeAction(actionData);
-                                continue;
+                                    actionData.Status = ObjectActionMergeStatuses.Skipped;
+                                    branchBatchLoggerService.LogMergeAction(actionData);
+                                    continue;
+                                case 0 when actionData.UsedMergeSettings is not {Update: true}:
+                                {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
+
+                                    actionData.Status = ObjectActionMergeStatuses.Skipped;
+                                    var message = actionData.UsedMergeSettings == null
+                                        ? $"The current row was skipped, because we were not able to find the entity type ('{actionData.ItemEntityType}') in the settings, so we don't know if we should merge it or not."
+                                        : $"The current row was skipped, because the user indicated that they don't want to merge update actions of items of type '{((EntityMergeSettingsModel)actionData.UsedMergeSettings).Type}'.";
+                                    actionData.MessageBuilder.AppendLine(message);
+                                    branchBatchLoggerService.LogMergeAction(actionData);
+                                    continue;
+                                }
                             }
 
                             sqlParameters["fileId"] = actionData.FileIdMapped;
@@ -2611,6 +2623,74 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
         result["Success"] = !errors.Any();
         return result;
+    }
+
+    /// <summary>
+    /// Check whether the merge for an item link can be executed.
+    /// If we don't have merge settings for the link itself, then we check if we have merge settings for the source and destination entity types of the link.
+    /// This will return <c>true</c> if the merge should continue or <c>false</c> if the merge should be skipped.
+    /// This will already log messages to explain the reason that the merge was skipped.
+    /// </summary>
+    /// <param name="actionData">The <see cref="BranchMergeLogModel"/> of the action to get the data for.</param>
+    /// <param name="mergeBranchSettings">The complete list of <see cref="MergeBranchSettingsModel"/> as specified by the user that configured the merge.</param>
+    /// <returns>This will return <c>true</c> if the merge should continue or <c>false</c> if the merge should be skipped.</returns>
+    private static bool CheckAndLogLinkMergeSettings(BranchMergeLogModel actionData, MergeBranchSettingsModel mergeBranchSettings)
+    {
+        if (actionData.UsedMergeSettings is not LinkTypeMergeSettingsModel linkMergeSettings)
+        {
+            actionData.MessageBuilder.AppendLine($"We were not able to find the link type ('{actionData.LinkType}') in the link merge settings, so we will check if we can find merge settings for the source and destination entity types of this link.");
+            var sourceEntitySettings = mergeBranchSettings.Entities.SingleOrDefault(e => String.Equals(e.Type, actionData.ItemEntityType, StringComparison.OrdinalIgnoreCase));
+            var destinationEntitySettings = mergeBranchSettings.Entities.SingleOrDefault(e => String.Equals(e.Type, actionData.LinkDestinationItemEntityType, StringComparison.OrdinalIgnoreCase));
+            if (sourceEntitySettings is not {Update: true} && destinationEntitySettings is not {Update: true})
+            {
+                var sourceTypeMessage = sourceEntitySettings == null
+                    ? $"we found no merge settings for the entity of the source item ('{actionData.ItemEntityType}')"
+                    : $"whe user specified that they don't want to merge updates for the entity of the source item ('{actionData.ItemEntityType}')";
+                var destinationTypeMessage = destinationEntitySettings == null
+                    ? $"we found no merge settings for the entity of the destination item ('{actionData.LinkDestinationItemEntityType}')"
+                    : $"the user specified that they don't want to merge updates for the entity of the destination item ('{actionData.LinkDestinationItemEntityType}')";
+                actionData.MessageBuilder.AppendLine($"The current row was skipped, because {sourceTypeMessage} and {destinationTypeMessage}.");
+                return false;
+            }
+
+            var messages = new List<string>();
+            if (sourceEntitySettings is {Update: true})
+            {
+                messages.Add($"the user specified that they want to merge updates for the entity of the source item ('{actionData.ItemEntityType}')");
+            }
+            if (destinationEntitySettings is {Update: true})
+            {
+                messages.Add($"the user specified that they want to merge updates for the entity of the destination item ('{actionData.LinkDestinationItemEntityType}')");
+            }
+
+            actionData.MessageBuilder.AppendLine($"We are still merging this row, because {String.Join(" and ", messages)}.");
+        }
+        else
+        {
+            var message = actionData.Action switch
+            {
+                "ADD_LINK" when !linkMergeSettings.Create => $"The current row was skipped, because the user indicated that they don't want to merge create actions of links of type '{linkMergeSettings.Type}'.",
+                "CHANGE_LINK" when !linkMergeSettings.Update => $"The current row was skipped, because the user indicated that they don't want to merge update actions of links of type '{linkMergeSettings.Type}'.",
+                "UPDATE_ITEMLINKDETAIL" when !linkMergeSettings.Update => $"The current row was skipped, because the user indicated that they don't want to merge update actions of links of type '{linkMergeSettings.Type}'.",
+                "ADD_FILE" when !linkMergeSettings.Update => $"The current row was skipped, because the user indicated that they don't want to merge update actions of links of type '{linkMergeSettings.Type}'.",
+                "UPDATE_FILE" when !linkMergeSettings.Update => $"The current row was skipped, because the user indicated that they don't want to merge update actions of links of type '{linkMergeSettings.Type}'.",
+                "REMOVE_FILE" when !linkMergeSettings.Update => $"The current row was skipped, because the user indicated that they don't want to merge update actions of links of type '{linkMergeSettings.Type}'.",
+                "REMOVE_LINK" when !linkMergeSettings.Delete => $"The current row was skipped, because the user indicated that they don't want to merge delete actions of links of type '{linkMergeSettings.Type}'.",
+                _ => null
+            };
+
+            // If message is null, then it means the merge can continue, so return true.
+            if (message == null)
+            {
+                return true;
+            }
+
+            // If message is not null, then it means the merge should be skipped, so log the message and return false.
+            actionData.MessageBuilder.AppendLine(message);
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -3449,13 +3529,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             var sourceTableName = $"{sourceTablePrefix}{WiserTableNames.WiserItem}";
             var destinationTableName = $"{destinationTablePrefix}{WiserTableNames.WiserItem}";
 
-            // If both the source and destination table prefixes are empty,
-            // then we're checking for both in the main `wiser_item` table and don't have to check again later.
-            if (String.IsNullOrEmpty(sourceTablePrefix) && String.IsNullOrEmpty(destinationTablePrefix))
-            {
-                alreadyCheckedMainItemTable = true;
-            }
-
             // Check if the source item exists in this table.
             query = $"""
                      SELECT entity_type FROM {sourceTableName} WHERE id = ?sourceId
@@ -3466,6 +3539,14 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             var sourceDataTable = await branchDatabaseConnection.GetAsync(query, skipCache: true);
             if (sourceDataTable.Rows.Count == 0)
             {
+                // If both the source and destination table prefixes are empty,
+                // then we're checking for both in the main `wiser_item` table and don't have to check again later.
+                // We do it inside this if statement, because we only want to set the variable if the ID was not found at all.
+                if (String.IsNullOrEmpty(sourceTablePrefix) && String.IsNullOrEmpty(destinationTablePrefix))
+                {
+                    alreadyCheckedMainItemTable = true;
+                }
+
                 actionData.MessageBuilder.AppendLine($"----> Did not find any item with ID '{sourceId}' in table '{sourceTableName}'. So this cannot be the correct link type, or the item has been deleted in the branch.");
                 continue;
             }
@@ -3487,6 +3568,13 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             var destinationDataTable = await branchDatabaseConnection.GetAsync(query, skipCache: true);
             if (destinationDataTable.Rows.Count == 0)
             {
+                // If both the source and destination table prefixes are empty,
+                // then we're checking for both in the main `wiser_item` table and don't have to check again later.
+                if (String.IsNullOrEmpty(sourceTablePrefix) && String.IsNullOrEmpty(destinationTablePrefix))
+                {
+                    alreadyCheckedMainItemTable = true;
+                }
+
                 actionData.MessageBuilder.AppendLine($"----> Did not find any item with ID '{destinationId}' in table '{destinationTableName}'. So this cannot be the correct link type, or the item has been deleted in the branch.");
                 continue;
             }
@@ -3531,7 +3619,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             var destinationEntityType = destinationDataTable.Rows.Count == 0 ? null : destinationDataTable.Rows[0].Field<string>("entity_type");
             if (!String.IsNullOrWhiteSpace(sourceEntityType) && !String.IsNullOrWhiteSpace(destinationEntityType))
             {
-                actionData.MessageBuilder.AppendLine($"----> We found the source AND destination items in '{WiserTableNames.WiserItem}', so using this link type.");
+                actionData.MessageBuilder.AppendLine($"----> We found the source AND destination items in '{WiserTableNames.WiserItem}', so using the link type '{linkType}' source source entity type '{sourceEntityType}' and destination entity type '{destinationEntityType}', even though we found no row for it in wiser_link.");
                 return (sourceEntityType, String.Empty, destinationEntityType, String.Empty);
             }
 
