@@ -1151,8 +1151,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             var tablesToLock = await GetTablesToLockAsync(allLinkTypeSettings, branchEntityTypesService, branchDatabaseHelpersService);
 
             // Lock the tables we're going to use, to be sure that other processes don't mess up our synchronisation.
-            await LockTablesAsync(tablesToLock, productionDatabaseConnection, productionDatabaseHelpersService);
-            await LockTablesAsync(tablesToLock, branchDatabaseConnection, branchDatabaseHelpersService);
+            await LockTablesAsync(tablesToLock, productionDatabaseConnection);
+            await LockTablesAsync(tablesToLock, branchDatabaseConnection);
 
             // Start database transactions, so that we can roll back if the merge fails at any point.
             // Note: This HAS to be done AFTER any truncates, locks or other changes to table structures, because those will cause implicit commits.
@@ -3311,13 +3311,21 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     /// </summary>
     /// <param name="tablesToLock">The list of tables to lock.</param>
     /// <param name="databaseConnection">The <see cref="IDatabaseConnection"/> with the connection to the database to lock the tables in.</param>
-    /// <param name="databaseHelpersService">An instance of <see cref="IDatabaseHelpersService"/> with the connection to the database to lock the tables in, to check which tables exist in that database.</param>
-    private static async Task LockTablesAsync(List<(string tableName, string alias)> tablesToLock, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
+    private static async Task LockTablesAsync(List<(string tableName, string alias)> tablesToLock, IDatabaseConnection databaseConnection)
     {
+        // Note: The "ConnectedDatabase" property is not set until EnsureOpenConnectionForReadingAsync is called, that's why we call it here already.
+        await databaseConnection.EnsureOpenConnectionForReadingAsync();
+
+        // Get the list of existing tables in the database.
+        databaseConnection.AddParameter("databaseName", databaseConnection.ConnectedDatabase);
+        var dataTable = await databaseConnection.GetAsync("SELECT TABLE_NAME FROM information_schema.`TABLES` WHERE TABLE_SCHEMA = ?databaseName");
+        var existingTables = dataTable.Rows.Cast<DataRow>().Select(dataRow => dataRow.Field<string>("TABLE_NAME")).ToList();
+
+        // Get the list of tables that exist, so we can lock them.
         var lockStatements = new List<string>();
         foreach (var (tableName, alias) in tablesToLock)
         {
-            if (!await databaseHelpersService.TableExistsAsync(tableName))
+            if (!existingTables.Any(t => String.Equals(t, tableName, StringComparison.OrdinalIgnoreCase)))
             {
                 continue;
             }
@@ -3325,6 +3333,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             lockStatements.Add($"{tableName}{(String.IsNullOrEmpty(alias) ? String.Empty : $" AS {alias}")} WRITE");
         }
 
+        // Do the actual table locking.
         var query = $"LOCK TABLES {String.Join(", ", lockStatements)}";
         await databaseConnection.ExecuteAsync(query);
     }
