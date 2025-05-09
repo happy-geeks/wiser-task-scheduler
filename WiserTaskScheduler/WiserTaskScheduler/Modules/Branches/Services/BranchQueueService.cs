@@ -1077,8 +1077,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         await originalDatabaseConnection.ExecuteAsync($"UPDATE {WiserTableNames.WiserBranchesQueue} SET started_on = ?now WHERE id = ?queueId");
 
         // Validate the settings.
-        var settings = JsonConvert.DeserializeObject<MergeBranchSettingsModel>(dataRowWithSettings.Field<string>("data") ?? "{}");
-        if (settings is not {Id: > 0} || String.IsNullOrWhiteSpace(settings.DatabaseName))
+        var mergeBranchSettings = JsonConvert.DeserializeObject<MergeBranchSettingsModel>(dataRowWithSettings.Field<string>("data") ?? "{}");
+        if (mergeBranchSettings is not {Id: > 0} || String.IsNullOrWhiteSpace(mergeBranchSettings.DatabaseName))
         {
             await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Trying to merge a branch, but it either had invalid settings, or the branch ID was empty, or the database name was empty. Queue ID was: {queueId}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
             errors.Add($"Trying to merge a branch, but it either had invalid settings, the branch ID was empty, or the database name was empty. Queue ID was: {queueId}");
@@ -1090,8 +1090,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         // Store database names in variables for later use and create connection string for the branch database.
         var productionConnectionStringBuilder = new MySqlConnectionStringBuilder(connectionString);
         var originalDatabase = productionConnectionStringBuilder.Database;
-        var branchDatabase = settings.DatabaseName;
-        var branchConnectionStringBuilder = GetConnectionStringBuilderForBranch(settings, branchDatabase);
+        var branchDatabase = mergeBranchSettings.DatabaseName;
+        var branchConnectionStringBuilder = GetConnectionStringBuilderForBranch(mergeBranchSettings, branchDatabase);
 
         // We have our own dictionary with SQL parameters, so that we can reuse them easier and add them easily all at once to every command we create.
         var sqlParameters = new Dictionary<string, object>();
@@ -1147,11 +1147,12 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             var allLinkTypeSettings = await branchLinkTypesService.GetAllLinkTypeSettingsAsync();
 
             // Get data that we'll need later.
-            var (objectsCreatedInBranch, tablesToLock) = await GetUsedObjectsAndTablesAsync(wiserHistoryDataTable, allLinkTypeSettings, branchDatabaseConnection);
+            var objectsCreatedInBranch = GetObjectsCreatedInBranch(wiserHistoryDataTable);
+            var tablesToLock = await GetTablesToLockAsync(allLinkTypeSettings, branchEntityTypesService, branchDatabaseHelpersService);
 
             // Lock the tables we're going to use, to be sure that other processes don't mess up our synchronisation.
-            await LockTablesAsync(productionDatabaseConnection, tablesToLock, false);
-            await LockTablesAsync(branchDatabaseConnection, tablesToLock, true);
+            await LockTablesAsync(tablesToLock, productionDatabaseConnection, productionDatabaseHelpersService);
+            await LockTablesAsync(tablesToLock, branchDatabaseConnection, branchDatabaseHelpersService);
 
             // Start database transactions, so that we can roll back if the merge fails at any point.
             // Note: This HAS to be done AFTER any truncates, locks or other changes to table structures, because those will cause implicit commits.
@@ -1196,7 +1197,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 };
 
                 // Check if Wiser found a conflict when setting up the merge and what the user choose to do with that conflict.
-                var conflict = settings.ConflictSettings.SingleOrDefault(setting => setting.Id == actionData.HistoryId);
+                var conflict = mergeBranchSettings.ConflictSettings.SingleOrDefault(setting => setting.Id == actionData.HistoryId);
                 actionData.UsedConflictSettings = conflict;
 
                 // If this history item has a conflict, and it's not accepted, skip and delete this history record.
@@ -1512,18 +1513,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                         actionData.ItemEntityType = linkData.Value.SourceType;
                         actionData.LinkDestinationItemEntityType = linkData.Value.DestinationType;
-
-                        if (!tablesToLock.Contains($"{linkData.Value.SourceTablePrefix}{WiserTableNames.WiserItem}"))
-                        {
-                            tablesToLock.Add($"{linkData.Value.SourceTablePrefix}{WiserTableNames.WiserItem}");
-                            tablesToLock.Add($"{linkData.Value.SourceTablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix}");
-                        }
-
-                        if (!tablesToLock.Contains($"{linkData.Value.DestinationTablePrefix}{WiserTableNames.WiserItem}"))
-                        {
-                            tablesToLock.Add($"{linkData.Value.DestinationTablePrefix}{WiserTableNames.WiserItem}");
-                            tablesToLock.Add($"{linkData.Value.DestinationTablePrefix}{WiserTableNames.WiserItem}{WiserTableNames.ArchiveSuffix}");
-                        }
                     }
 
                     // Get mapped IDs for everything.
@@ -1559,7 +1548,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     }
 
                     // Set the merge settings for the action data.
-                    actionData.UsedMergeSettings = GetMergeSettings(actionData, settings, linkData);
+                    actionData.UsedMergeSettings = GetMergeSettings(actionData, mergeBranchSettings, linkData);
 
                     // Update the item in the production environment.
                     switch (actionData.Action)
@@ -2583,7 +2572,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         }
         catch (Exception exception)
         {
-            await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Failed to merge the branch '{settings.DatabaseName}'. Error: {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+            await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"Failed to merge the branch '{mergeBranchSettings.DatabaseName}'. Error: {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
             errors.Add(exception.ToString());
 
             await branchDatabaseConnection.RollbackTransactionAsync(false);
@@ -2597,7 +2586,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         }
 
         // Delete the branch if there were no errors and the user indicated it should be deleted after a successful merge.
-        if (!errors.Any() && settings.DeleteAfterSuccessfulMerge)
+        if (!errors.Any() && mergeBranchSettings.DeleteAfterSuccessfulMerge)
         {
             try
             {
@@ -2718,27 +2707,16 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     }
 
     /// <summary>
-    /// Get some information that we're going to need to merge a branch, such as the tables that need to be locked and the objects that have been created in the branch.
+    /// Gets all objects that have been created in the branch and returns them.
+    /// This will also specify whether those objects have been deleted in the branch.
+    /// If an object has both been created and deleted in the branch, it can be skipped during the synchronisation.
     /// </summary>
     /// <param name="wiserHistoryDataTable">The <see cref="DataTable"/> that contains the contents of the wiser_history table of the branch database.</param>
-    /// <param name="allLinkTypeSettings">The list of all link type settings of the branch database.</param>
-    /// <param name="branchDatabaseConnection">The <see cref="IDatabaseConnection"/> to the branch database.</param>
-    /// <returns>A Tuple with a list of <see cref="ObjectCreatedInBranchModel"/> and a list of strings.</returns>
-    private static async Task<(List<ObjectCreatedInBranchModel> objectsCreatedInBranch, List<string> tablesToLock)> GetUsedObjectsAndTablesAsync(DataTable wiserHistoryDataTable, List<LinkSettingsModel> allLinkTypeSettings, IDatabaseConnection branchDatabaseConnection)
+    /// <returns>A list of <see cref="ObjectCreatedInBranchModel"/>.</returns>
+    private static List<ObjectCreatedInBranchModel> GetObjectsCreatedInBranch(DataTable wiserHistoryDataTable)
     {
         // Make a list of objects that have been created and deleted in this branch, so that can just skip them when we're synchronising to keep the history of the production clean.
         var objectsCreatedInBranch = new List<ObjectCreatedInBranchModel>();
-
-        // We need to lock all tables we're going to use, to make sure no other changes can be done while we're busy synchronising.
-        var tablesToLock = new List<string>
-        {
-            WiserTableNames.WiserHistory,
-
-            // These tables with aliases are used in GCL methods that we call, so we need to lock them as well.
-            WiserTableNames.WiserEntityProperty,
-            $"{WiserTableNames.WiserEntity} AS entity",
-            $"{WiserTableNames.WiserEntityProperty} AS property"
-        };
 
         // Get all tables and objects that are used in the current merge.
         foreach (DataRow dataRow in wiserHistoryDataTable.Rows)
@@ -2749,34 +2727,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 continue;
             }
 
-            tablesToLock.Add(tableName);
-            if (WiserTableNames.TablesWithArchive.Any(table => tableName.EndsWith(table, StringComparison.OrdinalIgnoreCase)))
-            {
-                tablesToLock.Add($"{tableName}{WiserTableNames.ArchiveSuffix}");
-            }
-
             // If we have a table that has an ID from wiser_item, then always lock wiser_item as well, because we will read from it later.
             var originalItemId = Convert.ToUInt64(dataRow["item_id"]);
-            var (tablePrefix, isWiserItemChange) = BranchesHelpers.GetTablePrefix(tableName, originalItemId);
-            var wiserItemTableName = $"{tablePrefix}{WiserTableNames.WiserItem}";
-            var wiserItemDetailTableName = $"{tablePrefix}{WiserTableNames.WiserItemDetail}";
-            var wiserItemFileTableName = $"{tablePrefix}{WiserTableNames.WiserItemFile}";
-
-            // Only lock the wiser_item table if the table prefix is not a link type.
-            // We have to check this because wiser_itemfile could have a prefix for an entity type, or for a link type.
-            // We want to lock the wiser_item table only if the prefix is not a link type.
-            if (isWiserItemChange && originalItemId > 0 && !tablesToLock.Contains(wiserItemTableName) && !String.IsNullOrWhiteSpace(tablePrefix) && !allLinkTypeSettings.Any(t => t.UseDedicatedTable && tablePrefix.TrimEnd('_') == t.Type.ToString()))
-            {
-                tablesToLock.Add(wiserItemTableName);
-                tablesToLock.Add($"{wiserItemTableName}{WiserTableNames.ArchiveSuffix}");
-
-                // Also lock the item detail and item file tables, because some GCL functions need them.
-                tablesToLock.Add($"{wiserItemDetailTableName}");
-                tablesToLock.Add($"{wiserItemDetailTableName}{WiserTableNames.ArchiveSuffix}");
-                tablesToLock.Add($"{wiserItemFileTableName}");
-                tablesToLock.Add($"{wiserItemFileTableName}{WiserTableNames.ArchiveSuffix}");
-            }
-
             var action = dataRow.Field<string>("action").ToUpperInvariant();
             var field = dataRow.Field<string>("field");
             var objectId = originalItemId.ToString();
@@ -2798,53 +2750,86 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     objectId = $"{originalItemId}_{dataRow["oldvalue"]}_{linkType}";
                     break;
                 }
-                case "INSERT_PERMISSION":
-                {
-                    // With INSERT_PERMISSION actions, we need to look up the highest role ID to create a temporary unique ID for the role.
-                    // So we need to lock the wiser_roles table, otherwise we can't query it later.
-                    tablesToLock.Add(WiserTableNames.WiserRoles);
-                    break;
-                }
             }
 
             BranchesHelpers.TrackObjectAction(objectsCreatedInBranch, action, objectId, tableName);
         }
 
-        // Add tables from wiser_id_mappings to tables to lock.
-        var mappingDataTable = await branchDatabaseConnection.GetAsync($"SELECT DISTINCT table_name FROM `{WiserTableNames.WiserIdMappings}`", skipCache: true);
-        foreach (DataRow dataRow in mappingDataTable.Rows)
+        return objectsCreatedInBranch;
+    }
+
+    /// <summary>
+    /// Get the tables that need to be locked when doing the merge, to prevent the data being updated during the merge and cause conflicts.
+    /// This will return a list of all tables that might be used while merging a branch, so that we can be sure that we lock all tables that we need to access.
+    /// </summary>
+    /// <param name="allLinkTypeSettings">The list of all link type settings of the branch database.</param>
+    /// <param name="branchEntityTypesService">An instance of the <see cref="IEntityTypesService"/> with a database connection to the branch database.</param>
+    /// <param name="branchDatabaseHelpersService">An instance of the <see cref="IDatabaseHelpersService"/> with a database connection to the branch database.</param>
+    /// <returns>A list of strings, with the names of all tables that should be locked.</returns>
+    private static async Task<List<(string tableName, string alias)>> GetTablesToLockAsync(List<LinkSettingsModel> allLinkTypeSettings, IEntityTypesService branchEntityTypesService, IDatabaseHelpersService branchDatabaseHelpersService)
+    {
+        // We need to lock all tables we're going to use, to make sure no other changes can be done while we're busy synchronising.
+        var tablesToLock = new List<(string tableName, string alias)>
         {
-            var tableName = dataRow.Field<string>("table_name");
-            if (String.IsNullOrWhiteSpace(tableName) || tablesToLock.Contains(tableName))
+            (WiserTableNames.WiserHistory, String.Empty),
+            (WiserTableNames.WiserEntity, String.Empty),
+            (WiserTableNames.WiserEntityProperty, String.Empty),
+            (WiserTableNames.WiserModule, String.Empty),
+            (WiserTableNames.WiserQuery, String.Empty),
+            (WiserTableNames.WiserStyledOutput, String.Empty),
+            (WiserTableNames.WiserUserRoles, String.Empty),
+            (WiserTableNames.WiserRoles, String.Empty),
+            (WiserTableNames.WiserPermission, String.Empty),
+            (WiserTableNames.WiserApiConnection, String.Empty),
+            (WiserTableNames.WiserDataSelector, String.Empty),
+            (WiserTableNames.WiserIdMappings, String.Empty),
+
+            // These tables with aliases are used in GCL methods that we call, so we need to lock them as well.
+            (WiserTableNames.WiserEntity, "entity"),
+            (WiserTableNames.WiserEntityProperty, "property")
+        };
+
+        // Add the main item and link tables and their archive tables.
+        tablesToLock.AddRange(WiserTableNames.TablesThatCanHaveEntityPrefix.Select(t => (t, String.Empty)));
+        tablesToLock.AddRange(WiserTableNames.TablesThatCanHaveLinkPrefix.Select(t => (t, String.Empty)));
+        tablesToLock.AddRange(WiserTableNames.TablesWithArchive.Select(t => ($"{t}{WiserTableNames.ArchiveSuffix}", String.Empty)));
+
+        // Add the item tables that have a dedicated table prefix.
+        var allTablePrefixes = await branchEntityTypesService.GetDedicatedTablePrefixesAsync();
+        foreach (var tablePrefix in allTablePrefixes)
+        {
+            foreach (var tableName in WiserTableNames.TablesThatCanHaveEntityPrefix)
             {
-                continue;
+                tablesToLock.Add(($"{tablePrefix}{tableName}", String.Empty));
+
+                if (!WiserTableNames.TablesWithArchive.Contains(tableName))
+                {
+                    continue;
+                }
+
+                tablesToLock.Add(($"{tablePrefix}{tableName}{WiserTableNames.ArchiveSuffix}", String.Empty));
             }
+        }
 
-            tablesToLock.Add(tableName);
-
-            if (WiserTableNames.TablesWithArchive.Any(table => tableName.EndsWith(table, StringComparison.OrdinalIgnoreCase)))
+        // Add the link tables that have a dedicated table prefix.
+        foreach (var linkSettings in allLinkTypeSettings.Where(l => l.UseDedicatedTable))
+        {
+            foreach (var tableName in WiserTableNames.TablesThatCanHaveLinkPrefix)
             {
-                tablesToLock.Add($"{tableName}{WiserTableNames.ArchiveSuffix}");
-            }
+                tablesToLock.Add(($"{linkSettings.Type}_{tableName}", String.Empty));
 
-            if (!tableName.EndsWith(WiserTableNames.WiserItem, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
+                if (!WiserTableNames.TablesWithArchive.Contains(tableName))
+                {
+                    continue;
+                }
 
-            // Also lock the item detail and item file tables, because some GCL functions need them.
-            var tablePrefix = tableName.Replace(WiserTableNames.WiserItem, String.Empty, StringComparison.OrdinalIgnoreCase);
-            var wiserItemDetailTableName = $"{tablePrefix}{WiserTableNames.WiserItemDetail}";
-            var wiserItemFileTableName = $"{tablePrefix}{WiserTableNames.WiserItemFile}";
-            tablesToLock.Add($"{wiserItemDetailTableName}");
-            tablesToLock.Add($"{wiserItemDetailTableName}{WiserTableNames.ArchiveSuffix}");
-            tablesToLock.Add($"{wiserItemFileTableName}");
-            tablesToLock.Add($"{wiserItemFileTableName}{WiserTableNames.ArchiveSuffix}");
+                tablesToLock.Add(($"{linkSettings.Type}_{tableName}{WiserTableNames.ArchiveSuffix}", String.Empty));
+            }
         }
 
         // Make sure we don't have any duplicates in the list of tables to lock.
-        tablesToLock = tablesToLock.Distinct().ToList();
-        return (objectsCreatedInBranch, tablesToLock);
+        tablesToLock = tablesToLock.DistinctBy(x => $"{x.tableName} AS {x.alias}").ToList();
+        return tablesToLock;
     }
 
     /// <summary>
@@ -3321,14 +3306,26 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     }
 
     /// <summary>
-    /// Lock a list of tables in a <see cref="MySqlConnection"/>.
+    /// Lock a list of tables in a database.
+    /// It will check if the tables actually exist in the given database and only lock existing tables.
     /// </summary>
-    /// <param name="databaseConnection">The <see cref="MySqlConnection"/> to lock the tables in.</param>
     /// <param name="tablesToLock">The list of tables to lock.</param>
-    /// <param name="alsoLockIdMappingsTable">Whether to also lock the table "wiser_id_mappings". Only set this to true for the branch database, since this table doesn't exist in the original/main database.</param>
-    private static async Task LockTablesAsync(IDatabaseConnection databaseConnection, IEnumerable<string> tablesToLock, bool alsoLockIdMappingsTable)
+    /// <param name="databaseConnection">The <see cref="IDatabaseConnection"/> with the connection to the database to lock the tables in.</param>
+    /// <param name="databaseHelpersService">An instance of <see cref="IDatabaseHelpersService"/> with the connection to the database to lock the tables in, to check which tables exist in that database.</param>
+    private static async Task LockTablesAsync(List<(string tableName, string alias)> tablesToLock, IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
     {
-        var query = $"LOCK TABLES {(!alsoLockIdMappingsTable ? "" : $"{WiserTableNames.WiserIdMappings} WRITE, ")}{String.Join(", ", tablesToLock.Select(table => $"{table} WRITE"))}";
+        var lockStatements = new List<string>();
+        foreach (var (tableName, alias) in tablesToLock)
+        {
+            if (!await databaseHelpersService.TableExistsAsync(tableName))
+            {
+                continue;
+            }
+
+            lockStatements.Add($"{tableName}{(String.IsNullOrEmpty(alias) ? String.Empty : $" AS {alias}")} WRITE");
+        }
+
+        var query = $"LOCK TABLES {String.Join(", ", lockStatements)}";
         await databaseConnection.ExecuteAsync(query);
     }
 
