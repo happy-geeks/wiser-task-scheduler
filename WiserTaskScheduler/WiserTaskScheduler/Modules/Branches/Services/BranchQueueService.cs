@@ -1278,6 +1278,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             actionData.LinkIdOriginal = actionData.ObjectIdOriginal;
                             actionData.LinkIdMapped = actionData.ObjectIdMapped;
                             actionData.LinkTableName = actionData.TableName.Replace(WiserTableNames.WiserItemLinkDetail, WiserTableNames.WiserItemLink, StringComparison.OrdinalIgnoreCase);
+                            actionData.ItemDetailIdOriginal = targetId;
+                            actionData.ItemDetailIdMapped = targetId;
 
                             // When a link has been changed, it's possible that the ID of one of the items is changed.
                             // It's also possible that this is a new link that the production database didn't have yet (and so the ID of the link will most likely be different).
@@ -1999,56 +2001,10 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             await productionDatabaseConnection.ExecuteAsync(query);
                             break;
                         }
-                        case "REMOVE_LINK":
-                        {
-                            // Check if the link type is in the list of changes.
-                            if (!CheckAndLogLinkMergeSettings(actionData, mergeBranchSettings))
-                            {
-                                itemsProcessed++;
-                                await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
-
-                                actionData.Status = ObjectActionMergeStatuses.Skipped;
-                                branchBatchLoggerService.LogMergeAction(actionData);
-                                continue;
-                            }
-
-                            if (linkSourceItemIsCreatedAndDeletedInBranch || linkDestinationItemIsCreatedAndDeletedInBranch)
-                            {
-                                // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
-                                historyItemsSynchronised.Add(actionData.HistoryId);
-                                itemsProcessed++;
-                                await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
-
-                                actionData.Status = ObjectActionMergeStatuses.SkippedAndRemoved;
-                                var text = linkSourceItemIsCreatedAndDeletedInBranch switch
-                                {
-                                    true when linkDestinationItemIsCreatedAndDeletedInBranch => "both the source and destination items of the link were created and then deleted in the branch",
-                                    true => "the source item of the link was created and then deleted in the branch",
-                                    _ => "the destination item of the link was created and then deleted in the branch"
-                                };
-
-                                actionData.MessageBuilder.AppendLine($"The current row was skipped and removed, because {text}, so we don't need to do anything..");
-                                branchBatchLoggerService.LogMergeAction(actionData);
-                                continue;
-                            }
-
-                            sqlParameters["itemId"] = actionData.ItemIdMapped;
-                            sqlParameters["destinationItemId"] = actionData.LinkDestinationItemIdMapped;
-                            sqlParameters["type"] = actionData.LinkType;
-
-                            AddParametersToCommand(sqlParameters, productionDatabaseConnection);
-                            query = $"""
-                                     {queryPrefix}
-                                     DELETE FROM `{actionData.TableName}`
-                                     WHERE item_id = ?itemId
-                                     AND destination_item_id = ?destinationItemId
-                                     AND type = ?type
-                                     """;
-                            await productionDatabaseConnection.ExecuteAsync(query);
-                            break;
-                        }
                         case "UPDATE_ITEMLINKDETAIL":
                         {
+                            actionData.ItemDetailIdMapped = targetId;
+
                             // Check if the user requested this change to be synchronised.
                             if (!CheckAndLogLinkMergeSettings(actionData, mergeBranchSettings))
                             {
@@ -2080,39 +2036,155 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 continue;
                             }
 
-                            sqlParameters["linkId"] = actionData.LinkIdMapped;
-                            sqlParameters["key"] = actionData.Field;
-                            sqlParameters["languageCode"] = actionData.ItemDetailLanguageCode;
-                            sqlParameters["groupName"] = actionData.ItemDetailGroupName;
+                            sqlParameters["newValue"] = actionData.NewValue;
+                            sqlParameters["detailId"] = actionData.ItemDetailIdMapped;
 
-                            // TODO: Use ID mappings and targetId the same way we do for wiser_itemdetail. Need to also update the triggers for wiser_itemlinkdetail for that.
-                            query = queryPrefix;
-                            if (String.IsNullOrWhiteSpace(actionData.NewValue))
+                            // Unlike updates to wiser_itemdetail, we use the same action for changes to columns such as "language_code" and for changes to values of rows with dynamic keys.
+                            // So we have to check what kind of update this is, based on the value of "Field" in wiser_history.
+                            switch (actionData.Field?.Trim().ToUpperInvariant())
                             {
-                                actionData.MessageBuilder.AppendLine($"The new value is empty, so we will delete the item detail row from '{actionData.TableName}'.");
-                                query += $"""
-                                          DELETE FROM `{actionData.TableName}`
-                                          WHERE itemlink_id = ?linkId
-                                          AND `key` = ?key
-                                          AND language_code = ?languageCode
-                                          AND groupname = ?groupName
-                                          """;
-                            }
-                            else
-                            {
-                                var useLongValue = actionData.NewValue.Length > 1000;
-                                sqlParameters["value"] = useLongValue ? "" : actionData.NewValue;
-                                sqlParameters["longValue"] = useLongValue ? actionData.NewValue : "";
+                                case "":
+                                case null:
+                                {
+                                    // The field is empty, this does not happen under normal circumstances,
+                                    // only when there's some kind of bug or someone has been making manual edits directly in the database.
+                                    // So we will skip this row and log a message.
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
 
-                                query += $"""
-                                          INSERT INTO `{actionData.TableName}` (language_code, itemlink_id, groupname, `key`, value, long_value)
-                                          VALUES (?languageCode, ?linkId, ?groupName, ?key, ?value, ?longValue)
-                                          ON DUPLICATE KEY UPDATE groupname = VALUES(groupname), value = VALUES(value), long_value = VALUES(long_value)
-                                          """;
-                            }
+                                    actionData.Status = ObjectActionMergeStatuses.Failed;
+                                    actionData.MessageBuilder.AppendLine($"For an {actionData.Action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
+                                    branchBatchLoggerService.LogMergeAction(actionData);
+                                    continue;
+                                }
+                                case "KEY":
+                                case "LANGUAGE_CODE":
+                                case "GROUPNAME":
+                                {
+                                    // The field is one of the columns in the table, so we can update it directly.
+                                    AddParametersToCommand(sqlParameters, productionDatabaseConnection);
+                                    query = $"""
+                                             {queryPrefix}
+                                             UPDATE `{actionData.TableName}` SET `{actionData.Field.ToMySqlSafeValue(false)}` = ?newValue
+                                             WHERE id = ?detailId
+                                             """;
 
-                            AddParametersToCommand(sqlParameters, productionDatabaseConnection);
-                            await productionDatabaseConnection.ExecuteAsync(query);
+                                    await productionDatabaseConnection.ExecuteAsync(query);
+                                    break;
+                                }
+                                default:
+                                {
+                                    // The field is a dynamic key, so we need to update the value of the row with that key.
+                                    var useLongValue = actionData.NewValue.Length > 1000;
+                                    sqlParameters["value"] = useLongValue ? "" : actionData.NewValue;
+                                    sqlParameters["longValue"] = useLongValue ? actionData.NewValue : "";
+                                    sqlParameters["linkId"] = actionData.LinkIdMapped;
+                                    sqlParameters["key"] = actionData.Field;
+                                    sqlParameters["languageCode"] = actionData.ItemDetailLanguageCode;
+                                    sqlParameters["groupName"] = actionData.ItemDetailGroupName;
+
+                                    // First we need to check if we already have a mapping for this item detail.
+                                    ulong existingId;
+                                    if (mappedTargetId is > 0)
+                                    {
+                                        // If we already found an ID in the mappings, just use that one.
+                                        existingId = mappedTargetId.Value;
+                                        actionData.MessageBuilder.AppendLine($"Found the current item detail in the mappings, so using that ID ('{existingId}') for updating the correct row in production.");
+                                    }
+                                    else
+                                    {
+                                        // Check if this item detail already exists in production.
+                                        query = $"""
+                                                 SELECT id
+                                                 FROM `{actionData.TableName}`
+                                                 WHERE itemlink_id = ?linkId
+                                                 AND `key` = ?key
+                                                 AND language_code = ?languageCode
+                                                 AND groupname = ?groupName
+                                                 """;
+
+                                        AddParametersToCommand(sqlParameters, productionDatabaseConnection);
+                                        existingId = await productionDatabaseConnection.ExecuteScalarAsync<ulong>(query, skipCache: true);
+
+                                        var text = existingId == 0
+                                            ? $"and also did not found it in the table '{actionData.TableName}' in production (based on itemlink_id, key, language_code and groupname). So we will add a new row."
+                                            : $"but we found it in the table '{actionData.TableName}' in production, based on item_id, key, language_code and groupname. The ID for that item link detail in production is '{existingId}'";
+                                        actionData.MessageBuilder.AppendLine($"Did not find the current item detail in the mappings, {text}.");
+                                    }
+
+                                    // We don't store item link details with empty values, so delete it if the new value is empty.
+                                    var deleteRow = String.IsNullOrWhiteSpace(actionData.NewValue);
+
+                                    // If the item link detail should be deleted, but it does not exist in production, then we can skip it.
+                                    if (deleteRow && existingId == 0)
+                                    {
+                                        historyItemsSynchronised.Add(actionData.HistoryId);
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
+
+                                        actionData.Status = ObjectActionMergeStatuses.SkippedAndRemoved;
+                                        actionData.MessageBuilder.AppendLine("The current item link detail is empty and should be deleted, but it does not exist in production, so we can skip this row.");
+                                        branchBatchLoggerService.LogMergeAction(actionData);
+                                        continue;
+                                    }
+
+                                    // We found an existing ID, so update that row.
+                                    if (existingId > 0)
+                                    {
+                                        actionData.ItemDetailIdMapped = existingId;
+                                        actionData.MessageBuilder.AppendLine(deleteRow
+                                            ? "Deleting the existing item link detail in production, via the ID we found before."
+                                            : "Updating the existing item link detail in production, via the ID we found before.");
+                                        sqlParameters["existingId"] = actionData.ItemDetailIdMapped;
+                                        AddParametersToCommand(sqlParameters, productionDatabaseConnection);
+
+                                        query = deleteRow
+                                            ? $"{queryPrefix} DELETE FROM `{actionData.TableName}` WHERE id = ?existingId"
+                                            : $"{queryPrefix} UPDATE `{actionData.TableName}` SET value = ?value, long_value = ?longValue WHERE id = ?existingId";
+
+                                        await productionDatabaseConnection.ExecuteAsync(query);
+
+                                        if (actionData.ItemDetailIdOriginal > 0)
+                                        {
+                                            if (deleteRow)
+                                            {
+                                                // Remove the ID mapping for this item link detail, since we deleted it in production.
+                                                await RemoveIdMappingAsync(idMapping, actionData.TableName, actionData.ItemDetailIdOriginal, branchDatabaseConnection, actionData);
+                                            }
+                                            else
+                                            {
+                                                // Map the item link detail ID from wiser_history to the ID of the current item detail, locally and in database.
+                                                await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, actionData.TableName, actionData.ItemDetailIdOriginal, actionData.ItemDetailIdMapped, branchDatabaseConnection, productionDatabaseConnection, actionData);
+                                            }
+                                        }
+
+                                        break;
+                                    }
+
+                                    // The item detail does not exist yet in production, so create it.
+                                    var newItemId = await GenerateNewIdAsync(actionData.TableName, branchDatabaseConnection, productionDatabaseConnection, actionData);
+                                    sqlParameters["newId"] = newItemId;
+
+                                    actionData.MessageBuilder.AppendLine($"Adding a new row in '{actionData.TableName}' in production, with ID '{newItemId}'.");
+                                    AddParametersToCommand(sqlParameters, productionDatabaseConnection);
+
+                                    query = $"""
+                                             {queryPrefix}
+                                             INSERT INTO `{actionData.TableName}` (id, language_code, itemlink_id, groupname, `key`, value, long_value)
+                                             VALUES (?newId, ?languageCode, ?linkId, ?groupName, ?key, ?value, ?longValue)
+                                             """;
+
+                                    await productionDatabaseConnection.ExecuteAsync(query);
+
+                                    // Map the item detail ID from wiser_history to the ID of the current item detail, locally and in database.
+                                    if (actionData.ItemDetailIdOriginal > 0)
+                                    {
+                                        await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, actionData.TableName, actionData.ItemDetailIdOriginal, newItemId, branchDatabaseConnection, productionDatabaseConnection, actionData);
+                                    }
+
+                                    break;
+                                }
+                            }
 
                             break;
                         }
