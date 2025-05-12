@@ -13,6 +13,7 @@ using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Branches.Enumerations;
 using GeeksCoreLibrary.Modules.Branches.Helpers;
 using GeeksCoreLibrary.Modules.Branches.Models;
+using GeeksCoreLibrary.Modules.Databases.Enums;
 using GeeksCoreLibrary.Modules.Databases.Helpers;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.DataSelector.Interfaces;
@@ -2416,77 +2417,91 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                             actionData.ObjectIdMapped = await GenerateNewIdAsync(actionData.TableName, branchDatabaseConnection, productionDatabaseConnection, actionData);
                             sqlParameters["newId"] = actionData.ObjectIdMapped;
-                            sqlParameters["guid"] = Guid.NewGuid().ToString("N");
-                            sqlParameters["guid2"] = Guid.NewGuid().ToString("N");
 
-                            AddParametersToCommand(sqlParameters, productionDatabaseConnection);
+                            // Get the unique indexes of the current table.
+                            actionData.MessageBuilder.AppendLine($"Checking if the current table '{actionData.TableName}' has a unique index, to prevent duplicate key exceptions...");
+                            var tableDefinition = WiserTableDefinitions.TablesToUpdate.Single(table => String.Equals(table.Name, actionData.TableName, StringComparison.OrdinalIgnoreCase));
+                            var uniqueIndexes = tableDefinition.Indexes.Where(x => x.Type == IndexTypes.Unique).ToList();
 
-                            // TODO: Dynamically look up if the current table has a unique index, and if so, generate a unique value for each column from that index.
-                            // TODO: Then we can get rid of these if-else statements and make this code more generic.
-                            // TODO: Afterwards, look up all values from the columns of this index, by using the newId variable and looking up the row in the current table in the branch.
-                            // TODO: Then look in production to see if it already has a row with the same values. If so, map the newId to the ID of the row in production and skip the insert statement.
-                            // TODO: Then all follow up update/delete statements should update the correct row in production and no longer cause duplicate key exceptions if someone has already added this row manually on production before the merge.
-
-                            if (actionData.TableName.Equals(WiserTableNames.WiserEntity, StringComparison.OrdinalIgnoreCase))
+                            if (uniqueIndexes.Count == 0)
                             {
-                                query = $"""
-                                         {queryPrefix}
-                                         SET @temporaryModuleId = (SELECT IFNULL(MAX(module_id), 0) + 1 FROM `{actionData.TableName}`);
-                                         INSERT INTO `{actionData.TableName}` (id, `name`, `module_id`) 
-                                         VALUES (?newId, ?guid, @temporaryModuleId)
-                                         """;
-                                actionData.MessageBuilder.AppendLine($"Created a temporary property name ('{sqlParameters["guid"]}') for the entity '{actionData.NewValue}', to prevent duplicate index errors when multiple properties are added in a row.");
-                            }
-                            else if (actionData.TableName.Equals(WiserTableNames.WiserEntityProperty, StringComparison.OrdinalIgnoreCase))
-                            {
-                                // The table wiser_entityproperty has a unique index (on entity_name, property_name), so we need to temporarily generate a unique property name, to prevent duplicate index errors when multiple properties are added in a row.
-                                query = $"""
-                                         {queryPrefix}
-                                         INSERT INTO `{actionData.TableName}` (id, `entity_name`, `property_name`) 
-                                         VALUES (?newId, 'temp_wts', ?guid)
-                                         """;
-                                actionData.MessageBuilder.AppendLine($"Created a temporary property name ('{sqlParameters["guid"]}') for the entity property '{actionData.NewValue}', to prevent duplicate index errors when multiple properties are added in a row.");
-                            }
-                            else if (actionData.TableName.Equals(WiserTableNames.WiserLink, StringComparison.OrdinalIgnoreCase))
-                            {
-                                // The table wiser_link has a unique index (on type, destination_entity_type, connected_entity_type), so we need to temporarily generate unique entity names, to prevent duplicate index errors when rows properties are added in a row.
-                                query = $"""
-                                         {queryPrefix}
-                                         INSERT INTO `{actionData.TableName}` (id, `type`, `destination_entity_type`, `connected_entity_type`) 
-                                         VALUES (?newId, 0, ?guid, ?guid2)
-                                         """;
-                                actionData.MessageBuilder.AppendLine($"Saved temporary GUIDs in destination_entity_type ('{sqlParameters["guid"]}') and connected_entity_type ('{sqlParameters["guid2"]}'), to prevent duplicate index errors when multiple properties are added in a row.");
-                            }
-                            else if (actionData.TableName.Equals(WiserTableNames.WiserPermission, StringComparison.OrdinalIgnoreCase))
-                            {
-                                // The table wiser_permission has a unique index on all columns, so we need to temporarily use a role ID that doesn't exist yet, to prevent duplicate index errors when multiple permissions are added in a row.
-                                // This query first gets the maximum role ID from the table, and then adds 1 to it, so that we can be sure that we have ID of a role that doesn't exist.
-                                // Then it checks the highest role_id from the wiser_permission table, and if that is higher than the one we just generated, we add 1 to that one and use that as the temporary ID.
-                                // This all is to prevent duplicate index errors and also to prevent accidentally overwriting someone's permissions.
-                                // Lastly, it also adds temporary non-existing values to most other columns, to prevent duplicate index errors when the role_id gets updated in an "UPDATE_PERMISSION" action.
-                                query = $"""
-                                         {queryPrefix}
-                                         SET @temporaryRoleId = (SELECT IFNULL(MAX(id), 0) + 1 FROM `{WiserTableNames.WiserRoles}`);
-                                         SET @temporaryRoleId = (SELECT IF(MAX(role_id) >= @temporaryRoleId, MAX(role_id) + 1, @temporaryRoleId) FROM `{actionData.TableName}`);
-                                         SET @temporaryItemId = (SELECT IFNULL(MAX(item_id), 0) + 1 FROM `{actionData.TableName}`);
-                                         SET @temporaryEntityPropertyId = (SELECT IFNULL(MAX(entity_property_id), 0) + 1 FROM `{actionData.TableName}`);
-                                         SET @temporaryModuleId = (SELECT IFNULL(MAX(module_id), 0) + 1 FROM `{actionData.TableName}`);
-                                         SET @temporaryQueryId = (SELECT IFNULL(MAX(query_id), 0) + 1 FROM `{actionData.TableName}`);
-                                         SET @temporaryDataSelectorId = (SELECT IFNULL(MAX(data_selector_id), 0) + 1 FROM `{actionData.TableName}`);
-                                         INSERT INTO `{actionData.TableName}` (id, `role_id`, `item_id`, `entity_property_id`, `module_id`, `query_id`, `data_selector_id`, `endpoint_url`)
-                                         VALUES (?newId, @temporaryRoleId, @temporaryItemId, @temporaryEntityPropertyId, @temporaryModuleId, @temporaryQueryId, @temporaryDataSelectorId, ?guid)
-                                         """;
-                                actionData.MessageBuilder.AppendLine("Saved temporary values in most columns of wiser_permission, to prevent duplicate index errors when multiple properties are added in a row.");
-                            }
-                            else
-                            {
+                                actionData.MessageBuilder.AppendLine("--> The table has no unique indexes, so just add a new row without values.");
                                 query = $"""
                                          {queryPrefix}
                                          INSERT INTO `{actionData.TableName}` (id) 
                                          VALUES (?newId)
                                          """;
                             }
+                            else
+                            {
+                                actionData.MessageBuilder.AppendLine($"--> The table has {uniqueIndexes.Count} unique index(es) with a total of {uniqueIndexes.Sum(index => index.Columns.Count)} columns, generating unique temporary values for each column...");
 
+                                var temporaryValueGenerators = new StringBuilder();
+                                var columnsToInsert = new List<string> { "id" };
+                                var valuesToInsert = new List<string> { "?newId" };
+                                var index = 0;
+                                foreach (var columnName in uniqueIndexes.SelectMany(i => i.Columns.Select(c => c.Name)))
+                                {
+                                    var column = tableDefinition.Columns.Single(c => String.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase));
+                                    // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
+                                    switch (column.Type)
+                                    {
+                                        case MySqlDbType.Decimal:
+                                        case MySqlDbType.Float:
+                                        case MySqlDbType.Double:
+                                        case MySqlDbType.Byte:
+                                        case MySqlDbType.Int16:
+                                        case MySqlDbType.Int24:
+                                        case MySqlDbType.Int32:
+                                        case MySqlDbType.Int64:
+                                        case MySqlDbType.UByte:
+                                        case MySqlDbType.UInt16:
+                                        case MySqlDbType.UInt24:
+                                        case MySqlDbType.UInt32:
+                                        case MySqlDbType.UInt64:
+                                            actionData.MessageBuilder.AppendLine($"--> The column '{columnName}' is a number, so we get the current highest number for that column, add 1 to it and use that as the temporary value for the new row.");
+                                            temporaryValueGenerators.AppendLine($"SET @temporaryValue{index} = (SELECT IFNULL(MAX(`{columnName.ToMySqlSafeValue((false))}`), 0) + 1 FROM `{actionData.TableName}`);");
+                                            columnsToInsert.Add($"`{columnName.ToMySqlSafeValue(false)}`");
+                                            valuesToInsert.Add($"@temporaryValue{index}");
+                                            break;
+                                        case MySqlDbType.Timestamp:
+                                        case MySqlDbType.Date:
+                                        case MySqlDbType.Time:
+                                        case MySqlDbType.DateTime:
+                                            actionData.MessageBuilder.AppendLine($"--> The column '{columnName}' is a date and/or time, so we use the highest possible date and/or time for the temporary value of the new row.");
+                                            columnsToInsert.Add($"`{columnName.ToMySqlSafeValue(false)}`");
+                                            sqlParameters[$"temporaryValue{index}"] = DateTime.MaxValue;
+                                            valuesToInsert.Add($"?temporaryValue{index}");
+                                            break;
+                                        case MySqlDbType.VarChar:
+                                        case MySqlDbType.String:
+                                        case MySqlDbType.TinyText:
+                                        case MySqlDbType.MediumText:
+                                        case MySqlDbType.Text:
+                                        case MySqlDbType.LongText:
+                                        case MySqlDbType.Guid:
+                                            actionData.MessageBuilder.AppendLine($"--> The column '{columnName}' is a text column, so we generate a new GUID for the temporary value of the new row.");
+                                            columnsToInsert.Add($"`{columnName.ToMySqlSafeValue(false)}`");
+                                            sqlParameters[$"temporaryValue{index}"] = column.Type == MySqlDbType.Guid ? Guid.NewGuid() : Guid.NewGuid().ToString("N");
+                                            valuesToInsert.Add($"?temporaryValue{index}");
+                                            break;
+                                        default:
+                                            actionData.MessageBuilder.AppendLine($"--> The column '{columnName}' is of type '{column.Type.ToString()}' and we don't know how to generate a random unique value for this type, so we leave it empty.");
+                                            break;
+                                    }
+
+                                    index++;
+                                }
+
+                                query = $"""
+                                         {queryPrefix}
+                                         {temporaryValueGenerators}
+                                         INSERT INTO `{actionData.TableName}` ({String.Join(", ", columnsToInsert)}) 
+                                         VALUES ({String.Join(", ", valuesToInsert)})
+                                         """;
+                            }
+
+                            AddParametersToCommand(sqlParameters, productionDatabaseConnection);
                             await productionDatabaseConnection.ExecuteAsync(query);
 
                             // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
