@@ -16,6 +16,7 @@ using GeeksCoreLibrary.Modules.Branches.Models;
 using GeeksCoreLibrary.Modules.Databases.Enums;
 using GeeksCoreLibrary.Modules.Databases.Helpers;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
+using GeeksCoreLibrary.Modules.Databases.Models;
 using GeeksCoreLibrary.Modules.DataSelector.Interfaces;
 using GeeksCoreLibrary.Modules.DataSelector.Models;
 using Microsoft.Extensions.DependencyInjection;
@@ -1521,6 +1522,12 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     actionData.FileIdMapped = GetMappedId(actionData.TableName, idMapping, actionData.FileIdOriginal, actionData, nameof(actionData.FileIdMapped)).Value;
                     actionData.ObjectIdMapped = GetMappedId(actionData.TableName, idMapping, actionData.ObjectIdOriginal, actionData, nameof(actionData.ObjectIdMapped)).Value;
 
+                    // Also store the mapped ID in the object created in branch list, so that we can use it later to remove any temporary values.
+                    if (objectCreatedInBranch != null)
+                    {
+                        objectCreatedInBranch.ObjectIdMapped = actionData.ObjectIdMapped.ToString();
+                    }
+
                     oldItemId = GetMappedId(actionData.ItemTableName, idMapping, oldItemId, actionData, nameof(oldItemId));
                     oldDestinationItemId = GetMappedId(actionData.LinkDestinationItemTableName, idMapping, oldDestinationItemId, actionData, nameof(oldDestinationItemId));
                     ulong? mappedTargetId;
@@ -2418,10 +2425,23 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             actionData.ObjectIdMapped = await GenerateNewIdAsync(actionData.TableName, branchDatabaseConnection, productionDatabaseConnection, actionData);
                             sqlParameters["newId"] = actionData.ObjectIdMapped;
 
+                            // Remove temporary values from the parameters from any previous history rows. Otherwise they will cause conflicts with the current row.
+                            foreach (var temporaryParameter in sqlParameters.Where(x => x.Key.StartsWith("temporaryValue")))
+                            {
+                                sqlParameters.Remove(temporaryParameter.Key);
+                            }
+
                             // Get the unique indexes of the current table.
                             actionData.MessageBuilder.AppendLine($"Checking if the current table '{actionData.TableName}' has a unique index, to prevent duplicate key exceptions...");
-                            var tableDefinition = WiserTableDefinitions.TablesToUpdate.Single(table => String.Equals(table.Name, actionData.TableName, StringComparison.OrdinalIgnoreCase));
-                            var uniqueIndexes = tableDefinition.Indexes.Where(x => x.Type == IndexTypes.Unique).ToList();
+                            var tableDefinition = WiserTableDefinitions.TablesToUpdate.SingleOrDefault(table => String.Equals(table.Name, actionData.TableName, StringComparison.OrdinalIgnoreCase))
+                                                  ?? new WiserTableDefinitionModel
+                                                  {
+                                                      Name = actionData.TableName,
+                                                      Indexes = await productionDatabaseHelpersService.GetIndexesAsync(actionData.TableName),
+                                                      Columns = await productionDatabaseHelpersService.GetColumnsAsync(actionData.TableName)
+                                                  };
+
+                            var uniqueIndexes = tableDefinition.Indexes.Where(x => x.Type == IndexTypes.Unique && !String.Equals(x.Name, "PRIMARY", StringComparison.OrdinalIgnoreCase)).ToList();
 
                             if (uniqueIndexes.Count == 0)
                             {
@@ -2437,12 +2457,22 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.MessageBuilder.AppendLine($"--> The table has {uniqueIndexes.Count} unique index(es) with a total of {uniqueIndexes.Sum(index => index.Columns.Count)} columns, generating unique temporary values for each column...");
 
                                 var temporaryValueGenerators = new StringBuilder();
-                                var columnsToInsert = new List<string> { "id" };
+                                var columnsToInsert = new List<string> { "`id`" };
                                 var valuesToInsert = new List<string> { "?newId" };
                                 var index = 0;
+
                                 foreach (var columnName in uniqueIndexes.SelectMany(i => i.Columns.Select(c => c.Name)))
                                 {
                                     var column = tableDefinition.Columns.Single(c => String.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase));
+
+                                    // We don't need to generate a temporary value for the ID column, since we already have that one.
+                                    // We also don't need to generate one for auto increment columns, since the database will generate that automatically.
+                                    if (column.AutoIncrement || String.Equals(columnName, "id", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        index++;
+                                        continue;
+                                    }
+
                                     // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
                                     switch (column.Type)
                                     {
@@ -2463,6 +2493,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                             temporaryValueGenerators.AppendLine($"SET @temporaryValue{index} = (SELECT IFNULL(MAX(`{columnName.ToMySqlSafeValue((false))}`), 0) + 1 FROM `{actionData.TableName}`);");
                                             columnsToInsert.Add($"`{columnName.ToMySqlSafeValue(false)}`");
                                             valuesToInsert.Add($"@temporaryValue{index}");
+                                            objectCreatedInBranch.ColumnsWithTemporaryValues.Add(column);
                                             break;
                                         case MySqlDbType.Timestamp:
                                         case MySqlDbType.Date:
@@ -2472,6 +2503,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                             columnsToInsert.Add($"`{columnName.ToMySqlSafeValue(false)}`");
                                             sqlParameters[$"temporaryValue{index}"] = DateTime.MaxValue;
                                             valuesToInsert.Add($"?temporaryValue{index}");
+                                            objectCreatedInBranch.ColumnsWithTemporaryValues.Add(column);
                                             break;
                                         case MySqlDbType.VarChar:
                                         case MySqlDbType.String:
@@ -2484,6 +2516,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                             columnsToInsert.Add($"`{columnName.ToMySqlSafeValue(false)}`");
                                             sqlParameters[$"temporaryValue{index}"] = column.Type == MySqlDbType.Guid ? Guid.NewGuid() : Guid.NewGuid().ToString("N");
                                             valuesToInsert.Add($"?temporaryValue{index}");
+                                            objectCreatedInBranch.ColumnsWithTemporaryValues.Add(column);
                                             break;
                                         default:
                                             actionData.MessageBuilder.AppendLine($"--> The column '{columnName}' is of type '{column.Type.ToString()}' and we don't know how to generate a random unique value for this type, so we leave it empty.");
@@ -2547,6 +2580,16 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.MessageBuilder.AppendLine($"For an {actionData.Action} action, we need to know the field that was updated, but the field was not saved in `wiser_history` for some reason.");
                                 branchBatchLoggerService.LogMergeAction(actionData);
                                 continue;
+                            }
+
+                            // Check if this object was created in the branch and if so, remove the temporary value from the list.
+                            var columnWithTemporaryValue = objectCreatedInBranch?.ColumnsWithTemporaryValues?.SingleOrDefault(c => String.Equals(c.Name, actionData.Field, StringComparison.OrdinalIgnoreCase));
+                            if (columnWithTemporaryValue != null)
+                            {
+                                // When we updated a column with a temporary value, we need to remove that column from the list.
+                                // At the end of the merge, we will remove the temporary values, that are left over, from the production database.
+                                objectCreatedInBranch.ColumnsWithTemporaryValues.Remove(columnWithTemporaryValue);
+                                actionData.MessageBuilder.AppendLine("We found that the current object was created in the branch and that we added a temporary value for the current column. Since we are updating that column now with a new value, we need to remove the temporary value from the list.");
                             }
 
                             sqlParameters["id"] = actionData.ObjectIdMapped;
@@ -2619,11 +2662,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 }
                 catch (Exception exception)
                 {
-                    var exceptionMessage = exception.Message;
-                    if (exception is GclQueryException gclQueryException)
-                    {
-                        exceptionMessage = gclQueryException.InnerException.Message;
-                    }
+                    var exceptionMessage = GetExceptionMessage(exception);
 
                     await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"An error occurred while trying to synchronise history ID '{actionData.HistoryId}' from '{branchDatabase}' to '{originalDatabase}': {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
                     errors.Add($"Het is niet gelukt om de wijziging '{actionData.Action}' voor object '{actionData.ObjectIdOriginal}' over te zetten. De fout was: {exceptionMessage}");
@@ -2634,6 +2673,9 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 }
             }
 
+            await CleanupAfterMergeAsync(branchQueue, configurationServiceName, objectsCreatedInBranch, productionDatabaseConnection, queryPrefix, errors);
+
+            // We have finished processing all items in the history table, so update the progress to 100%.
             await UpdateProgressInQueue(originalDatabaseConnection, queueId, totalItemsInHistory, true);
 
             // Check if any ids need to be updated for styled output entries.
@@ -2653,21 +2695,28 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             }
             catch (Exception exception)
             {
-                var exceptionMessage = exception.Message;
-                if (exception is GclQueryException gclQueryException)
-                {
-                    exceptionMessage = gclQueryException.InnerException.Message;
-                }
+                var exceptionMessage = GetExceptionMessage(exception);
 
                 await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"An error occurred while trying to clean up after synchronising from '{branchDatabase}' to '{originalDatabase}': {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                errors.Add($"Er is iets fout gegaan tijdens het opruimen na de synchronisatie. Het wordt aangeraden om deze omgeving niet meer te gebruiken voor synchroniseren naar productie, anders kunnen dingen dubbel gesynchroniseerd worden. U kunt wel een nieuwe omgeving maken en vanuit daar weer verder werken. De fout was: {exceptionMessage}");
+                errors.Add($"Er is iets fout gegaan tijdens het opruimen na de synchronisatie. De fout was: {exceptionMessage}");
             }
 
-            // Always commit, so we keep our progress.
-            await branchDatabaseConnection.CommitTransactionAsync();
-            await productionDatabaseConnection.CommitTransactionAsync();
-
-            result["SuccessfulChanges"] = successfulChanges;
+            // Commit the transactions if we have no errors, otherwise rollback.
+            if (errors.Count == 0)
+            {
+                await logService.LogInformation(logger, LogScopes.RunBody, branchQueue.LogSettings, $"We have found no errors during while synchronising from '{branchDatabase}' to '{originalDatabase}'. We merged {successfulChanges} change(s) to production. So committing the transactions/changes now.", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                await branchDatabaseConnection.CommitTransactionAsync();
+                await productionDatabaseConnection.CommitTransactionAsync();
+                result["SuccessfulChanges"] = successfulChanges;
+            }
+            else
+            {
+                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"We have found {errors.Count} error(s) while synchronising from '{branchDatabase}' to '{originalDatabase}', so we did a rollback. Nothing has been changed on production. Please check and fix the errors and then try a new merge.", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                errors.Add($"Er zijn {errors.Count} fout(en) opgetreden tijdens de synchronisatie, dus we hebben de wijzigingen teruggedraaid. Er is niets veranderd in productie. Controleer de fouten, los deze op en probeer daarna een nieuwe merge.");
+                await branchDatabaseConnection.RollbackTransactionAsync();
+                await productionDatabaseConnection.RollbackTransactionAsync();
+                result["SuccessfulChanges"] = 0;
+            }
         }
         catch (Exception exception)
         {
@@ -2685,7 +2734,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         }
 
         // Delete the branch if there were no errors and the user indicated it should be deleted after a successful merge.
-        if (!errors.Any() && mergeBranchSettings.DeleteAfterSuccessfulMerge)
+        if (errors.Count == 0 && mergeBranchSettings.DeleteAfterSuccessfulMerge)
         {
             try
             {
@@ -2708,8 +2757,121 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
         await FinishBranchActionAsync(queueId, dataRowWithSettings, branchQueue, configurationServiceName, originalDatabaseConnection, wiserItemsService, taskAlertsService, errors, stopwatch, startDate, branchQueue.MergedBranchTemplateId, MergeBranchSubject, MergeBranchTemplate);
 
-        result["Success"] = !errors.Any();
+        result["Success"] = errors.Count == 0;
         return result;
+    }
+
+    /// <summary>
+    /// Do any cleanup that might be needed after merging a branch.
+    /// Like removing temporary values from the production database that we added to prevent duplicate key errors from unique indexes on tables.
+    /// </summary>
+    /// <param name="branchQueue">Information about the WTS configuration for handling branch queues, for logging.</param>
+    /// <param name="configurationServiceName">The service name as it's specified in the XML configuration.</param>
+    /// <param name="objectsCreatedInBranch">A <see cref="List{T}"/> of <see cref="objectsCreatedInBranch"/> that contain the items that were created by the merge with temporary values.</param>
+    /// <param name="productionDatabaseConnection">The <see cref="IDatabaseConnection" /> to the production database.</param>
+    /// <param name="queryPrefix">The prefix for all queries, that contains the username and things for wiser_history.</param>
+    /// <param name="errors">The list of errors that will be returned to the WTS.</param>
+    private async Task CleanupAfterMergeAsync(BranchQueueModel branchQueue, string configurationServiceName, List<ObjectCreatedInBranchModel> objectsCreatedInBranch, IDatabaseConnection productionDatabaseConnection, string queryPrefix, JArray errors)
+    {
+        // Check if we have added any new objects with temporary values, without having replaced those temporary values with the actual values.
+        // If that is the case, we need to change those temporary values to the default values for those columns.
+        // We can do this safely now, because we have already merged all the changes to the production database, so these rows should be unique now without the temporary values.
+        foreach (var objectCreatedInBranch in objectsCreatedInBranch.Where(o => o.ColumnsWithTemporaryValues.Count > 0))
+        {
+            try
+            {
+                var updateClause = new List<string>();
+                foreach (var column in objectCreatedInBranch.ColumnsWithTemporaryValues)
+                {
+                    if (!column.NotNull || column.DefaultValue != null)
+                    {
+                        // If the column is nullable or has a default value, we can just set it to NULL, which the database will turn into the default value when applicable.
+                        updateClause.Add($"`{column.Name.ToMySqlSafeValue(false)}` = NULL");
+                        continue;
+                    }
+
+                    // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
+                    switch (column.Type)
+                    {
+                        case MySqlDbType.Decimal:
+                        case MySqlDbType.Float:
+                        case MySqlDbType.Double:
+                        case MySqlDbType.Byte:
+                        case MySqlDbType.Int16:
+                        case MySqlDbType.Int24:
+                        case MySqlDbType.Int32:
+                        case MySqlDbType.Int64:
+                        case MySqlDbType.UByte:
+                        case MySqlDbType.UInt16:
+                        case MySqlDbType.UInt24:
+                        case MySqlDbType.UInt32:
+                        case MySqlDbType.UInt64:
+                            // For numbers, set the column value to 0.
+                            updateClause.Add($"`{column.Name.ToMySqlSafeValue(false)}` = 0");
+                            break;
+                        case MySqlDbType.Timestamp:
+                        case MySqlDbType.Date:
+                        case MySqlDbType.Time:
+                        case MySqlDbType.DateTime:
+                            // For dates and times, set the column value to the current date and/or time.
+                            updateClause.Add($"`{column.Name.ToMySqlSafeValue(false)}` = NOW()");
+                            break;
+                        case MySqlDbType.VarChar:
+                        case MySqlDbType.String:
+                        case MySqlDbType.TinyText:
+                        case MySqlDbType.MediumText:
+                        case MySqlDbType.Text:
+                        case MySqlDbType.LongText:
+                        case MySqlDbType.Guid:
+                            // For texts, set the column value to an empty string.
+                            updateClause.Add($"`{column.Name.ToMySqlSafeValue(false)}` = ''");
+                            break;
+                        default:
+                            // We don't set temporary values for other column types, so we don't need to do anything.
+                            continue;
+                    }
+                }
+
+                if (updateClause.Count <= 0)
+                {
+                    continue;
+                }
+
+                productionDatabaseConnection.AddParameter("id", objectCreatedInBranch.ObjectIdMapped);
+
+                var query = $"""
+                             {queryPrefix}
+                             UPDATE `{objectCreatedInBranch.TableName}` 
+                             SET {String.Join(", ", updateClause)}
+                             WHERE id = ?id
+                             """;
+                await productionDatabaseConnection.ExecuteAsync(query);
+            }
+            catch (Exception exception)
+            {
+                var exceptionMessage = GetExceptionMessage(exception);
+
+                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"An error occurred while trying to delete a temporary value from the table '{objectCreatedInBranch.TableName}': {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
+                errors.Add($"Er is iets fout gegaan tijdens het opruimen van tijdelijke waardes op de tabel '{objectCreatedInBranch.TableName}'. De fout was: {exceptionMessage}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get the exception message from the exception.
+    /// If the exception is a <see cref="GclQueryException"/>, then we get the message from the inner exception.
+    /// </summary>
+    /// <param name="exception">The exception to get the message of.</param>
+    /// <returns>The exception message for logging.</returns>
+    private static string GetExceptionMessage(Exception exception)
+    {
+        var exceptionMessage = exception.Message;
+        if (exception is GclQueryException {InnerException: not null} gclQueryException)
+        {
+            exceptionMessage = gclQueryException.InnerException.Message;
+        }
+
+        return exceptionMessage;
     }
 
     /// <summary>
@@ -2788,7 +2950,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     /// <returns>An <see cref="ObjectCreatedInBranchModel" /> with information about the object.</returns>
     private static ObjectCreatedInBranchModel CheckIfObjectWasCreatedInBranch(BranchMergeLogModel actionData, List<ObjectCreatedInBranchModel> objectsCreatedInBranch)
     {
-        var idForComparison = actionData.ItemIdOriginal.ToString();
+        actionData.MessageBuilder.AppendLine($"Checking if the current object was created in the current branch, in the {nameof(objectsCreatedInBranch)} list that we prepared at the start of the merge.");
+        string idForComparison;
         switch (actionData.Action)
         {
             case "ADD_LINK":
@@ -2797,7 +2960,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 // the source item ID (which is saved in "newvalue") and the link type (which is saved in "field", together with the ordering) to get a unique ID for the link.
                 var type = actionData.Field.Split(",").FirstOrDefault() ?? "0";
                 idForComparison = $"{actionData.ObjectIdOriginal}_{actionData.NewValue}_{type}";
-                actionData.MessageBuilder.AppendLine($"Generated the following value for later checks if the link was created and deleted in the branch: {idForComparison}");
+                actionData.MessageBuilder.AppendLine("--> The action is for adding a new item link. These actions don't log the ID of wiser_itemlink in wiser_history, so generating an ID with source item ID, destination item ID and link type, which are logged in wiser_history with this action.");
                 break;
             }
             case "REMOVE_LINK":
@@ -2806,13 +2969,69 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 // the source item ID (which is saved in "oldvalue") and the link type (which is saved in "field") to get a unique ID for the link.
                 var type = String.IsNullOrWhiteSpace(actionData.Field) ? "0" : actionData.Field;
                 idForComparison = $"{actionData.ObjectIdOriginal}_{actionData.OldValue}_{type}";
-                actionData.MessageBuilder.AppendLine($"Generated the following value for later checks if the link was created and deleted in the branch: {idForComparison}");
+                actionData.MessageBuilder.AppendLine("--> The action is for removing an item link. These actions don't log the ID of wiser_itemlink in wiser_history, so generating an ID with source item ID, destination item ID and link type, which are logged in wiser_history with this action.");
+                break;
+            }
+            case "INSERT_ENTITY":
+            case "INSERT_ENTITYPROPERTY":
+            case "INSERT_QUERY":
+            case "INSERT_MODULE":
+            case "INSERT_DATA_SELECTOR":
+            case "INSERT_PERMISSION":
+            case "INSERT_USER_ROLE":
+            case "INSERT_FIELD_TEMPLATE":
+            case "INSERT_LINK_SETTING":
+            case "INSERT_API_CONNECTION":
+            case "INSERT_ROLE":
+            case "CREATE_STYLED_OUTPUT":
+            case "CREATE_EASY_OBJECT":
+            case "UPDATE_ENTITY":
+            case "UPDATE_ENTITYPROPERTY":
+            case "UPDATE_QUERY":
+            case "UPDATE_DATA_SELECTOR":
+            case "UPDATE_MODULE":
+            case "UPDATE_PERMISSION":
+            case "UPDATE_USER_ROLE":
+            case "UPDATE_FIELD_TEMPLATE":
+            case "UPDATE_LINK_SETTING":
+            case "UPDATE_API_CONNECTION":
+            case "UPDATE_ROLE":
+            case "UPDATE_STYLED_OUTPUT":
+            case "UPDATE_EASY_OBJECT":
+            case "DELETE_ENTITY":
+            case "DELETE_ENTITYPROPERTY":
+            case "DELETE_QUERY":
+            case "DELETE_DATA_SELECTOR":
+            case "DELETE_MODULE":
+            case "DELETE_PERMISSION":
+            case "DELETE_USER_ROLE":
+            case "DELETE_FIELD_TEMPLATE":
+            case "DELETE_LINK_SETTING":
+            case "DELETE_API_CONNECTION":
+            case "DELETE_ROLE":
+            case "DELETE_STYLED_OUTPUT":
+            case "DELETE_EASY_OBJECT":
+            {
+                idForComparison = actionData.ObjectIdOriginal.ToString();
+                actionData.MessageBuilder.AppendLine($"--> The object was some kind of configuration or setting, so using {nameof(actionData.ObjectIdOriginal)}.");
+                break;
+            }
+            default:
+            {
+                idForComparison = actionData.ItemIdOriginal.ToString();
+                actionData.MessageBuilder.AppendLine($"--> The object was a Wiser item or something related to a Wiser item, so using {nameof(actionData.ItemIdOriginal)}.");
                 break;
             }
         }
 
         // Treat details as items during the check for deleted items.
-        return objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == idForComparison && String.Equals(i.TableName, actionData.ItemTableName, StringComparison.OrdinalIgnoreCase));
+        var result = objectsCreatedInBranch.FirstOrDefault(i => i.ObjectId == idForComparison && String.Equals(i.TableName, actionData.TableName, StringComparison.OrdinalIgnoreCase));
+
+        actionData.MessageBuilder.AppendLine(result == null
+            ? $"--> No object with id '{idForComparison}' found in the list of objects that were created in the current branch."
+            : $"--> We found the object with id '{idForComparison}' in the list of objects that were created in the current branch.");
+
+        return result;
     }
 
     /// <summary>
