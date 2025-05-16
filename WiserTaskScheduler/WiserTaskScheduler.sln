@@ -7,8 +7,25 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WiserTaskScheduler", "Wiser
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoUpdater", "AutoUpdater\AutoUpdater.csproj", "{EF0799C9-2E89-4AFD-B31D-5F3A245C3244}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{6A0A499C-8E43-40DE-B54A-AF92AAD52A7A}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "GitHub", "GitHub", "{7148BE77-B730-4A04-A11A-62C0E46DAE34}"
 	ProjectSection(SolutionItems) = preProject
+		..\.github\CODEOWNERS = ..\.github\CODEOWNERS
+		..\.github\dependabot.yml = ..\.github\dependabot.yml
+		..\.github\pull_request_template.md = ..\.github\pull_request_template.md
+		.gitattributes = .gitattributes
+		.gitignore = .gitignore
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Documentation", "Documentation", "{A03262FB-F3BE-4AE9-9424-CA1AACCA72E4}"
+	ProjectSection(SolutionItems) = preProject
+		..\CONTRIBUTING.md = ..\CONTRIBUTING.md
+		..\LICENCE.md = ..\LICENCE.md
+		..\README.md = ..\README.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docker", "Docker", "{61F15D94-48E0-496C-AB03-D18290B61B0F}"
+	ProjectSection(SolutionItems) = preProject
+		.dockerignore = .dockerignore
 		compose.yaml = compose.yaml
 		Dockerfile = Dockerfile
 		entrypoint.sh = entrypoint.sh
@@ -54,5 +71,7 @@ Global
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {DF7CA463-6B41-48E6-9F97-CE1DE01BC62A}
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
 	EndGlobalSection
 EndGlobal
