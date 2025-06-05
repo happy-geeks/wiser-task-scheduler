@@ -1486,6 +1486,80 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             actionData.ItemTableName = actionData.TableName;
                             break;
                         }
+                        case "UPDATE_PERMISSION":
+                        {
+                            // First check if the field is an ID field and if so, check if we can parse it as a ulong.
+                            switch (actionData.Field.ToLowerInvariant())
+                            {
+                                case "role_id":
+                                case "item_id":
+                                case "entity_property_id":
+                                case "module_id":
+                                case "query_id":
+                                case "data_selector_id":
+                                    if (!UInt64.TryParse(actionData.NewValue, out var parsedValue))
+                                    {
+                                        historyItemsSynchronised.Add(actionData.HistoryId);
+                                        itemsProcessed++;
+                                        await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
+
+                                        actionData.Status = ObjectActionMergeStatuses.Skipped;
+                                        actionData.MessageBuilder.AppendLine("The current row was skipped, because this is a permission change for some kind of ID, but we weren't able to parse that ID as a ulong.");
+                                        branchBatchLoggerService.LogMergeAction(actionData);
+
+                                        continue;
+                                    }
+
+                                    actionData.MessageBuilder.AppendLine($"The current row is a change in {actionData.TableName}, for column {actionData.Field}. We need to find out of that linked object has a mapped ID in the production environment, so we can use that instead of the original ID when merging this change.");
+                                    actionData.LinkedObjectIdOriginal = parsedValue;
+                                    actionData.LinkedObjectIdMapped = parsedValue;
+                                    break;
+                            }
+
+                            // Then store the table name of the linked object, so that we can use it later to find the correct item in production.
+                            // Note: We made two separate switch statements here, because so that we don't need to do the ID parsing multiple times.
+                            switch (actionData.Field.ToLowerInvariant())
+                            {
+                                case "role_id":
+                                    actionData.LinkedObjectTableName = WiserTableNames.WiserUserRoles;
+                                    break;
+                                case "item_id":
+                                    // Get the entity type of the item that is linked to this permission.
+                                    query = $"""
+                                             SELECT entity_name
+                                             FROM `{WiserTableNames.WiserPermission}`
+                                             WHERE id = ?permissionId
+                                             """;
+
+                                    branchDatabaseConnection.AddParameter("permissionId", actionData.ObjectIdOriginal);
+                                    actionData.ItemEntityType = await branchDatabaseConnection.ExecuteScalarAsync<string>(query);
+                                    if (String.IsNullOrWhiteSpace(actionData.ItemEntityType))
+                                    {
+                                        actionData.MessageBuilder.AppendLine($"The current row is a permission change for an item, but the `entity_name` column does not contain a value, so we have to assume that the item is located in the default `{WiserTableNames.WiserItem}` table and look for an ID mapping of that table.");
+                                        break;
+                                    }
+
+                                    // Get the table prefix for the specified entity type, so that we can find the correct item in production.
+                                    var linkedObjectTablePrefix = await branchEntityTypesService.GetTablePrefixForEntityAsync(actionData.ItemEntityType);
+                                    actionData.LinkedObjectTableName = $"{linkedObjectTablePrefix}{WiserTableNames.WiserItem}";
+                                    actionData.MessageBuilder.AppendLine($"The current row is a permission change for an item and it uses the entity type '{actionData.ItemEntityType}'. For this entity type, we found that is uses the table prefix '{linkedObjectTablePrefix}', so we will look for an ID mapping of the table '{actionData.LinkedObjectTableName}'.");
+                                    break;
+                                case "entity_property_id":
+                                    actionData.LinkedObjectTableName = WiserTableNames.WiserEntityProperty;
+                                    break;
+                                case "module_id":
+                                    actionData.LinkedObjectTableName = WiserTableNames.WiserModule;
+                                    break;
+                                case "query_id":
+                                    actionData.LinkedObjectTableName = WiserTableNames.WiserQuery;
+                                    break;
+                                case "data_selector_id":
+                                    actionData.LinkedObjectTableName = WiserTableNames.WiserDataSelector;
+                                    break;
+                            }
+
+                            break;
+                        }
                     }
 
                     // Get information we need for Wiser item links.
@@ -1521,6 +1595,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     actionData.LinkIdMapped = GetMappedId(actionData.LinkTableName, idMapping, actionData.LinkIdOriginal, actionData, nameof(actionData.LinkIdMapped)).Value;
                     actionData.FileIdMapped = GetMappedId(actionData.TableName, idMapping, actionData.FileIdOriginal, actionData, nameof(actionData.FileIdMapped)).Value;
                     actionData.ObjectIdMapped = GetMappedId(actionData.TableName, idMapping, actionData.ObjectIdOriginal, actionData, nameof(actionData.ObjectIdMapped)).Value;
+                    actionData.LinkedObjectIdMapped = GetMappedId(actionData.LinkedObjectTableName, idMapping, actionData.LinkedObjectIdOriginal, actionData, nameof(actionData.LinkedObjectIdMapped)).Value;
 
                     // Also store the mapped ID in the object created in branch list, so that we can use it later to remove any temporary values.
                     if (objectCreatedInBranch != null)
@@ -2593,7 +2668,22 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             }
 
                             sqlParameters["id"] = actionData.ObjectIdMapped;
-                            sqlParameters["newValue"] = actionData.NewValue;
+
+                            object valueToSaveInProduction;
+                            if (actionData.LinkedObjectIdMapped > 0)
+                            {
+                                valueToSaveInProduction = actionData.LinkedObjectIdMapped;
+                            }
+                            else if (actionData.LinkedObjectIdOriginal > 0)
+                            {
+                                valueToSaveInProduction = actionData.LinkedObjectIdOriginal;
+                            }
+                            else
+                            {
+                                valueToSaveInProduction = actionData.NewValue;
+                            }
+
+                            sqlParameters["newValue"] = valueToSaveInProduction;
 
                             AddParametersToCommand(sqlParameters, productionDatabaseConnection);
                             query = $"""
@@ -3752,7 +3842,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     private static ulong? GetMappedId(string tableName, Dictionary<string, Dictionary<ulong, ulong>> idMapping, ulong? id, BranchMergeLogModel actionData, string propertyName, bool returnNullIfNotFound = false)
     {
         var defaultValue = returnNullIfNotFound ? null : id;
-        if (id is null or 0)
+        if (id is null or 0 || String.IsNullOrWhiteSpace(tableName))
         {
             return defaultValue;
         }

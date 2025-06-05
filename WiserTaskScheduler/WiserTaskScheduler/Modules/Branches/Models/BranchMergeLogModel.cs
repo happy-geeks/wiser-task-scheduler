@@ -202,6 +202,28 @@ public class BranchMergeLogModel(int queueId, string queueName, int branchId, ul
 
     #endregion
 
+    #region Information for other objects/tables
+
+    /// <summary>
+    /// Some tables/objects are linked to other objects, such as permissions that are linked to queries, items, etc.
+    /// This will contain the ID of the linked object in the branch database.
+    /// </summary>
+    public ulong LinkedObjectIdOriginal { get; set; }
+
+    /// <summary>
+    /// Some tables/objects are linked to other objects, such as permissions that are linked to queries, items, etc.
+    /// This will contain the ID of the linked object in the production database.
+    /// </summary>
+    public ulong LinkedObjectIdMapped { get; set; }
+
+    /// <summary>
+    /// Some tables/objects are linked to other objects, such as permissions that are linked to queries, items, etc.
+    /// This will contain the name of the table that should contain the linked object.
+    /// </summary>
+    public string LinkedObjectTableName { get; set; } = String.Empty;
+
+    #endregion
+
     #region Extra information for debugging
 
     /// <summary>
