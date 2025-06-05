@@ -337,7 +337,10 @@ public class WiserImportsService(IServiceProvider serviceProvider, ILogService l
                         linkDetail.Changed = true;
                     }
 
-                    import.Item.Details.AddRange(link.Details);
+                    foreach (var detail in link.Details)
+                    {
+                        import.Item.SetDetail(detail);
+                    }
                     await wiserItemsService.SaveAsync(import.Item, username: usernameForLogs, userId: importRow.UserId);
                 }
             }
