@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -130,7 +131,7 @@ public class CleanupService(IOptions<WtsSettings> wtsSettings, IServiceProvider 
             }
 
             // Check if the property name is set and not just whitespace(or is empty).
-            if (!string.IsNullOrWhiteSpace(cleanupServiceSettings.ProperyNameTemporaryWiserFiles))
+            if (String.IsNullOrWhiteSpace(cleanupServiceSettings.ProperyNameTemporaryWiserFiles))
             {
                 return;
             }
@@ -143,7 +144,19 @@ public class CleanupService(IOptions<WtsSettings> wtsSettings, IServiceProvider 
 
             databaseConnection.AddParameter("propertyName", cleanupServiceSettings.ProperyNameTemporaryWiserFiles);
             databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStoreTemporaryWiserFiles));
-            var rowsDeleted = await databaseConnection.ExecuteAsync($"DELETE FROM {WiserTableNames.WiserItemFile} WHERE property_name = ?propertyName AND added_on < ?cleanupDate", cleanUp: true);
+            var itemsToDelete = await databaseConnection.GetAsync($"SELECT id FROM {WiserTableNames.WiserItemFile} WHERE property_name = ?propertyName AND added_on < ?cleanupDate");
+
+            // if there is nothing to delete, don't bother running the delete query.
+            if (itemsToDelete.Rows.Count == 0)
+            {
+                return;
+            }
+
+            var idsToDelete = itemsToDelete.Rows.Cast<DataRow>().Select(x => Convert.ToUInt64(x["id"])).ToList();
+
+            var deleteQuery = $"DELETE FROM {WiserTableNames.WiserItemFile} WHERE id IN ({String.Join(", ", idsToDelete)})";
+
+            var rowsDeleted = await databaseConnection.ExecuteAsync(deleteQuery, cleanUp: true);
             await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserItemFile}'.", logName);
 
             if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
