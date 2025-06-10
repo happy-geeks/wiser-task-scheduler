@@ -49,4 +49,14 @@ public class CleanupServiceSettings
     /// value is in seconds
     /// </summary>
     public int Timeout { get; set; } = 300;
+
+    /// <summary>
+    /// Gets or sets the number of days temporary wiser files need to be kept.
+    /// </summary>
+    public int NumberOfDaysToStoreTemporaryWiserFiles { get; set; } = 1;
+
+    /// <summary>
+    /// Gets or sets the string of the property name of temporary wiser files.
+    /// </summary>
+    public string ProperyNameTemporaryWiserFiles { get; set; } = "TEMPORARY_FILE_FROM_WISER";
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -39,6 +40,7 @@ public class CleanupService(IOptions<WtsSettings> wtsSettings, IServiceProvider 
         await CleanupDatabaseLogsAsync(databaseConnection, databaseHelpersService);
         await CleanupDatabaseRenderTimesAsync(databaseConnection, databaseHelpersService);
         await CleanupWtsServicesAsync(databaseConnection, databaseHelpersService);
+		await CleanupTemporaryWiserFilesAsync(databaseConnection, databaseHelpersService);
     }
 
     /// <summary>
@@ -109,6 +111,62 @@ public class CleanupService(IOptions<WtsSettings> wtsSettings, IServiceProvider 
         catch (Exception exception)
         {
             await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during cleanup: {exception}", logName);
+        }
+    }
+
+    /// <summary>
+    /// Cleanup files in the wiser_itemfile table with property_name 'TEMPORARY_FILE_FROM_WISER' older than 24h.
+    /// Note: this does not yet support dedicated tables.
+    /// </summary>
+    /// <param name="databaseConnection">The database connection to use.</param>
+    /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
+    private async Task CleanupTemporaryWiserFilesAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService)
+    {
+        try
+        {
+            // Check if the table exists before trying to delete from it.
+            if (!await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserItemFile))
+            {
+                return;
+            }
+
+            // Check if the property name is set and not just whitespace(or is empty).
+            if (String.IsNullOrWhiteSpace(cleanupServiceSettings.ProperyNameTemporaryWiserFiles))
+            {
+                return;
+            }
+
+            // Check if the number of days to store is greater than 0.
+            if (cleanupServiceSettings.NumberOfDaysToStoreTemporaryWiserFiles <= 0)
+            {
+                return;
+            }
+
+            databaseConnection.AddParameter("propertyName", cleanupServiceSettings.ProperyNameTemporaryWiserFiles);
+            databaseConnection.AddParameter("cleanupDate", DateTime.Now.AddDays(-cleanupServiceSettings.NumberOfDaysToStoreTemporaryWiserFiles));
+            var itemsToDelete = await databaseConnection.GetAsync($"SELECT id FROM {WiserTableNames.WiserItemFile} WHERE property_name = ?propertyName AND added_on < ?cleanupDate");
+
+            // if there is nothing to delete, don't bother running the delete query.
+            if (itemsToDelete.Rows.Count == 0)
+            {
+                return;
+            }
+
+            var idsToDelete = itemsToDelete.Rows.Cast<DataRow>().Select(x => Convert.ToUInt64(x["id"])).ToList();
+
+            var deleteQuery = $"DELETE FROM {WiserTableNames.WiserItemFile} WHERE id IN ({String.Join(", ", idsToDelete)})";
+
+            var rowsDeleted = await databaseConnection.ExecuteAsync(deleteQuery, cleanUp: true);
+            await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Cleaned up {rowsDeleted} rows in '{WiserTableNames.WiserItemFile}'.", logName);
+
+            if (cleanupServiceSettings.OptimizeLogsTableAfterCleanup)
+            {
+                await databaseHelpersService.OptimizeTablesAsync(WiserTableNames.WiserItemFile);
+            }
+        }
+        catch (Exception exception)
+        {
+            await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during temp file cleanup: {exception}", logName);
         }
     }
 
