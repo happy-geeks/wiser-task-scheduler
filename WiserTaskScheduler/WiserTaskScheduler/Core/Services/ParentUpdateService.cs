@@ -80,6 +80,15 @@ public class ParentUpdateService(IOptions<WtsSettings> wtsSettings, IServiceProv
     /// <param name="targetDatabase">The database we are applying the parent updates on.</param>
     private async Task ParentsUpdateMainAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, ParentUpdateDatabaseStrings targetDatabase)
     {
+        await databaseConnection.EnsureOpenConnectionForWritingAsync();
+
+        if (databaseConnection.ConnectedDatabaseForWriting == null)
+        {
+            // No need to log this, If we dont have a database connection just skip it for now.
+            // We run the updates once we database connection is back and adding logs here would just flood the logs.
+            return;
+        }
+
         if (await databaseHelpersService.DatabaseExistsAsync(targetDatabase.DatabaseName))
         {
             if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserParentUpdates, targetDatabase.DatabaseName))
@@ -127,6 +136,15 @@ public class ParentUpdateService(IOptions<WtsSettings> wtsSettings, IServiceProv
     /// <param name="targetDatabase">The database we are applying the parent updates on.</param>
     private async Task ParentsUpdateOptimizeTables(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, ParentUpdateDatabaseStrings targetDatabase)
     {
+        await databaseConnection.EnsureOpenConnectionForWritingAsync();
+
+        if (databaseConnection.ConnectedDatabaseForWriting == null)
+        {
+            // No need to log this, If we dont have a database connection just skip it for now.
+            // We run the updates once we database connection is back and adding logs here would just flood the logs.
+            return;
+        }
+
         if (await databaseHelpersService.DatabaseExistsAsync(targetDatabase.DatabaseName))
         {
             if (await databaseHelpersService.TableExistsAsync(WiserTableNames.WiserParentUpdates, targetDatabase.DatabaseName))
