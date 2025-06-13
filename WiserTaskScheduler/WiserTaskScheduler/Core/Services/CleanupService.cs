@@ -308,8 +308,9 @@ public class CleanupService(
             {
                 var deleteFloatingLinksQuery = $"""
                     DELETE FROM {itemLinkTablePrefix}{WiserTableNames.WiserItemLink}
-                    WHERE id IN ({String.Join(", ", retrievedIds.Rows.Cast<DataRow>().Select(x => x.Field<ulong>("id")))})
+                    WHERE id IN ({String.Join(", ", retrievedIds.Rows.Cast<DataRow>().Select(x => x.Field<long>("id")))})
                 """;
+
                 /*
                 TODO: uncomment this after verifying the correctness of the cleanup query.
                 var deleteResults = await databaseConnection.ExecuteAsync(retrieveIdsQuery);
