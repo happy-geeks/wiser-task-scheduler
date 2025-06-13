@@ -320,7 +320,7 @@ public class CleanupService(
         }
         catch (Exception exception)
         {
-            await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during cleanup of {itemLinkTablePrefix}{WiserTableNames.WiserItemLink}: {exception}", logName);
+            await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occurred during cleanup of {itemLinkTablePrefix}{WiserTableNames.WiserItemLink}: {exception}", logName);
         }
     }
 }
