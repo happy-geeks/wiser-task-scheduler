@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
+using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Core.Services;
 using WiserTaskScheduler.Modules.Queries.Models;
@@ -48,10 +49,10 @@ public class QueriesServiceTests
         // Arrange
         var serviceCollection = new ServiceCollection();
         serviceCollection.AddScoped<IDatabaseConnection, MockDatabaseConnection>();
-        serviceCollection.AddScoped<ILogger<QueriesService>, MockLogger<QueriesService>>();
+        serviceCollection.AddSingleton<ILogService, MockLogService>();
         var serviceProvider = serviceCollection.BuildServiceProvider();
 
-        var queriesService = new QueriesService(new LogService(serviceProvider, null, Options.Create(new WtsSettings())), serviceProvider.GetRequiredService<ILogger<QueriesService>>(), serviceProvider, gclSettings);
+        var queriesService = new QueriesService(serviceProvider.GetRequiredService<ILogService>(), null, serviceProvider, gclSettings);
         await queriesService.InitializeAsync(configuration, tablesToOptimize);
 
         // Act
@@ -118,10 +119,7 @@ public class QueriesServiceTests
                         {
                             TimeId = 1,
                             Order = 1,
-                            Query = """
-                                    # TestQuery1
-                                    SELECT 1 AS testValue
-                                    """
+                            Query = "QueriesService1"
                         }
                     }
                 },
@@ -131,6 +129,36 @@ public class QueriesServiceTests
                 """
                 {"Results":[{"testValue":"1"}]}
                 """);
+                yield return new TestCaseData(new ConfigurationModel()
+                    {
+                        ConnectionString = "data source=localhost;initial catalog=TestDB;user id=TestUser;password=TestPassword",
+                        ServiceName = "TestService",
+                        Queries = new []
+                        {
+                            new QueryModel()
+                            {
+                                TimeId = 1,
+                                Order = 2,
+                                Query = "QueriesService2"
+                            }
+                        }
+                    },
+                    null,
+                    Options.Create(new GclSettings()),
+                    JObject.Parse("""
+                                  {
+                                    "MyResult": {
+                                      "Results": [
+                                        {
+                                          "MyValue": "Hello, World!"
+                                        }
+                                      ]
+                                    }
+                                  }
+                                  """),
+                    """
+                    {"Results":[{"returnValue":"Hello, World!"}]}
+                    """);
             }
         }
     }

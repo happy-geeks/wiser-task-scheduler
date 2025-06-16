@@ -7,6 +7,8 @@ namespace WiserTaskScheduler.Tests.Mocks;
 
 public class MockDatabaseConnection : IDatabaseConnection
 {
+    private Dictionary<string, object> parameters = new Dictionary<string, object>();
+
     public async ValueTask DisposeAsync()
     {
         throw new NotImplementedException();
@@ -32,19 +34,31 @@ public class MockDatabaseConnection : IDatabaseConnection
         throw new NotImplementedException();
     }
 
-    public async Task<DataTable> GetAsync(string query, bool skipCache = false, bool cleanUp = true, bool useWritingConnectionIfAvailable = false)
+    public Task<DataTable> GetAsync(string query, bool skipCache = false, bool cleanUp = true, bool useWritingConnectionIfAvailable = false)
     {
         var dataTable = new DataTable();
 
-        if (query.StartsWith("# TestQuery1"))
+        switch (query)
         {
-            dataTable.Columns.Add("testValue", typeof(string));
-            var row = dataTable.NewRow();
-            row["testValue"] = 1;
-            dataTable.Rows.Add(row);
+            case "QueriesService1":
+            {
+                dataTable.Columns.Add("testValue", typeof(string));
+                var row = dataTable.NewRow();
+                row["testValue"] = 1;
+                dataTable.Rows.Add(row);
+                break;
+            }
+            case "QueriesService2":
+            {
+                dataTable.Columns.Add("returnValue", typeof(string));
+                var row = dataTable.NewRow();
+                row["returnValue"] = parameters["MyValue"];
+                dataTable.Rows.Add(row);
+                break;
+            }
         }
 
-        return dataTable;
+        return Task.FromResult(dataTable);
     }
 
     public async Task<string> GetAsJsonAsync(string query, bool formatResult = false, bool skipCache = false)
@@ -84,12 +98,12 @@ public class MockDatabaseConnection : IDatabaseConnection
 
     public void AddParameter(string key, object value)
     {
-
+        parameters.Add(key, value);
     }
 
     public void ClearParameters()
     {
-
+        parameters.Clear();
     }
 
     public string GetDatabaseNameForCaching(bool writeDatabase = false)
