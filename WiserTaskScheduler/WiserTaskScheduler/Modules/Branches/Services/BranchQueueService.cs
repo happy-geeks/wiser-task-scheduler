@@ -1535,14 +1535,17 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                     actionData.ItemEntityType = await branchDatabaseConnection.ExecuteScalarAsync<string>(query);
                                     if (String.IsNullOrWhiteSpace(actionData.ItemEntityType))
                                     {
+                                        actionData.LinkedObjectTableName = WiserTableNames.WiserItem;
                                         actionData.MessageBuilder.AppendLine($"The current row is a permission change for an item, but the `entity_name` column does not contain a value, so we have to assume that the item is located in the default `{WiserTableNames.WiserItem}` table and look for an ID mapping of that table.");
-                                        break;
+                                    }
+                                    else
+                                    {
+                                        // Get the table prefix for the specified entity type, so that we can find the correct item in production.
+                                        var linkedObjectTablePrefix = await branchEntityTypesService.GetTablePrefixForEntityAsync(actionData.ItemEntityType);
+                                        actionData.LinkedObjectTableName = $"{linkedObjectTablePrefix}{WiserTableNames.WiserItem}";
+                                        actionData.MessageBuilder.AppendLine($"The current row is a permission change for an item and it uses the entity type '{actionData.ItemEntityType}'. For this entity type, we found that is uses the table prefix '{linkedObjectTablePrefix}', so we will look for an ID mapping of the table '{actionData.LinkedObjectTableName}'.");
                                     }
 
-                                    // Get the table prefix for the specified entity type, so that we can find the correct item in production.
-                                    var linkedObjectTablePrefix = await branchEntityTypesService.GetTablePrefixForEntityAsync(actionData.ItemEntityType);
-                                    actionData.LinkedObjectTableName = $"{linkedObjectTablePrefix}{WiserTableNames.WiserItem}";
-                                    actionData.MessageBuilder.AppendLine($"The current row is a permission change for an item and it uses the entity type '{actionData.ItemEntityType}'. For this entity type, we found that is uses the table prefix '{linkedObjectTablePrefix}', so we will look for an ID mapping of the table '{actionData.LinkedObjectTableName}'.");
                                     break;
                                 case "entity_property_id":
                                     actionData.LinkedObjectTableName = WiserTableNames.WiserEntityProperty;
@@ -1615,16 +1618,18 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     var linkDestinationItemIsCreatedAndDeletedInBranch = linkDestinationItemCreatedInBranch is {AlsoDeleted: true, AlsoUndeleted: false};
 
                     // Find and/or cache the entity type of the source item.
+                    var itemData = new BranchMergeItemCacheModel();
+                    var destinationItemData = new BranchMergeItemCacheModel();
                     if (actionData.ItemIdOriginal > 0)
                     {
-                        var itemData = await GetOrAddItemDataAsync(actionData.ItemIdOriginal, sqlParameters, actionData.ItemTableName, tablePrefix, branchDatabaseConnection, itemsCache, actionData, actionData.ItemEntityType);
+                        itemData = await GetOrAddItemDataAsync(actionData.ItemIdOriginal, sqlParameters, actionData.ItemTableName, tablePrefix, branchDatabaseConnection, itemsCache, actionData, actionData.ItemEntityType);
                         actionData.ItemEntityType = itemData.EntityType;
                     }
 
                     // Find and/or cache the entity type of the destination item.
                     if (actionData.LinkDestinationItemIdOriginal > 0)
                     {
-                        var itemData = await GetOrAddItemDataAsync(actionData.LinkDestinationItemIdOriginal, sqlParameters, actionData.LinkDestinationItemTableName, tablePrefix, branchDatabaseConnection, itemsCache, actionData, actionData.LinkDestinationItemEntityType);
+                        destinationItemData = await GetOrAddItemDataAsync(actionData.LinkDestinationItemIdOriginal, sqlParameters, actionData.LinkDestinationItemTableName, tablePrefix, branchDatabaseConnection, itemsCache, actionData, actionData.LinkDestinationItemEntityType);
                         actionData.LinkDestinationItemEntityType = itemData.EntityType;
                     }
 
@@ -1682,6 +1687,11 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                         case "UPDATE_ITEM" when actionData.TableName.EndsWith(WiserTableNames.WiserItemDetail, StringComparison.OrdinalIgnoreCase):
                         {
                             actionData.ItemDetailIdMapped = targetId;
+
+                            if (itemData.IsDeleted)
+                            {
+                                // TODO: Handle the case where the item is deleted in the branch.
+                            }
 
                             // Check if the user requested this change to be synchronised.
                             if (actionData.UsedMergeSettings is not {Update: true})
