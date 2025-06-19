@@ -266,35 +266,30 @@ public class CleanupService(
     /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
     private async Task CleanupFloatingLinksAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService, ILinkTypesService linkTypesService)
     {
-        var AllLinkTypes = await linkTypesService.GetAllLinkTypeSettingsAsync();
+        var allLinkTypes = await linkTypesService.GetAllLinkTypeSettingsAsync();
 
-        foreach (var linkType in AllLinkTypes)
+        foreach (var linkType in allLinkTypes.Where(linkType => !linkType.UseItemParentId))
         {
-            if (!linkType.UseItemParentId)
-            {
-                await CleanupFloatingLinksAsync(databaseConnection, databaseHelpersService, wiserItemsService, linkTypesService, linkType);
-            }
+            await CleanupFloatingLinksAsync(databaseConnection, databaseHelpersService, wiserItemsService, linkTypesService, linkType);
         }
     }
 
     private async Task CleanupFloatingLinksAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService, ILinkTypesService linkTypesService, LinkSettingsModel linkSettings)
     {
-
         var itemLinkTablePrefix= linkTypesService.GetTablePrefixForLink(linkSettings);
-
         var sourceItemTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkSettings.SourceEntityType);
         var destinationItemTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkSettings.DestinationEntityType);
 
         var retrieveIdsQuery = $"""
-                                    SELECT link.id
-                                    FROM {itemLinkTablePrefix}{WiserTableNames.WiserItemLink} AS link
-                                    LEFT JOIN {sourceItemTablePrefix}{WiserTableNames.WiserItem} AS sourceItem ON sourceItem.id = link.item_id AND sourceItem.entity_type = ?sourceItemEntityType
-                                    LEFT JOIN {destinationItemTablePrefix}{WiserTableNames.WiserItem} AS destinationItem ON destinationItem.id = link.destination_item_id AND destinationItem.entity_type = ?destinationItemEntityType
-                                    WHERE link.type = ?linkType
-                                    AND link.destination_item_id != 0
-                                    AND (sourceItem.id IS NULL OR destinationItem.id IS NULL)
-                                    AND link.added_on < (CURDATE() - INTERVAL 1 MONTH)
-                                 """;
+                                SELECT link.id
+                                FROM {itemLinkTablePrefix}{WiserTableNames.WiserItemLink} AS link
+                                LEFT JOIN {sourceItemTablePrefix}{WiserTableNames.WiserItem} AS sourceItem ON sourceItem.id = link.item_id AND sourceItem.entity_type = ?sourceItemEntityType
+                                LEFT JOIN {destinationItemTablePrefix}{WiserTableNames.WiserItem} AS destinationItem ON destinationItem.id = link.destination_item_id AND destinationItem.entity_type = ?destinationItemEntityType
+                                WHERE link.type = ?linkType
+                                AND link.destination_item_id != 0
+                                AND (sourceItem.id IS NULL OR destinationItem.id IS NULL)
+                                AND link.added_on < (CURDATE() - INTERVAL 1 MONTH)
+                                """;
         try
         {
             databaseConnection.ClearParameters();
@@ -307,15 +302,14 @@ public class CleanupService(
             if (retrievedIds.Rows.Count != 0)
             {
                 var deleteFloatingLinksQuery = $"""
-                    DELETE FROM {itemLinkTablePrefix}{WiserTableNames.WiserItemLink}
-                    WHERE id IN ({String.Join(", ", retrievedIds.Rows.Cast<DataRow>().Select(x => x.Field<long>("id")))})
-                """;
+                                                SET @_saveHistory = TRUE;
+                                                SET @_username = 'WTS Cleanup Service';
+                                                DELETE FROM {itemLinkTablePrefix}{WiserTableNames.WiserItemLink}
+                                                WHERE id IN ({String.Join(", ", retrievedIds.Rows.Cast<DataRow>().Select(x => x.Field<long>("id")))})
+                                                """;
 
-                /*
-                TODO: uncomment this after verifying the correctness of the cleanup query.
-                var deleteResults = await databaseConnection.ExecuteAsync(retrieveIdsQuery);
+                var deleteResults = await databaseConnection.ExecuteAsync(deleteFloatingLinksQuery);
                 await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Deleted {deleteResults} floating links for link type '{linkSettings.Type}' in '{itemLinkTablePrefix}{WiserTableNames.WiserItemLink}'.", logName);
-                */
             }
         }
         catch (Exception exception)
