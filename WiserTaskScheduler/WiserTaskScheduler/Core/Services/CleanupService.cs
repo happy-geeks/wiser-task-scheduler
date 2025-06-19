@@ -26,7 +26,7 @@ public class CleanupService(
     IServiceProvider serviceProvider,
     ILogService logService,
     ILogger<CleanupService> logger
-    ) : ICleanupService, ISingletonService
+) : ICleanupService, ISingletonService
 {
     private readonly string logName = $"CleanupService ({Environment.MachineName} - {wtsSettings.Value.Name})";
 
@@ -48,8 +48,8 @@ public class CleanupService(
         await CleanupDatabaseLogsAsync(databaseConnection, databaseHelpersService);
         await CleanupDatabaseRenderTimesAsync(databaseConnection, databaseHelpersService);
         await CleanupWtsServicesAsync(databaseConnection, databaseHelpersService);
-		await CleanupTemporaryWiserFilesAsync(databaseConnection, databaseHelpersService);
-        await CleanupFloatingLinksAsync(databaseConnection, databaseHelpersService, wiserItemsService , linkTypesService);
+        await CleanupTemporaryWiserFilesAsync(databaseConnection, databaseHelpersService);
+        await CleanupFloatingLinksAsync(databaseConnection, databaseHelpersService, wiserItemsService, linkTypesService);
     }
 
     /// <summary>
@@ -276,7 +276,7 @@ public class CleanupService(
 
     private async Task CleanupFloatingLinksAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService, ILinkTypesService linkTypesService, LinkSettingsModel linkSettings)
     {
-        var itemLinkTablePrefix= linkTypesService.GetTablePrefixForLink(linkSettings);
+        var itemLinkTablePrefix = linkTypesService.GetTablePrefixForLink(linkSettings);
         var sourceItemTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkSettings.SourceEntityType);
         var destinationItemTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkSettings.DestinationEntityType);
 
