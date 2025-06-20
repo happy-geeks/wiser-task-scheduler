@@ -73,7 +73,7 @@ public class ScriptsService : IScriptsService, IActionsService, IScopedService
     /// </summary>
     /// <param name="script">The <c>&lt;Script&gt;</c> tag that initiated the action.</param>
     /// <param name="scriptText">The actual script text to execute.</param>
-    /// <param name="usingResultSet">The result set that will be added to the </param>
+    /// <param name="usingResultSet">The result set that will be added to the JavaScript engine with the name <c>WtsResultSet</c>.</param>
     /// <param name="configurationServiceName">The service name of the configuration that this action is part of. Only used for logging purposes.</param>
     /// <returns>A <see cref="JObject"/> with the JavaScript result as a <see cref="JArray"/> property called "<c>Results</c>".</returns>
     private async Task<JObject> ExecuteJavaScript(ScriptModel script, string scriptText, JArray usingResultSet, string configurationServiceName)
@@ -86,7 +86,7 @@ public class ScriptsService : IScriptsService, IActionsService, IScopedService
 
         // Expose the result set to the JavaScript engine.
         scriptService.SetValue("WtsResultSet", usingResultSet);
-        var result = scriptService.ExecuteScript<object[]>(scriptText);
+        var result = scriptService.Evaluate<object[]>(scriptText);
         return new JObject
         {
             { "Results", JArray.FromObject(result) }
