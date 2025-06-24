@@ -113,7 +113,9 @@ public class ConfigurationsService(
             configuration.DocumentStoreReadersGroup,
             configuration.DocumentStoreReader,
             configuration.SlackMessageGroup,
-            configuration.SlackMessages
+            configuration.SlackMessages,
+            configuration.ScriptsGroup,
+            configuration.Scripts
         };
 
         var allActions = new List<ActionModel>();
