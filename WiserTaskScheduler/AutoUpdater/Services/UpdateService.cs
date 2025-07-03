@@ -133,7 +133,7 @@ public class UpdateService : IUpdateService
         var path = Path.Combine(wts.PathToFolder, WtsExeFile);
         if (Path.Exists(path))
         {
-            var versionInfo = FileVersionInfo.GetVersionInfo(Path.Combine(wts.PathToFolder, WtsExeFile));
+            var versionInfo = FileVersionInfo.GetVersionInfo(path);
             version = new Version(versionInfo.FileVersion ?? String.Empty);
             updateState = CheckForUpdates(version, versionList);
         }
@@ -224,34 +224,32 @@ public class UpdateService : IUpdateService
     {
         bool serviceAlreadyStopped;
 
-        using (var serviceController = new ServiceController())
+        using var serviceController = new ServiceController();
+        serviceController.ServiceName = wts.ServiceName;
+
+        // Check if the service has been found. If the status throws an invalid operation exception the service does not exist.
+        try
         {
-            serviceController.ServiceName = wts.ServiceName;
+            serviceAlreadyStopped = serviceController.Status == ServiceControllerStatus.Stopped;
+        }
+        catch (InvalidOperationException)
+        {
+            var subject = "WTS Auto Updater - WTS not found";
+            var message = $"The service for WTS '{wts.ServiceName}' could not be found on the server and can therefore not be updated.";
 
-            // Check if the service has been found. If the status throws an invalid operation exception the service does not exist.
-            try
-            {
-                serviceAlreadyStopped = serviceController.Status == ServiceControllerStatus.Stopped;
-            }
-            catch (InvalidOperationException)
-            {
-                var subject = "WTS Auto Updater - WTS not found";
-                var message = $"The service for WTS '{wts.ServiceName}' could not be found on the server and can therefore not be updated.";
+            InformPeople(wts, subject, message);
 
-                InformPeople(wts, subject, message);
+            logger.LogWarning($"No service found for '{wts.ServiceName}'.");
+            return;
+        }
 
-                logger.LogWarning($"No service found for '{wts.ServiceName}'.");
-                return;
-            }
+        if (!serviceAlreadyStopped)
+        {
+            serviceController.Stop();
+            serviceController.WaitForStatus(ServiceControllerStatus.Stopped);
 
-            if (!serviceAlreadyStopped)
-            {
-                serviceController.Stop();
-                serviceController.WaitForStatus(ServiceControllerStatus.Stopped);
-
-                // Wait for 1 minute after the service has been stopped to increase the chance all resources have been released.
-                Thread.Sleep(UpdateDelayAfterServiceShutdown);
-            }
+            // Wait for 1 minute after the service has been stopped to increase the chance all resources have been released.
+            Thread.Sleep(UpdateDelayAfterServiceShutdown);
         }
 
         try
@@ -259,11 +257,15 @@ public class UpdateService : IUpdateService
             BackupWts(wts);
             PlaceWts(wts, Path.Combine(WtsTempPath, "update", "update.zip"));
 
+            if (!File.Exists(Path.Combine(wts.PathToFolder, WtsExeFile)))
+            {
+                RevertUpdate(wts, serviceController, currentVersion, versionToUpdateTo, !serviceAlreadyStopped, new InvalidOperationException($"The WTS executable '{WtsExeFile}' was not found in the folder '{wts.PathToFolder}'."));
+                return;
+            }
+
             // If the service was not running when the update started it does not need to restart.
             if (!serviceAlreadyStopped)
             {
-                using var serviceController = new ServiceController();
-                serviceController.ServiceName = wts.ServiceName;
                 try
                 {
                     serviceController.Start();
@@ -271,8 +273,7 @@ public class UpdateService : IUpdateService
                 }
                 catch (InvalidOperationException updateException)
                 {
-                    RevertUpdate(wts, serviceController, currentVersion, versionToUpdateTo, updateException);
-
+                    RevertUpdate(wts, serviceController, currentVersion, versionToUpdateTo, true, updateException);
                     return;
                 }
             }
@@ -359,19 +360,23 @@ public class UpdateService : IUpdateService
     /// Revert the WTS back to the previous version from the backup made prior to the update.
     /// </summary>
     /// <param name="wts">The WTS information to update.</param>
-    /// <param name="serviceController"></param>
-    /// <param name="currentVersion"></param>
-    /// <param name="versionToUpdateTo"></param>
-    /// <param name="updateException"></param>
-    private void RevertUpdate(WtsModel wts, ServiceController serviceController, Version currentVersion, Version versionToUpdateTo, InvalidOperationException updateException)
+    /// <param name="serviceController">The <see cref="ServiceController"/> of the WTS service.</param>
+    /// <param name="currentVersion">The version the WTS is currently on.</param>
+    /// <param name="versionToUpdateTo">The version the WTS was being updated to.</param>
+    /// <param name="startWts">If the WTS should be started after the revert.</param>
+    /// <param name="updateException">The reason the WTS could not be updated.</param>
+    private void RevertUpdate(WtsModel wts, ServiceController serviceController, Version currentVersion, Version versionToUpdateTo, bool startWts, InvalidOperationException updateException)
     {
         PlaceWts(wts, Path.Combine(WtsTempPath, "backups", wts.ServiceName, $"{DateTime.Now:yyyyMMdd}.zip"));
 
         try
         {
-            // Try to start the previous installed version again.
-            serviceController.Start();
-            serviceController.WaitForStatus(ServiceControllerStatus.Running);
+            if (startWts)
+            {
+                // Try to start the previous installed version again.
+                serviceController.Start();
+                serviceController.WaitForStatus(ServiceControllerStatus.Running);
+            }
 
             var subject = "WTS Auto Updater - Updating failed!";
             var message = $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}, successfully restored to version {currentVersion}.<br/><br/>Error when updating:<br/>{updateException}";

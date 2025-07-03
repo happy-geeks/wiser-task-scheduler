@@ -22,7 +22,7 @@ var host = Host.CreateDefaultBuilder(args)
 
         var secretsBasePath = hostingContext.Configuration.GetSection("Updater").GetValue<string>("SecretsBaseDirectory");
 
-        config.AddJsonFile($"{secretsBasePath}updater-appsettings-secrets.json", false, false)
+        config.AddJsonFile(Path.Combine(secretsBasePath, "updater-appsettings-secrets.json"), false, false)
             .AddJsonFile($"appsettings.{hostingContext.HostingEnvironment.EnvironmentName}.json", true, true);
     })
     .ConfigureServices((hostContext, services) =>
@@ -45,7 +45,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddHttpContextAccessor();
         services.AddGclServices(hostContext.Configuration, false, false, false);
 
-        // If there is a bot token provided for Slack add the service. 
+        // If there is a bot token provided for Slack add the service.
         var slackBotToken = slackSettings.GetValue<string>("BotToken");
         if (!String.IsNullOrWhiteSpace(slackBotToken))
         {
