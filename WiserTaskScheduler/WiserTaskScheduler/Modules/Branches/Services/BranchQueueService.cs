@@ -2424,12 +2424,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                             actionData.ObjectIdMapped = await GenerateNewIdAsync(actionData.TableName, branchDatabaseConnection, productionDatabaseConnection, actionData);
                             sqlParameters["newId"] = actionData.ObjectIdMapped;
-
-                            // Remove temporary values from the parameters from any previous history rows. Otherwise they will cause conflicts with the current row.
-                            foreach (var temporaryParameter in sqlParameters.Where(x => x.Key.StartsWith("temporaryValue")))
-                            {
-                                sqlParameters.Remove(temporaryParameter.Key);
-                            }
+                            sqlParameters["oldId"] = actionData.ObjectIdOriginal;
 
                             // Get the unique indexes of the current table.
                             actionData.MessageBuilder.AppendLine($"Checking if the current table '{actionData.TableName}' has a unique index, to prevent duplicate key exceptions...");
@@ -2456,82 +2451,58 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             {
                                 actionData.MessageBuilder.AppendLine($"--> The table has {uniqueIndexes.Count} unique index(es) with a total of {uniqueIndexes.Sum(index => index.Columns.Count)} columns, generating unique temporary values for each column...");
 
-                                var temporaryValueGenerators = new StringBuilder();
-                                var columnsToInsert = new List<string> { "`id`" };
-                                var valuesToInsert = new List<string> { "?newId" };
-                                var index = 0;
+                                // TODO: Get current/latest values of unique index of entry in branch
+                                query = $"""
+                                        SELECT {String.Join(", ", uniqueIndexes.SelectMany(index => $"`{index.Columns.Select(column => column.Name)}`"))}
+                                        FROM `{actionData.TableName}`
+                                        WHERE id = ?oldId
+                                        """;
 
-                                foreach (var columnName in uniqueIndexes.SelectMany(i => i.Columns.Select(c => c.Name)))
+                                AddParametersToCommand(sqlParameters, branchDatabaseConnection);
+                                var uniqueIndexValues = await branchDatabaseConnection.GetAsync(query);
+
+                                if (uniqueIndexValues == null || uniqueIndexValues.Rows.Count == 0)
                                 {
-                                    var column = tableDefinition.Columns.Single(c => String.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase));
-
-                                    // We don't need to generate a temporary value for the ID column, since we already have that one.
-                                    // We also don't need to generate one for auto increment columns, since the database will generate that automatically.
-                                    if (column.AutoIncrement || String.Equals(columnName, "id", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        index++;
-                                        continue;
-                                    }
-
-                                    // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
-                                    switch (column.Type)
-                                    {
-                                        case MySqlDbType.Decimal:
-                                        case MySqlDbType.Float:
-                                        case MySqlDbType.Double:
-                                        case MySqlDbType.Byte:
-                                        case MySqlDbType.Int16:
-                                        case MySqlDbType.Int24:
-                                        case MySqlDbType.Int32:
-                                        case MySqlDbType.Int64:
-                                        case MySqlDbType.UByte:
-                                        case MySqlDbType.UInt16:
-                                        case MySqlDbType.UInt24:
-                                        case MySqlDbType.UInt32:
-                                        case MySqlDbType.UInt64:
-                                            actionData.MessageBuilder.AppendLine($"--> The column '{columnName}' is a number, so we get the current highest number for that column, add 1 to it and use that as the temporary value for the new row.");
-                                            temporaryValueGenerators.AppendLine($"SET @temporaryValue{index} = (SELECT IFNULL(MAX(`{columnName.ToMySqlSafeValue((false))}`), 0) + 1 FROM `{actionData.TableName}`);");
-                                            columnsToInsert.Add($"`{columnName.ToMySqlSafeValue(false)}`");
-                                            valuesToInsert.Add($"@temporaryValue{index}");
-                                            objectCreatedInBranch.ColumnsWithTemporaryValues.Add(column);
-                                            break;
-                                        case MySqlDbType.Timestamp:
-                                        case MySqlDbType.Date:
-                                        case MySqlDbType.Time:
-                                        case MySqlDbType.DateTime:
-                                            actionData.MessageBuilder.AppendLine($"--> The column '{columnName}' is a date and/or time, so we use the highest possible date and/or time for the temporary value of the new row.");
-                                            columnsToInsert.Add($"`{columnName.ToMySqlSafeValue(false)}`");
-                                            sqlParameters[$"temporaryValue{index}"] = DateTime.MaxValue;
-                                            valuesToInsert.Add($"?temporaryValue{index}");
-                                            objectCreatedInBranch.ColumnsWithTemporaryValues.Add(column);
-                                            break;
-                                        case MySqlDbType.VarChar:
-                                        case MySqlDbType.String:
-                                        case MySqlDbType.TinyText:
-                                        case MySqlDbType.MediumText:
-                                        case MySqlDbType.Text:
-                                        case MySqlDbType.LongText:
-                                        case MySqlDbType.Guid:
-                                            actionData.MessageBuilder.AppendLine($"--> The column '{columnName}' is a text column, so we generate a new GUID for the temporary value of the new row.");
-                                            columnsToInsert.Add($"`{columnName.ToMySqlSafeValue(false)}`");
-                                            sqlParameters[$"temporaryValue{index}"] = column.Type == MySqlDbType.Guid ? Guid.NewGuid() : Guid.NewGuid().ToString("N");
-                                            valuesToInsert.Add($"?temporaryValue{index}");
-                                            objectCreatedInBranch.ColumnsWithTemporaryValues.Add(column);
-                                            break;
-                                        default:
-                                            actionData.MessageBuilder.AppendLine($"--> The column '{columnName}' is of type '{column.Type.ToString()}' and we don't know how to generate a random unique value for this type, so we leave it empty.");
-                                            break;
-                                    }
-
-                                    index++;
+                                    // This should never be able to happen. If it does, we will stop the merge.
+                                    actionData.MessageBuilder.AppendLine("--> The unique index values could not be retrieved from the branch database, so we cannot continue with the merge.");
+                                    throw new InvalidOperationException($"The unique index values for the table '{actionData.TableName}' for row '{actionData.ObjectIdOriginal}' could not be retrieved from the branch database, so we cannot continue with the merge. This is a critical error that should not happen.");
                                 }
 
+                                foreach (var column in uniqueIndexes.SelectMany(index => index.Columns.Select(column => column.Name)))
+                                {
+                                    // TODO: Apply mapping to the values depending on column.
+                                    sqlParameters[column.ToMySqlSafeValue(false)] = uniqueIndexValues.Rows[0][column];
+                                }
+
+                                // TODO: Find match of exact unique index in production
                                 query = $"""
-                                         {queryPrefix}
-                                         {temporaryValueGenerators}
-                                         INSERT INTO `{actionData.TableName}` ({String.Join(", ", columnsToInsert)}) 
-                                         VALUES ({String.Join(", ", valuesToInsert)})
+                                         SELECT id
+                                         FROM `{actionData.TableName}`
+                                         WHERE {String.Join(" AND ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"`{column.Name}` = ?{column.Name.ToMySqlSafeValue(false)}")))}
                                          """;
+
+                                AddParametersToCommand(sqlParameters, productionDatabaseConnection);
+                                var productionIdResult = await productionDatabaseConnection.ExecuteScalarAsync(query, skipCache: true);
+
+                                // TODO: If yes, set ID for mapped value
+                                if (ulong.TryParse(productionIdResult?.ToString(), out var productionId))
+                                {
+                                    actionData.ObjectIdMapped = productionId;
+                                }
+                                // TODO: If not, insert with the values and set ID for mapped value
+                                else
+                                {
+                                    query = $"""
+                                             {queryPrefix}
+                                             INSERT INTO `{actionData.TableName}` (id, {String.Join(", ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"`{column.Name}`")))}) 
+                                             VALUES (?newId, {String.Join(", ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"?{column.Name.ToMySqlSafeValue(false)}")))})
+                                             """;
+
+                                    await productionDatabaseConnection.ExecuteAsync(query);
+                                }
+
+                                // TODO: Set object created with unique index
+                                objectCreatedInBranch.UniqueIndexValuesAlreadyUpToDate = true;
                             }
 
                             AddParametersToCommand(sqlParameters, productionDatabaseConnection);
@@ -2582,15 +2553,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 continue;
                             }
 
-                            // Check if this object was created in the branch and if so, remove the temporary value from the list.
-                            var columnWithTemporaryValue = objectCreatedInBranch?.ColumnsWithTemporaryValues?.SingleOrDefault(c => String.Equals(c.Name, actionData.Field, StringComparison.OrdinalIgnoreCase));
-                            if (columnWithTemporaryValue != null)
-                            {
-                                // When we updated a column with a temporary value, we need to remove that column from the list.
-                                // At the end of the merge, we will remove the temporary values, that are left over, from the production database.
-                                objectCreatedInBranch.ColumnsWithTemporaryValues.Remove(columnWithTemporaryValue);
-                                actionData.MessageBuilder.AppendLine("We found that the current object was created in the branch and that we added a temporary value for the current column. Since we are updating that column now with a new value, we need to remove the temporary value from the list.");
-                            }
+                            // TODO: Check if entry was added with unique indexes and check if column is part of unique index to skip (already set).
 
                             sqlParameters["id"] = actionData.ObjectIdMapped;
                             sqlParameters["newValue"] = actionData.NewValue;
@@ -2672,8 +2635,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     branchBatchLoggerService.LogMergeAction(actionData);
                 }
             }
-
-            await CleanupAfterMergeAsync(branchQueue, configurationServiceName, objectsCreatedInBranch, productionDatabaseConnection, queryPrefix, errors);
 
             // We have finished processing all items in the history table, so update the progress to 100%.
             await UpdateProgressInQueue(originalDatabaseConnection, queueId, totalItemsInHistory, true);
@@ -2759,102 +2720,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
         result["Success"] = errors.Count == 0;
         return result;
-    }
-
-    /// <summary>
-    /// Do any cleanup that might be needed after merging a branch.
-    /// Like removing temporary values from the production database that we added to prevent duplicate key errors from unique indexes on tables.
-    /// </summary>
-    /// <param name="branchQueue">Information about the WTS configuration for handling branch queues, for logging.</param>
-    /// <param name="configurationServiceName">The service name as it's specified in the XML configuration.</param>
-    /// <param name="objectsCreatedInBranch">A <see cref="List{T}"/> of <see cref="objectsCreatedInBranch"/> that contain the items that were created by the merge with temporary values.</param>
-    /// <param name="productionDatabaseConnection">The <see cref="IDatabaseConnection" /> to the production database.</param>
-    /// <param name="queryPrefix">The prefix for all queries, that contains the username and things for wiser_history.</param>
-    /// <param name="errors">The list of errors that will be returned to the WTS.</param>
-    private async Task CleanupAfterMergeAsync(BranchQueueModel branchQueue, string configurationServiceName, List<ObjectCreatedInBranchModel> objectsCreatedInBranch, IDatabaseConnection productionDatabaseConnection, string queryPrefix, JArray errors)
-    {
-        // Check if we have added any new objects with temporary values, without having replaced those temporary values with the actual values.
-        // If that is the case, we need to change those temporary values to the default values for those columns.
-        // We can do this safely now, because we have already merged all the changes to the production database, so these rows should be unique now without the temporary values.
-        foreach (var objectCreatedInBranch in objectsCreatedInBranch.Where(o => o.ColumnsWithTemporaryValues.Count > 0))
-        {
-            try
-            {
-                var updateClause = new List<string>();
-                foreach (var column in objectCreatedInBranch.ColumnsWithTemporaryValues)
-                {
-                    if (!column.NotNull || column.DefaultValue != null)
-                    {
-                        // If the column is nullable or has a default value, we can just set it to NULL, which the database will turn into the default value when applicable.
-                        updateClause.Add($"`{column.Name.ToMySqlSafeValue(false)}` = NULL");
-                        continue;
-                    }
-
-                    // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
-                    switch (column.Type)
-                    {
-                        case MySqlDbType.Decimal:
-                        case MySqlDbType.Float:
-                        case MySqlDbType.Double:
-                        case MySqlDbType.Byte:
-                        case MySqlDbType.Int16:
-                        case MySqlDbType.Int24:
-                        case MySqlDbType.Int32:
-                        case MySqlDbType.Int64:
-                        case MySqlDbType.UByte:
-                        case MySqlDbType.UInt16:
-                        case MySqlDbType.UInt24:
-                        case MySqlDbType.UInt32:
-                        case MySqlDbType.UInt64:
-                            // For numbers, set the column value to 0.
-                            updateClause.Add($"`{column.Name.ToMySqlSafeValue(false)}` = 0");
-                            break;
-                        case MySqlDbType.Timestamp:
-                        case MySqlDbType.Date:
-                        case MySqlDbType.Time:
-                        case MySqlDbType.DateTime:
-                            // For dates and times, set the column value to the current date and/or time.
-                            updateClause.Add($"`{column.Name.ToMySqlSafeValue(false)}` = NOW()");
-                            break;
-                        case MySqlDbType.VarChar:
-                        case MySqlDbType.String:
-                        case MySqlDbType.TinyText:
-                        case MySqlDbType.MediumText:
-                        case MySqlDbType.Text:
-                        case MySqlDbType.LongText:
-                        case MySqlDbType.Guid:
-                            // For texts, set the column value to an empty string.
-                            updateClause.Add($"`{column.Name.ToMySqlSafeValue(false)}` = ''");
-                            break;
-                        default:
-                            // We don't set temporary values for other column types, so we don't need to do anything.
-                            continue;
-                    }
-                }
-
-                if (updateClause.Count <= 0)
-                {
-                    continue;
-                }
-
-                productionDatabaseConnection.AddParameter("id", objectCreatedInBranch.ObjectIdMapped);
-
-                var query = $"""
-                             {queryPrefix}
-                             UPDATE `{objectCreatedInBranch.TableName}` 
-                             SET {String.Join(", ", updateClause)}
-                             WHERE id = ?id
-                             """;
-                await productionDatabaseConnection.ExecuteAsync(query);
-            }
-            catch (Exception exception)
-            {
-                var exceptionMessage = GetExceptionMessage(exception);
-
-                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"An error occurred while trying to delete a temporary value from the table '{objectCreatedInBranch.TableName}': {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                errors.Add($"Er is iets fout gegaan tijdens het opruimen van tijdelijke waardes op de tabel '{objectCreatedInBranch.TableName}'. De fout was: {exceptionMessage}");
-            }
-        }
     }
 
     /// <summary>
