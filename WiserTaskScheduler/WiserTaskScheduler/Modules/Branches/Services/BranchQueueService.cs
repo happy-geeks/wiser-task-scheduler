@@ -2432,8 +2432,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                                   ?? new WiserTableDefinitionModel
                                                   {
                                                       Name = actionData.TableName,
-                                                      Indexes = await productionDatabaseHelpersService.GetIndexesAsync(actionData.TableName),
-                                                      Columns = await productionDatabaseHelpersService.GetColumnsAsync(actionData.TableName)
+                                                      Indexes = await productionDatabaseHelpersService.GetIndexesAsync(actionData.TableName)
                                                   };
 
                             var uniqueIndexes = tableDefinition.Indexes.Where(x => x.Type == IndexTypes.Unique && !String.Equals(x.Name, "PRIMARY", StringComparison.OrdinalIgnoreCase)).ToList();
@@ -2452,8 +2451,9 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.MessageBuilder.AppendLine($"--> The table has {uniqueIndexes.Count} unique index(es) with a total of {uniqueIndexes.Sum(index => index.Columns.Count)} columns, generating unique temporary values for each column...");
 
                                 // TODO: Get current/latest values of unique index of entry in branch
+
                                 query = $"""
-                                        SELECT {String.Join(", ", uniqueIndexes.SelectMany(index => $"`{index.Columns.Select(column => column.Name)}`"))}
+                                        SELECT {String.Join(", ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"`{column.Name}`")))}
                                         FROM `{actionData.TableName}`
                                         WHERE id = ?oldId
                                         """;
@@ -2471,7 +2471,35 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 foreach (var column in uniqueIndexes.SelectMany(index => index.Columns.Select(column => column.Name)))
                                 {
                                     // TODO: Apply mapping to the values depending on column.
-                                    sqlParameters[column.ToMySqlSafeValue(false)] = uniqueIndexValues.Rows[0][column];
+                                    var columnValue = uniqueIndexValues.Rows[0][column];
+                                    switch (actionData.TableName, column)
+                                    {
+                                        case (WiserTableNames.WiserEntity, "module_id"):
+                                        case (WiserTableNames.WiserPermission, "module_id"):
+                                            columnValue = GetMappedId(WiserTableNames.WiserModule, idMapping, Convert.ToUInt64(columnValue), actionData, column);
+                                            break;
+                                        case (WiserTableNames.WiserPermission, "role_id"):
+                                            columnValue = GetMappedId(WiserTableNames.WiserRoles, idMapping, Convert.ToUInt64(columnValue), actionData, column);
+                                            break;
+                                        case (WiserTableNames.WiserPermission, "item_id"):
+                                            query = $"SELECT entity_name FROM {WiserTableNames.WiserPermission} WHERE id = ?oldId";
+                                            var entityNameOfPermission = await branchDatabaseConnection.ExecuteScalarAsync<string>(query);
+                                            var entitySettingsOfPermission = await wiserItemsService.GetEntityTypeSettingsAsync(entityNameOfPermission);
+                                            var permissionEntityTablePrefix = wiserItemsService.GetTablePrefixForEntity(entitySettingsOfPermission);
+                                            columnValue = GetMappedId($"{permissionEntityTablePrefix}{WiserTableNames.WiserItem}", idMapping, Convert.ToUInt64(columnValue), actionData, column);
+                                            break;
+                                        case (WiserTableNames.WiserPermission, "entity_property_id"):
+                                            columnValue = GetMappedId(WiserTableNames.WiserEntityProperty, idMapping, Convert.ToUInt64(columnValue), actionData, column);
+                                            break;
+                                        case (WiserTableNames.WiserPermission, "query_id"):
+                                            columnValue = GetMappedId(WiserTableNames.WiserQuery, idMapping, Convert.ToUInt64(columnValue), actionData, column);
+                                            break;
+                                        case (WiserTableNames.WiserPermission, "data_selector_id"):
+                                            columnValue = GetMappedId(WiserTableNames.WiserDataSelector, idMapping, Convert.ToUInt64(columnValue), actionData, column);
+                                            break;
+                                    }
+
+                                    sqlParameters[column.ToMySqlSafeValue(false)] = columnValue;
                                 }
 
                                 // TODO: Find match of exact unique index in production
@@ -2485,7 +2513,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 var productionIdResult = await productionDatabaseConnection.ExecuteScalarAsync(query, skipCache: true);
 
                                 // TODO: If yes, set ID for mapped value
-                                if (ulong.TryParse(productionIdResult?.ToString(), out var productionId))
+                                if (UInt64.TryParse(productionIdResult?.ToString(), out var productionId))
                                 {
                                     actionData.ObjectIdMapped = productionId;
                                 }
@@ -2554,6 +2582,28 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             }
 
                             // TODO: Check if entry was added with unique indexes and check if column is part of unique index to skip (already set).
+                            if (objectCreatedInBranch.UniqueIndexValuesAlreadyUpToDate)
+                            {
+                                var tableDefinition = WiserTableDefinitions.TablesToUpdate.SingleOrDefault(table => String.Equals(table.Name, actionData.TableName, StringComparison.OrdinalIgnoreCase))
+                                                      ?? new WiserTableDefinitionModel
+                                                      {
+                                                          Name = actionData.TableName,
+                                                          Indexes = await productionDatabaseHelpersService.GetIndexesAsync(actionData.TableName)
+                                                      };
+
+                                var uniqueIndexes = tableDefinition.Indexes.Where(x => x.Type == IndexTypes.Unique && !String.Equals(x.Name, "PRIMARY", StringComparison.OrdinalIgnoreCase)).ToList();
+
+                                if (uniqueIndexes.Count > 0 && uniqueIndexes.Any(x => x.Columns.Any(column => column.Name.Equals(actionData.Field, StringComparison.InvariantCultureIgnoreCase))))
+                                {
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
+
+                                    actionData.Status = ObjectActionMergeStatuses.Merged;
+                                    actionData.MessageBuilder.AppendLine($"The current row was skipped, because the unique index values for the current object were already up to date in production. So we don't need to update the field '{actionData.Field}' again.");
+                                    branchBatchLoggerService.LogMergeAction(actionData);
+                                    continue;
+                                }
+                            }
 
                             sqlParameters["id"] = actionData.ObjectIdMapped;
                             sqlParameters["newValue"] = actionData.NewValue;
