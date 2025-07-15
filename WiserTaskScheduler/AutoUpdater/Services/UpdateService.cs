@@ -245,11 +245,24 @@ public class UpdateService : IUpdateService
 
         if (!serviceAlreadyStopped)
         {
-            serviceController.Stop();
-            serviceController.WaitForStatus(ServiceControllerStatus.Stopped);
+            try
+            {
+                serviceController.Stop();
+                serviceController.WaitForStatus(ServiceControllerStatus.Stopped);
 
-            // Wait for 1 minute after the service has been stopped to increase the chance all resources have been released.
-            Thread.Sleep(UpdateDelayAfterServiceShutdown);
+                // Wait for 1 minute after the service has been stopped to increase the chance all resources have been released.
+                Thread.Sleep(UpdateDelayAfterServiceShutdown);
+            }
+            catch (InvalidOperationException stopException)
+            {
+                var subject = "WTS Auto Updater - Updating failed!";
+                var message = $"Failed to stop WTS '{wts.ServiceName}' before updating to version {versionToUpdateTo}. It is possible the WTS will still perform the stop command, please check if the WTS is still running.{Environment.NewLine}{Environment.NewLine}Error when stopping service:{Environment.NewLine}{stopException}";
+
+                logger.LogError(stopException, message);
+                InformPeople(wts, subject, message);
+
+                return;
+            }
         }
 
         try
@@ -291,7 +304,7 @@ public class UpdateService : IUpdateService
         catch (Exception exception)
         {
             var subject = "WTS Auto Updater - Updating failed!";
-            var message = $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}.{Environment.NewLine}{Environment.NewLine} Error when updating:<br/>{exception}";
+            var message = $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}.{Environment.NewLine}{Environment.NewLine} Error when updating:{Environment.NewLine}{exception}";
 
             logger.LogError(exception, $"Exception occured while updating WTS '{wts.ServiceName}'.");
 
@@ -379,7 +392,7 @@ public class UpdateService : IUpdateService
             }
 
             var subject = "WTS Auto Updater - Updating failed!";
-            var message = $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}, successfully restored to version {currentVersion}.<br/><br/>Error when updating:<br/>{updateException}";
+            var message = $"Failed to update WTS '{wts.ServiceName}' to version {versionToUpdateTo}, successfully restored to version {currentVersion}.{Environment.NewLine}{Environment.NewLine}Error when updating:{Environment.NewLine}{updateException}";
 
             logger.LogError(message);
             InformPeople(wts, subject, message);
