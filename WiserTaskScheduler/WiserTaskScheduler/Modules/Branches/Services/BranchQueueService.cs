@@ -2445,6 +2445,9 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                          INSERT INTO `{actionData.TableName}` (id) 
                                          VALUES (?newId)
                                          """;
+
+                                AddParametersToCommand(sqlParameters, productionDatabaseConnection);
+                                await productionDatabaseConnection.ExecuteAsync(query);
                             }
                             else
                             {
@@ -2526,15 +2529,13 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                              VALUES (?newId, {String.Join(", ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"?{column.Name.ToMySqlSafeValue(false)}")))})
                                              """;
 
+                                    AddParametersToCommand(sqlParameters, productionDatabaseConnection);
                                     await productionDatabaseConnection.ExecuteAsync(query);
                                 }
 
                                 // TODO: Set object created with unique index
                                 objectCreatedInBranch.UniqueIndexValuesAlreadyUpToDate = true;
                             }
-
-                            AddParametersToCommand(sqlParameters, productionDatabaseConnection);
-                            await productionDatabaseConnection.ExecuteAsync(query);
 
                             // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
                             await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, actionData.TableName, actionData.ObjectIdOriginal, actionData.ObjectIdMapped, branchDatabaseConnection, productionDatabaseConnection, actionData);
@@ -2582,7 +2583,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             }
 
                             // TODO: Check if entry was added with unique indexes and check if column is part of unique index to skip (already set).
-                            if (objectCreatedInBranch.UniqueIndexValuesAlreadyUpToDate)
+                            if (objectCreatedInBranch is {UniqueIndexValuesAlreadyUpToDate: true})
                             {
                                 var tableDefinition = WiserTableDefinitions.TablesToUpdate.SingleOrDefault(table => String.Equals(table.Name, actionData.TableName, StringComparison.OrdinalIgnoreCase))
                                                       ?? new WiserTableDefinitionModel
@@ -2595,6 +2596,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                                 if (uniqueIndexes.Count > 0 && uniqueIndexes.Any(x => x.Columns.Any(column => column.Name.Equals(actionData.Field, StringComparison.InvariantCultureIgnoreCase))))
                                 {
+                                    successfulChanges++;
+                                    historyItemsSynchronised.Add(actionData.HistoryId);
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
 
