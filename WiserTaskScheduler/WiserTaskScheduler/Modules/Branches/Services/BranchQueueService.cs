@@ -2453,8 +2453,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             {
                                 actionData.MessageBuilder.AppendLine($"--> The table has {uniqueIndexes.Count} unique index(es) with a total of {uniqueIndexes.Sum(index => index.Columns.Count)} columns, generating unique temporary values for each column...");
 
-                                // TODO: Get current/latest values of unique index of entry in branch
-
                                 query = $"""
                                         SELECT {String.Join(", ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"`{column.Name}`")))}
                                         FROM `{actionData.TableName}`
@@ -2473,7 +2471,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                                 foreach (var column in uniqueIndexes.SelectMany(index => index.Columns.Select(column => column.Name)))
                                 {
-                                    // TODO: Apply mapping to the values depending on column.
+                                    // Apply mapping to the values depending on the table and column to ensure the correct information is used.
                                     var columnValue = uniqueIndexValues.Rows[0][column];
                                     switch (actionData.TableName, column)
                                     {
@@ -2505,7 +2503,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                     sqlParameters[column.ToMySqlSafeValue(false)] = columnValue;
                                 }
 
-                                // TODO: Find match of exact unique index in production
+                                // Find match of exact unique index in production
                                 query = $"""
                                          SELECT id
                                          FROM `{actionData.TableName}`
@@ -2515,12 +2513,11 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 AddParametersToCommand(sqlParameters, productionDatabaseConnection);
                                 var productionIdResult = await productionDatabaseConnection.ExecuteScalarAsync(query, skipCache: true);
 
-                                // TODO: If yes, set ID for mapped value
+                                // If a match has been found map it, otherwise we will insert a new row with all values of the unique index to prevent conflicts.
                                 if (UInt64.TryParse(productionIdResult?.ToString(), out var productionId))
                                 {
                                     actionData.ObjectIdMapped = productionId;
                                 }
-                                // TODO: If not, insert with the values and set ID for mapped value
                                 else
                                 {
                                     query = $"""
@@ -2533,7 +2530,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                     await productionDatabaseConnection.ExecuteAsync(query);
                                 }
 
-                                // TODO: Set object created with unique index
                                 objectCreatedInBranch.UniqueIndexValuesAlreadyUpToDate = true;
                             }
 
@@ -2582,7 +2578,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 continue;
                             }
 
-                            // TODO: Check if entry was added with unique indexes and check if column is part of unique index to skip (already set).
+                            // If the object was already created in production, we can skip the update if the unique index values are already up to date. Otherwise they will be processed as normal.
                             if (objectCreatedInBranch is {UniqueIndexValuesAlreadyUpToDate: true})
                             {
                                 var tableDefinition = WiserTableDefinitions.TablesToUpdate.SingleOrDefault(table => String.Equals(table.Name, actionData.TableName, StringComparison.OrdinalIgnoreCase))
