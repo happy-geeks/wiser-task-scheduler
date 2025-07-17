@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Exceptions;
 using GeeksCoreLibrary.Core.Extensions;
+using GeeksCoreLibrary.Core.Helpers;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Branches.Enumerations;
@@ -2426,7 +2427,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             sqlParameters["newId"] = actionData.ObjectIdMapped;
                             sqlParameters["oldId"] = actionData.ObjectIdOriginal;
 
-
                             var uniqueIndexes = await GetUniqueIndexesAsync(actionData, productionDatabaseHelpersService);
                             if (uniqueIndexes.Count == 0)
                             {
@@ -2445,7 +2445,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 actionData.MessageBuilder.AppendLine($"--> The table has {uniqueIndexes.Count} unique index(es) with a total of {uniqueIndexes.Sum(index => index.Columns.Count)} columns, generating unique temporary values for each column...");
 
                                 query = $"""
-                                        SELECT {String.Join(", ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"`{column.Name}`")))}
+                                        SELECT {String.Join(", ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"`{column.Name}`")).Distinct())}
                                         FROM `{actionData.TableName}`
                                         WHERE id = ?oldId
                                         """;
@@ -2460,45 +2460,24 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                     throw new InvalidOperationException($"The unique index values for the table '{actionData.TableName}' for row '{actionData.ObjectIdOriginal}' could not be retrieved from the branch database, so we cannot continue with the merge. This is a critical error that should not happen.");
                                 }
 
-                                foreach (var column in uniqueIndexes.SelectMany(index => index.Columns.Select(column => column.Name)))
+                                foreach (var column in uniqueIndexes.SelectMany(index => index.Columns.Select(column => column.Name)).Distinct())
                                 {
                                     // Apply mapping to the values depending on the table and column to ensure the correct information is used.
-                                    var columnValue = uniqueIndexValues.Rows[0][column];
-                                    switch (actionData.TableName, column)
-                                    {
-                                        case (WiserTableNames.WiserEntity, "module_id"):
-                                        case (WiserTableNames.WiserPermission, "module_id"):
-                                            columnValue = GetMappedId(WiserTableNames.WiserModule, idMapping, Convert.ToUInt64(columnValue), actionData, column);
-                                            break;
-                                        case (WiserTableNames.WiserPermission, "role_id"):
-                                            columnValue = GetMappedId(WiserTableNames.WiserRoles, idMapping, Convert.ToUInt64(columnValue), actionData, column);
-                                            break;
-                                        case (WiserTableNames.WiserPermission, "item_id"):
-                                            query = $"SELECT entity_name FROM {WiserTableNames.WiserPermission} WHERE id = ?oldId";
-                                            var entityNameOfPermission = await branchDatabaseConnection.ExecuteScalarAsync<string>(query);
-                                            var entitySettingsOfPermission = await wiserItemsService.GetEntityTypeSettingsAsync(entityNameOfPermission);
-                                            var permissionEntityTablePrefix = wiserItemsService.GetTablePrefixForEntity(entitySettingsOfPermission);
-                                            columnValue = GetMappedId($"{permissionEntityTablePrefix}{WiserTableNames.WiserItem}", idMapping, Convert.ToUInt64(columnValue), actionData, column);
-                                            break;
-                                        case (WiserTableNames.WiserPermission, "entity_property_id"):
-                                            columnValue = GetMappedId(WiserTableNames.WiserEntityProperty, idMapping, Convert.ToUInt64(columnValue), actionData, column);
-                                            break;
-                                        case (WiserTableNames.WiserPermission, "query_id"):
-                                            columnValue = GetMappedId(WiserTableNames.WiserQuery, idMapping, Convert.ToUInt64(columnValue), actionData, column);
-                                            break;
-                                        case (WiserTableNames.WiserPermission, "data_selector_id"):
-                                            columnValue = GetMappedId(WiserTableNames.WiserDataSelector, idMapping, Convert.ToUInt64(columnValue), actionData, column);
-                                            break;
-                                    }
-
-                                    sqlParameters[column.ToMySqlSafeValue(false)] = columnValue;
+                                    var value = uniqueIndexValues.Rows[0][column];
+                                    var columnValue = await GetMappedIdBasedOnTableAndColumnAsync(value, actionData.TableName, column, idMapping, actionData, branchDatabaseConnection, wiserItemsService, allEntityTypeSettings);
+                                    sqlParameters[DatabaseHelpers.CreateValidParameterName(column)] = columnValue;
                                 }
+
+                                // Reset values to remove incomplete data, they are overwritten for each unique index resulting in the last index to be used.
+                                actionData.LinkedObjectTableName = String.Empty;
+                                actionData.LinkedObjectIdOriginal = 0;
+                                actionData.LinkedObjectIdMapped = 0;
 
                                 // Find match of exact unique index in production
                                 query = $"""
                                          SELECT id
                                          FROM `{actionData.TableName}`
-                                         WHERE {String.Join(" AND ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"`{column.Name}` = ?{column.Name.ToMySqlSafeValue(false)}")))}
+                                         WHERE {String.Join(" AND ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"`{column.Name}` = ?{DatabaseHelpers.CreateValidParameterName(column.Name)}")).Distinct())}
                                          """;
 
                                 AddParametersToCommand(sqlParameters, productionDatabaseConnection);
@@ -2507,14 +2486,17 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 // If a match has been found map it, otherwise we will insert a new row with all values of the unique index to prevent conflicts.
                                 if (UInt64.TryParse(productionIdResult?.ToString(), out var productionId))
                                 {
+                                    actionData.MessageBuilder.AppendLine($"The combination of unique index values already exists in production, so we will use the existing ID '{productionId}' for the current row.");
                                     actionData.ObjectIdMapped = productionId;
                                 }
                                 else
                                 {
+                                    actionData.MessageBuilder.AppendLine("The combination of unique index values does not exist in production, so we will insert a new row with all values of the unique index.");
+
                                     query = $"""
                                              {queryPrefix}
-                                             INSERT INTO `{actionData.TableName}` (id, {String.Join(", ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"`{column.Name}`")))}) 
-                                             VALUES (?newId, {String.Join(", ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"?{column.Name.ToMySqlSafeValue(false)}")))})
+                                             INSERT INTO `{actionData.TableName}` (id, {String.Join(", ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"`{column.Name}`")).Distinct())}) 
+                                             VALUES (?newId, {String.Join(", ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"?{DatabaseHelpers.CreateValidParameterName(column.Name)}")).Distinct())})
                                              """;
 
                                     AddParametersToCommand(sqlParameters, productionDatabaseConnection);
@@ -2580,7 +2562,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                     itemsProcessed++;
                                     await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
 
-                                    actionData.Status = ObjectActionMergeStatuses.Merged;
+                                    actionData.Status = ObjectActionMergeStatuses.SkippedAndRemoved;
                                     actionData.MessageBuilder.AppendLine($"The current row was skipped, because the unique index values for the current object were already up to date in production. So we don't need to update the field '{actionData.Field}' again.");
                                     branchBatchLoggerService.LogMergeAction(actionData);
                                     continue;
@@ -2588,7 +2570,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             }
 
                             sqlParameters["id"] = actionData.ObjectIdMapped;
-                            sqlParameters["newValue"] = actionData.NewValue;
+                            var newValue = await GetMappedIdBasedOnTableAndColumnAsync(actionData.NewValue, actionData.TableName, actionData.Field, idMapping, actionData, branchDatabaseConnection, wiserItemsService, allEntityTypeSettings);
+                            sqlParameters["newValue"] = newValue;
 
                             AddParametersToCommand(sqlParameters, productionDatabaseConnection);
                             query = $"""
@@ -4014,5 +3997,90 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                               };
 
         return tableDefinition.Indexes.Where(x => x.Type == IndexTypes.Unique && !String.Equals(x.Name, "PRIMARY", StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    /// <summary>
+    /// Get the mapped ID based on the origin table and column.
+    /// </summary>
+    /// <param name="value">The original value.</param>
+    /// <param name="tableName">The name of the table being processed.</param>
+    /// <param name="column">The column being processed.</param>
+    /// <param name="idMapping">The dictionary that contains all the ID mappings.</param>
+    /// <param name="actionData">The <see cref="BranchMergeLogModel" /> where we can add log messages to.</param>
+    /// <param name="branchDatabaseConnection">The <see cref="IDatabaseConnection"/> for the branch database.</param>
+    /// <param name="wiserItemsService">The <see cref="IWiserItemsService"/> service to retrieve item information.</param>
+    /// <param name="allEntityTypeSettings">A dictionary that contains all entity type settings.</param>
+    /// <returns></returns>
+    private static async Task<object> GetMappedIdBasedOnTableAndColumnAsync(object value, string tableName, string column, Dictionary<string, Dictionary<ulong, ulong>> idMapping, BranchMergeLogModel actionData, IDatabaseConnection branchDatabaseConnection, IWiserItemsService wiserItemsService, Dictionary<string, EntitySettingsModel> allEntityTypeSettings)
+    {
+        actionData.MessageBuilder.AppendLine($"Attempting to get mapped ID for table '{tableName}', column '{column}' and value '{value}'...");
+
+        // If the value is not a valid ID there will be no mapping, so we can return the original value.
+        if (!UInt64.TryParse(value?.ToString(), out var columnValue))
+        {
+            actionData.MessageBuilder.AppendLine($"--> The value '{value}' is not a valid ID, so returning the original value.");
+            return value;
+        }
+
+        ulong mappedId;
+
+        switch (tableName, column.ToLowerInvariant())
+        {
+            case (WiserTableNames.WiserEntity, "module_id"):
+            case (WiserTableNames.WiserEntityProperty, "module_id"):
+            case (WiserTableNames.WiserPermission, "module_id"):
+                mappedId = GetMappedId(WiserTableNames.WiserModule, idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = WiserTableNames.WiserModule;
+                break;
+            case (WiserTableNames.WiserPermission, "role_id"):
+                mappedId = GetMappedId(WiserTableNames.WiserRoles, idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = WiserTableNames.WiserRoles;
+                break;
+            case (WiserTableNames.WiserPermission, "item_id"):
+                var query = $"SELECT entity_name FROM {WiserTableNames.WiserPermission} WHERE id = ?oldId";
+                var entityNameOfPermission = await branchDatabaseConnection.ExecuteScalarAsync<string>(query);
+                _ = allEntityTypeSettings.TryGetValue(entityNameOfPermission, out var entitySettingsOfPermission);
+                var permissionEntityTablePrefix = wiserItemsService.GetTablePrefixForEntity(entitySettingsOfPermission);
+                mappedId = GetMappedId($"{permissionEntityTablePrefix}{WiserTableNames.WiserItem}", idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = $"{permissionEntityTablePrefix}{WiserTableNames.WiserItem}";
+                break;
+            case (WiserTableNames.WiserPermission, "entity_property_id"):
+                mappedId = GetMappedId(WiserTableNames.WiserEntityProperty, idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = WiserTableNames.WiserEntityProperty;
+                break;
+            case (WiserTableNames.WiserPermission, "query_id"):
+            case (WiserTableNames.WiserStyledOutput, "query_id"):
+                mappedId = GetMappedId(WiserTableNames.WiserQuery, idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = WiserTableNames.WiserQuery;
+                break;
+            case (WiserTableNames.WiserPermission, "data_selector_id"):
+                mappedId = GetMappedId(WiserTableNames.WiserDataSelector, idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = WiserTableNames.WiserDataSelector;
+                break;
+            case (WiserTableNames.WiserEntityProperty, "group_id"):
+                mappedId = GetMappedId(WiserTableNames.WiserEntityProperty, idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = WiserTableNames.WiserEntityProperty;
+                break;
+            case (WiserTableNames.WiserUserRoles, "user_id"):
+                _ = allEntityTypeSettings.TryGetValue("wiseruser", out var entitySettingsOfUser);
+                var userEntityTablePrefix = wiserItemsService.GetTablePrefixForEntity(entitySettingsOfUser);
+                mappedId = GetMappedId($"{userEntityTablePrefix}{WiserTableNames.WiserItem}", idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = $"{userEntityTablePrefix}{WiserTableNames.WiserItem}";
+                break;
+            case (WiserTableNames.WiserUserRoles, "role_id"):
+                mappedId = GetMappedId(WiserTableNames.WiserRoles, idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = $"{WiserTableNames.WiserRoles}";
+                break;
+            default:
+                // When the table and column are not recognized, we return the original value to ensure no changes due to data type have been made.
+                actionData.MessageBuilder.AppendLine($"--> No specific mapping found for table '{tableName}' and column '{column}', returning the original value: {value}");
+                return value;
+        }
+
+        actionData.LinkedObjectIdOriginal = columnValue;
+        actionData.LinkedObjectIdMapped = mappedId;
+        actionData.MessageBuilder.AppendLine($"--> Mapped ID for table '{tableName}', column '{column}' and value '{value}' is: {mappedId}");
+
+        return mappedId;
     }
 }
