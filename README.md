@@ -54,7 +54,7 @@ If the auto updater is not used or if the auto updater has indicated that a manu
 2. Start the project in your favorite SDE;
 3. Right click on the project and click "Publish";
 4. Click "Publish WiserTaskScheduler to folder" or "Publish AutoUpdater to folder" (depending on which project to create a new build);
-5. The application will be published in the project folder "bin\Release\net9.0\win-x64\publish\";
+5. The application will be published in the project folder "Publish" (e.g. `C:\Users\<username>\RiderProjects\WiserTaskScheduler\WiserTaskScheduler\Publish`);
 6. Check that all DLL files are present in the publish folder, about 400 files should be present. If these are missing, the application is built as a "Single file" and cannot be started.
 7. Place all files **EXCLUDING** appsettings in a zip file called "version{version}.zip" (e.g. version1.3.6.0.zip) and upload it to the server that hosts the WTS versions;
 8. Update the "version.json" file in the "Update" folder;
