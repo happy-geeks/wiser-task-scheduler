@@ -31,6 +31,11 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docker", "Docker", "{61F15D
 		entrypoint.sh = entrypoint.sh
 	EndProjectSection
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Update", "Update", "{AEE874A3-88ED-43A3-B30D-16DD9BD2884B}"
+	ProjectSection(SolutionItems) = preProject
+		..\Update\versions.json = ..\Update\versions.json
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
