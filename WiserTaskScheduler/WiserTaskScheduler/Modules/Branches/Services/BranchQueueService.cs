@@ -2426,17 +2426,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             sqlParameters["newId"] = actionData.ObjectIdMapped;
                             sqlParameters["oldId"] = actionData.ObjectIdOriginal;
 
-                            // Get the unique indexes of the current table.
-                            actionData.MessageBuilder.AppendLine($"Checking if the current table '{actionData.TableName}' has a unique index, to prevent duplicate key exceptions...");
-                            var tableDefinition = WiserTableDefinitions.TablesToUpdate.SingleOrDefault(table => String.Equals(table.Name, actionData.TableName, StringComparison.OrdinalIgnoreCase))
-                                                  ?? new WiserTableDefinitionModel
-                                                  {
-                                                      Name = actionData.TableName,
-                                                      Indexes = await productionDatabaseHelpersService.GetIndexesAsync(actionData.TableName)
-                                                  };
 
-                            var uniqueIndexes = tableDefinition.Indexes.Where(x => x.Type == IndexTypes.Unique && !String.Equals(x.Name, "PRIMARY", StringComparison.OrdinalIgnoreCase)).ToList();
-
+                            var uniqueIndexes = await GetUniqueIndexesAsync(actionData, productionDatabaseHelpersService);
                             if (uniqueIndexes.Count == 0)
                             {
                                 actionData.MessageBuilder.AppendLine("--> The table has no unique indexes, so just add a new row without values.");
@@ -2581,15 +2572,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             // If the object was already created in production, we can skip the update if the unique index values are already up to date. Otherwise they will be processed as normal.
                             if (objectCreatedInBranch is {UniqueIndexValuesAlreadyUpToDate: true})
                             {
-                                var tableDefinition = WiserTableDefinitions.TablesToUpdate.SingleOrDefault(table => String.Equals(table.Name, actionData.TableName, StringComparison.OrdinalIgnoreCase))
-                                                      ?? new WiserTableDefinitionModel
-                                                      {
-                                                          Name = actionData.TableName,
-                                                          Indexes = await productionDatabaseHelpersService.GetIndexesAsync(actionData.TableName)
-                                                      };
-
-                                var uniqueIndexes = tableDefinition.Indexes.Where(x => x.Type == IndexTypes.Unique && !String.Equals(x.Name, "PRIMARY", StringComparison.OrdinalIgnoreCase)).ToList();
-
+                                var uniqueIndexes = await GetUniqueIndexesAsync(actionData, productionDatabaseHelpersService);
                                 if (uniqueIndexes.Count > 0 && uniqueIndexes.Any(x => x.Columns.Any(column => column.Name.Equals(actionData.Field, StringComparison.InvariantCultureIgnoreCase))))
                                 {
                                     successfulChanges++;
@@ -4012,5 +3995,24 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         await branchDatabaseConnection.ExecuteAsync(query);
 
         actionData?.MessageBuilder.AppendLine("--> Mappings successfully removed from database and in-memory list.");
+    }
+
+    /// <summary>
+    /// Get the unique indexes for a table, to check if the unique combination already exists in the production database.
+    /// </summary>
+    /// <param name="actionData">The <see cref="BranchMergeLogModel" /> where we can add log messages to.</param>
+    /// <param name="productionDatabaseHelpersService">The <see cref="IDatabaseHelpersService"/> for the production database.</param>
+    /// <returns>Returns the unique indexes if present.</returns>
+    private static async Task<List<IndexSettingsModel>> GetUniqueIndexesAsync(BranchMergeLogModel actionData, IDatabaseHelpersService productionDatabaseHelpersService)
+    {
+        actionData.MessageBuilder.AppendLine($"Checking if the current table '{actionData.TableName}' has a unique index, to check if an unmapped row is present...");
+        var tableDefinition = WiserTableDefinitions.TablesToUpdate.SingleOrDefault(table => String.Equals(table.Name, actionData.TableName, StringComparison.OrdinalIgnoreCase))
+                              ?? new WiserTableDefinitionModel
+                              {
+                                  Name = actionData.TableName,
+                                  Indexes = await productionDatabaseHelpersService.GetIndexesAsync(actionData.TableName)
+                              };
+
+        return tableDefinition.Indexes.Where(x => x.Type == IndexTypes.Unique && !String.Equals(x.Name, "PRIMARY", StringComparison.OrdinalIgnoreCase)).ToList();
     }
 }
