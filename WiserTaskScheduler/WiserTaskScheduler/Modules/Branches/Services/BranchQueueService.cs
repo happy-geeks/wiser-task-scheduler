@@ -2570,6 +2570,8 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             }
 
                             sqlParameters["id"] = actionData.ObjectIdMapped;
+                            sqlParameters["oldId"] = actionData.ObjectIdOriginal;
+                            AddParametersToCommand(sqlParameters, branchDatabaseConnection);
                             var newValue = await GetMappedIdBasedOnTableAndColumnAsync(actionData.NewValue, actionData.TableName, actionData.Field, idMapping, actionData, branchDatabaseConnection, wiserItemsService, allEntityTypeSettings);
                             sqlParameters["newValue"] = newValue;
 
@@ -4010,7 +4012,7 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     /// <param name="branchDatabaseConnection">The <see cref="IDatabaseConnection"/> for the branch database.</param>
     /// <param name="wiserItemsService">The <see cref="IWiserItemsService"/> service to retrieve item information.</param>
     /// <param name="allEntityTypeSettings">A dictionary that contains all entity type settings.</param>
-    /// <returns></returns>
+    /// <returns>Returns a mapped ID or the original value.</returns>
     private static async Task<object> GetMappedIdBasedOnTableAndColumnAsync(object value, string tableName, string column, Dictionary<string, Dictionary<ulong, ulong>> idMapping, BranchMergeLogModel actionData, IDatabaseConnection branchDatabaseConnection, IWiserItemsService wiserItemsService, Dictionary<string, EntitySettingsModel> allEntityTypeSettings)
     {
         actionData.MessageBuilder.AppendLine($"Attempting to get mapped ID for table '{tableName}', column '{column}' and value '{value}'...");
