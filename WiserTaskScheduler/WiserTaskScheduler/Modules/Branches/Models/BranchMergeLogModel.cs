@@ -167,22 +167,22 @@ public class BranchMergeLogModel(int queueId, string queueName, int branchId, ul
     #region Item detail information
 
     /// <summary>
-    /// If this is a change for a Wiser item detail, this will contain the value of the `id` column of `wiser_itemdetail`, in the branch database.
+    /// If this is a change for a Wiser item detail, this will contain the value of the `id` column of `wiser_itemdetail` or `wiser_itemlinkdetail`, in the branch database.
     /// </summary>
     public ulong ItemDetailIdOriginal { get; set; }
 
     /// <summary>
-    /// If this is a change for a Wiser item detail, this will contain the value of the `id` column of `wiser_itemdetail`, in the branch database.
+    /// If this is a change for a Wiser item detail, this will contain the value of the `id` column of `wiser_itemdetail` or `wiser_itemlinkdetail`, in the branch database.
     /// </summary>
     public ulong ItemDetailIdMapped { get; set; }
 
     /// <summary>
-    /// If this is a change for a Wiser item detail, this will contain the value of the `language_code` column of `wiser_itemdetail`, in the branch database.
+    /// If this is a change for a Wiser item detail, this will contain the value of the `language_code` column of `wiser_itemdetail` or `wiser_itemlinkdetail`, in the branch database.
     /// </summary>
     public string ItemDetailLanguageCode { get; set; } = String.Empty;
 
     /// <summary>
-    /// If this is a change for a Wiser item detail, this will contain the value of the `groupname` column of `wiser_itemdetail`, in the branch database.
+    /// If this is a change for a Wiser item detail, this will contain the value of the `groupname` column of `wiser_itemdetail` or `wiser_itemlinkdetail`, in the branch database.
     /// </summary>
     public string ItemDetailGroupName { get; set; } = String.Empty;
 
