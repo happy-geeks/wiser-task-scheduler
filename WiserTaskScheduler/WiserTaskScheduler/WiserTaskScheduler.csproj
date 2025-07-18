@@ -41,4 +41,18 @@
     <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
         <PackageReference Include="EvoPdf.Chromium.Linux" Version="11.4.1" />
     </ItemGroup>
+    
+    <!-- Exclude Publish folder -->
+    <ItemGroup>
+      <Compile Remove="Publish\**" />
+    </ItemGroup>
+    <ItemGroup>
+      <EmbeddedResource Remove="Publish\**" />
+    </ItemGroup>
+    <ItemGroup>
+      <Content Remove="Publish\**" />
+    </ItemGroup>
+    <ItemGroup>
+      <None Remove="Publish\**" />
+    </ItemGroup>
 </Project>

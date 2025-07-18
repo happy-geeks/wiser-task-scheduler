@@ -21,4 +21,18 @@
         <PackageReference Include="Serilog.AspNetCore" Version="9.0.0"/>
         <PackageReference Include="SlackNet.AspNetCore" Version="0.16.2" />
     </ItemGroup>
+
+    <!-- Exclude Publish folder -->
+    <ItemGroup>
+        <Compile Remove="Publish\**" />
+    </ItemGroup>
+    <ItemGroup>
+        <EmbeddedResource Remove="Publish\**" />
+    </ItemGroup>
+    <ItemGroup>
+        <Content Remove="Publish\**" />
+    </ItemGroup>
+    <ItemGroup>
+        <None Remove="Publish\**" />
+    </ItemGroup>
 </Project>
