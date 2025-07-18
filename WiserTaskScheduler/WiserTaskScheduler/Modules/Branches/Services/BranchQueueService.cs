@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using GeeksCoreLibrary.Core.Exceptions;
 using GeeksCoreLibrary.Core.Extensions;
+using GeeksCoreLibrary.Core.Helpers;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Branches.Enumerations;
@@ -2424,25 +2425,9 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
                             actionData.ObjectIdMapped = await GenerateNewIdAsync(actionData.TableName, branchDatabaseConnection, productionDatabaseConnection, actionData);
                             sqlParameters["newId"] = actionData.ObjectIdMapped;
+                            sqlParameters["oldId"] = actionData.ObjectIdOriginal;
 
-                            // Remove temporary values from the parameters from any previous history rows. Otherwise they will cause conflicts with the current row.
-                            foreach (var temporaryParameter in sqlParameters.Where(x => x.Key.StartsWith("temporaryValue")))
-                            {
-                                sqlParameters.Remove(temporaryParameter.Key);
-                            }
-
-                            // Get the unique indexes of the current table.
-                            actionData.MessageBuilder.AppendLine($"Checking if the current table '{actionData.TableName}' has a unique index, to prevent duplicate key exceptions...");
-                            var tableDefinition = WiserTableDefinitions.TablesToUpdate.SingleOrDefault(table => String.Equals(table.Name, actionData.TableName, StringComparison.OrdinalIgnoreCase))
-                                                  ?? new WiserTableDefinitionModel
-                                                  {
-                                                      Name = actionData.TableName,
-                                                      Indexes = await productionDatabaseHelpersService.GetIndexesAsync(actionData.TableName),
-                                                      Columns = await productionDatabaseHelpersService.GetColumnsAsync(actionData.TableName)
-                                                  };
-
-                            var uniqueIndexes = tableDefinition.Indexes.Where(x => x.Type == IndexTypes.Unique && !String.Equals(x.Name, "PRIMARY", StringComparison.OrdinalIgnoreCase)).ToList();
-
+                            var uniqueIndexes = await GetUniqueIndexesAsync(actionData, productionDatabaseHelpersService);
                             if (uniqueIndexes.Count == 0)
                             {
                                 actionData.MessageBuilder.AppendLine("--> The table has no unique indexes, so just add a new row without values.");
@@ -2451,91 +2436,75 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                          INSERT INTO `{actionData.TableName}` (id) 
                                          VALUES (?newId)
                                          """;
+
+                                AddParametersToCommand(sqlParameters, productionDatabaseConnection);
+                                await productionDatabaseConnection.ExecuteAsync(query);
                             }
                             else
                             {
                                 actionData.MessageBuilder.AppendLine($"--> The table has {uniqueIndexes.Count} unique index(es) with a total of {uniqueIndexes.Sum(index => index.Columns.Count)} columns, generating unique temporary values for each column...");
 
-                                var temporaryValueGenerators = new StringBuilder();
-                                var columnsToInsert = new List<string> { "`id`" };
-                                var valuesToInsert = new List<string> { "?newId" };
-                                var index = 0;
+                                query = $"""
+                                        SELECT {String.Join(", ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"`{column.Name}`")).Distinct())}
+                                        FROM `{actionData.TableName}`
+                                        WHERE id = ?oldId
+                                        """;
 
-                                foreach (var columnName in uniqueIndexes.SelectMany(i => i.Columns.Select(c => c.Name)))
+                                AddParametersToCommand(sqlParameters, branchDatabaseConnection);
+                                var uniqueIndexValues = await branchDatabaseConnection.GetAsync(query);
+
+                                if (uniqueIndexValues == null || uniqueIndexValues.Rows.Count == 0)
                                 {
-                                    var column = tableDefinition.Columns.Single(c => String.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase));
-
-                                    // We don't need to generate a temporary value for the ID column, since we already have that one.
-                                    // We also don't need to generate one for auto increment columns, since the database will generate that automatically.
-                                    if (column.AutoIncrement || String.Equals(columnName, "id", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        index++;
-                                        continue;
-                                    }
-
-                                    // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
-                                    switch (column.Type)
-                                    {
-                                        case MySqlDbType.Decimal:
-                                        case MySqlDbType.Float:
-                                        case MySqlDbType.Double:
-                                        case MySqlDbType.Byte:
-                                        case MySqlDbType.Int16:
-                                        case MySqlDbType.Int24:
-                                        case MySqlDbType.Int32:
-                                        case MySqlDbType.Int64:
-                                        case MySqlDbType.UByte:
-                                        case MySqlDbType.UInt16:
-                                        case MySqlDbType.UInt24:
-                                        case MySqlDbType.UInt32:
-                                        case MySqlDbType.UInt64:
-                                            actionData.MessageBuilder.AppendLine($"--> The column '{columnName}' is a number, so we get the current highest number for that column, add 1 to it and use that as the temporary value for the new row.");
-                                            temporaryValueGenerators.AppendLine($"SET @temporaryValue{index} = (SELECT IFNULL(MAX(`{columnName.ToMySqlSafeValue((false))}`), 0) + 1 FROM `{actionData.TableName}`);");
-                                            columnsToInsert.Add($"`{columnName.ToMySqlSafeValue(false)}`");
-                                            valuesToInsert.Add($"@temporaryValue{index}");
-                                            objectCreatedInBranch.ColumnsWithTemporaryValues.Add(column);
-                                            break;
-                                        case MySqlDbType.Timestamp:
-                                        case MySqlDbType.Date:
-                                        case MySqlDbType.Time:
-                                        case MySqlDbType.DateTime:
-                                            actionData.MessageBuilder.AppendLine($"--> The column '{columnName}' is a date and/or time, so we use the highest possible date and/or time for the temporary value of the new row.");
-                                            columnsToInsert.Add($"`{columnName.ToMySqlSafeValue(false)}`");
-                                            sqlParameters[$"temporaryValue{index}"] = DateTime.MaxValue;
-                                            valuesToInsert.Add($"?temporaryValue{index}");
-                                            objectCreatedInBranch.ColumnsWithTemporaryValues.Add(column);
-                                            break;
-                                        case MySqlDbType.VarChar:
-                                        case MySqlDbType.String:
-                                        case MySqlDbType.TinyText:
-                                        case MySqlDbType.MediumText:
-                                        case MySqlDbType.Text:
-                                        case MySqlDbType.LongText:
-                                        case MySqlDbType.Guid:
-                                            actionData.MessageBuilder.AppendLine($"--> The column '{columnName}' is a text column, so we generate a new GUID for the temporary value of the new row.");
-                                            columnsToInsert.Add($"`{columnName.ToMySqlSafeValue(false)}`");
-                                            sqlParameters[$"temporaryValue{index}"] = column.Type == MySqlDbType.Guid ? Guid.NewGuid() : Guid.NewGuid().ToString("N");
-                                            valuesToInsert.Add($"?temporaryValue{index}");
-                                            objectCreatedInBranch.ColumnsWithTemporaryValues.Add(column);
-                                            break;
-                                        default:
-                                            actionData.MessageBuilder.AppendLine($"--> The column '{columnName}' is of type '{column.Type.ToString()}' and we don't know how to generate a random unique value for this type, so we leave it empty.");
-                                            break;
-                                    }
-
-                                    index++;
+                                    // This should never be able to happen. If it does, we will stop the merge.
+                                    actionData.MessageBuilder.AppendLine("--> The unique index values could not be retrieved from the branch database, so we cannot continue with the merge.");
+                                    throw new InvalidOperationException($"The unique index values for the table '{actionData.TableName}' for row '{actionData.ObjectIdOriginal}' could not be retrieved from the branch database, so we cannot continue with the merge. This is a critical error that should not happen.");
                                 }
 
-                                query = $"""
-                                         {queryPrefix}
-                                         {temporaryValueGenerators}
-                                         INSERT INTO `{actionData.TableName}` ({String.Join(", ", columnsToInsert)}) 
-                                         VALUES ({String.Join(", ", valuesToInsert)})
-                                         """;
-                            }
+                                foreach (var column in uniqueIndexes.SelectMany(index => index.Columns.Select(column => column.Name)).Distinct())
+                                {
+                                    // Apply mapping to the values depending on the table and column to ensure the correct information is used.
+                                    var value = uniqueIndexValues.Rows[0][column];
+                                    var columnValue = await GetMappedIdBasedOnTableAndColumnAsync(value, actionData.TableName, column, idMapping, actionData, branchDatabaseConnection, wiserItemsService, allEntityTypeSettings);
+                                    sqlParameters[DatabaseHelpers.CreateValidParameterName(column)] = columnValue;
+                                }
 
-                            AddParametersToCommand(sqlParameters, productionDatabaseConnection);
-                            await productionDatabaseConnection.ExecuteAsync(query);
+                                // Reset values to remove incomplete data, they are overwritten for each unique index resulting in the last index to be used.
+                                actionData.LinkedObjectTableName = String.Empty;
+                                actionData.LinkedObjectIdOriginal = 0;
+                                actionData.LinkedObjectIdMapped = 0;
+
+                                // Find match of exact unique index in production
+                                query = $"""
+                                         SELECT id
+                                         FROM `{actionData.TableName}`
+                                         WHERE {String.Join(" AND ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"`{column.Name}` = ?{DatabaseHelpers.CreateValidParameterName(column.Name)}")).Distinct())}
+                                         """;
+
+                                AddParametersToCommand(sqlParameters, productionDatabaseConnection);
+                                var productionIdResult = await productionDatabaseConnection.ExecuteScalarAsync(query, skipCache: true);
+
+                                // If a match has been found map it, otherwise we will insert a new row with all values of the unique index to prevent conflicts.
+                                if (UInt64.TryParse(productionIdResult?.ToString(), out var productionId))
+                                {
+                                    actionData.MessageBuilder.AppendLine($"The combination of unique index values already exists in production, so we will use the existing ID '{productionId}' for the current row.");
+                                    actionData.ObjectIdMapped = productionId;
+                                }
+                                else
+                                {
+                                    actionData.MessageBuilder.AppendLine("The combination of unique index values does not exist in production, so we will insert a new row with all values of the unique index.");
+
+                                    query = $"""
+                                             {queryPrefix}
+                                             INSERT INTO `{actionData.TableName}` (id, {String.Join(", ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"`{column.Name}`")).Distinct())}) 
+                                             VALUES (?newId, {String.Join(", ", uniqueIndexes.SelectMany(index => index.Columns.Select(column => $"?{DatabaseHelpers.CreateValidParameterName(column.Name)}")).Distinct())})
+                                             """;
+
+                                    AddParametersToCommand(sqlParameters, productionDatabaseConnection);
+                                    await productionDatabaseConnection.ExecuteAsync(query);
+                                }
+
+                                objectCreatedInBranch.UniqueIndexValuesAlreadyUpToDate = true;
+                            }
 
                             // Map the item ID from wiser_history to the ID of the newly created item, locally and in database.
                             await AddIdMappingAsync(idMapping, idMappingsAddedInCurrentMerge, actionData.TableName, actionData.ObjectIdOriginal, actionData.ObjectIdMapped, branchDatabaseConnection, productionDatabaseConnection, actionData);
@@ -2582,18 +2551,29 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 continue;
                             }
 
-                            // Check if this object was created in the branch and if so, remove the temporary value from the list.
-                            var columnWithTemporaryValue = objectCreatedInBranch?.ColumnsWithTemporaryValues?.SingleOrDefault(c => String.Equals(c.Name, actionData.Field, StringComparison.OrdinalIgnoreCase));
-                            if (columnWithTemporaryValue != null)
+                            // If the object was already created in production, we can skip the update if the unique index values are already up to date. Otherwise they will be processed as normal.
+                            if (objectCreatedInBranch is {UniqueIndexValuesAlreadyUpToDate: true})
                             {
-                                // When we updated a column with a temporary value, we need to remove that column from the list.
-                                // At the end of the merge, we will remove the temporary values, that are left over, from the production database.
-                                objectCreatedInBranch.ColumnsWithTemporaryValues.Remove(columnWithTemporaryValue);
-                                actionData.MessageBuilder.AppendLine("We found that the current object was created in the branch and that we added a temporary value for the current column. Since we are updating that column now with a new value, we need to remove the temporary value from the list.");
+                                var uniqueIndexes = await GetUniqueIndexesAsync(actionData, productionDatabaseHelpersService);
+                                if (uniqueIndexes.Count > 0 && uniqueIndexes.Any(x => x.Columns.Any(column => column.Name.Equals(actionData.Field, StringComparison.InvariantCultureIgnoreCase))))
+                                {
+                                    successfulChanges++;
+                                    historyItemsSynchronised.Add(actionData.HistoryId);
+                                    itemsProcessed++;
+                                    await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
+
+                                    actionData.Status = ObjectActionMergeStatuses.SkippedAndRemoved;
+                                    actionData.MessageBuilder.AppendLine($"The current row was skipped, because the unique index values for the current object were already up to date in production. So we don't need to update the field '{actionData.Field}' again.");
+                                    branchBatchLoggerService.LogMergeAction(actionData);
+                                    continue;
+                                }
                             }
 
                             sqlParameters["id"] = actionData.ObjectIdMapped;
-                            sqlParameters["newValue"] = actionData.NewValue;
+                            sqlParameters["oldId"] = actionData.ObjectIdOriginal;
+                            AddParametersToCommand(sqlParameters, branchDatabaseConnection);
+                            var newValue = await GetMappedIdBasedOnTableAndColumnAsync(actionData.NewValue, actionData.TableName, actionData.Field, idMapping, actionData, branchDatabaseConnection, wiserItemsService, allEntityTypeSettings);
+                            sqlParameters["newValue"] = newValue;
 
                             AddParametersToCommand(sqlParameters, productionDatabaseConnection);
                             query = $"""
@@ -2672,8 +2652,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     branchBatchLoggerService.LogMergeAction(actionData);
                 }
             }
-
-            await CleanupAfterMergeAsync(branchQueue, configurationServiceName, objectsCreatedInBranch, productionDatabaseConnection, queryPrefix, errors);
 
             // We have finished processing all items in the history table, so update the progress to 100%.
             await UpdateProgressInQueue(originalDatabaseConnection, queueId, totalItemsInHistory, true);
@@ -2759,102 +2737,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
 
         result["Success"] = errors.Count == 0;
         return result;
-    }
-
-    /// <summary>
-    /// Do any cleanup that might be needed after merging a branch.
-    /// Like removing temporary values from the production database that we added to prevent duplicate key errors from unique indexes on tables.
-    /// </summary>
-    /// <param name="branchQueue">Information about the WTS configuration for handling branch queues, for logging.</param>
-    /// <param name="configurationServiceName">The service name as it's specified in the XML configuration.</param>
-    /// <param name="objectsCreatedInBranch">A <see cref="List{T}"/> of <see cref="objectsCreatedInBranch"/> that contain the items that were created by the merge with temporary values.</param>
-    /// <param name="productionDatabaseConnection">The <see cref="IDatabaseConnection" /> to the production database.</param>
-    /// <param name="queryPrefix">The prefix for all queries, that contains the username and things for wiser_history.</param>
-    /// <param name="errors">The list of errors that will be returned to the WTS.</param>
-    private async Task CleanupAfterMergeAsync(BranchQueueModel branchQueue, string configurationServiceName, List<ObjectCreatedInBranchModel> objectsCreatedInBranch, IDatabaseConnection productionDatabaseConnection, string queryPrefix, JArray errors)
-    {
-        // Check if we have added any new objects with temporary values, without having replaced those temporary values with the actual values.
-        // If that is the case, we need to change those temporary values to the default values for those columns.
-        // We can do this safely now, because we have already merged all the changes to the production database, so these rows should be unique now without the temporary values.
-        foreach (var objectCreatedInBranch in objectsCreatedInBranch.Where(o => o.ColumnsWithTemporaryValues.Count > 0))
-        {
-            try
-            {
-                var updateClause = new List<string>();
-                foreach (var column in objectCreatedInBranch.ColumnsWithTemporaryValues)
-                {
-                    if (!column.NotNull || column.DefaultValue != null)
-                    {
-                        // If the column is nullable or has a default value, we can just set it to NULL, which the database will turn into the default value when applicable.
-                        updateClause.Add($"`{column.Name.ToMySqlSafeValue(false)}` = NULL");
-                        continue;
-                    }
-
-                    // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
-                    switch (column.Type)
-                    {
-                        case MySqlDbType.Decimal:
-                        case MySqlDbType.Float:
-                        case MySqlDbType.Double:
-                        case MySqlDbType.Byte:
-                        case MySqlDbType.Int16:
-                        case MySqlDbType.Int24:
-                        case MySqlDbType.Int32:
-                        case MySqlDbType.Int64:
-                        case MySqlDbType.UByte:
-                        case MySqlDbType.UInt16:
-                        case MySqlDbType.UInt24:
-                        case MySqlDbType.UInt32:
-                        case MySqlDbType.UInt64:
-                            // For numbers, set the column value to 0.
-                            updateClause.Add($"`{column.Name.ToMySqlSafeValue(false)}` = 0");
-                            break;
-                        case MySqlDbType.Timestamp:
-                        case MySqlDbType.Date:
-                        case MySqlDbType.Time:
-                        case MySqlDbType.DateTime:
-                            // For dates and times, set the column value to the current date and/or time.
-                            updateClause.Add($"`{column.Name.ToMySqlSafeValue(false)}` = NOW()");
-                            break;
-                        case MySqlDbType.VarChar:
-                        case MySqlDbType.String:
-                        case MySqlDbType.TinyText:
-                        case MySqlDbType.MediumText:
-                        case MySqlDbType.Text:
-                        case MySqlDbType.LongText:
-                        case MySqlDbType.Guid:
-                            // For texts, set the column value to an empty string.
-                            updateClause.Add($"`{column.Name.ToMySqlSafeValue(false)}` = ''");
-                            break;
-                        default:
-                            // We don't set temporary values for other column types, so we don't need to do anything.
-                            continue;
-                    }
-                }
-
-                if (updateClause.Count <= 0)
-                {
-                    continue;
-                }
-
-                productionDatabaseConnection.AddParameter("id", objectCreatedInBranch.ObjectIdMapped);
-
-                var query = $"""
-                             {queryPrefix}
-                             UPDATE `{objectCreatedInBranch.TableName}` 
-                             SET {String.Join(", ", updateClause)}
-                             WHERE id = ?id
-                             """;
-                await productionDatabaseConnection.ExecuteAsync(query);
-            }
-            catch (Exception exception)
-            {
-                var exceptionMessage = GetExceptionMessage(exception);
-
-                await logService.LogError(logger, LogScopes.RunBody, branchQueue.LogSettings, $"An error occurred while trying to delete a temporary value from the table '{objectCreatedInBranch.TableName}': {exception}", configurationServiceName, branchQueue.TimeId, branchQueue.Order);
-                errors.Add($"Er is iets fout gegaan tijdens het opruimen van tijdelijke waardes op de tabel '{objectCreatedInBranch.TableName}'. De fout was: {exceptionMessage}");
-            }
-        }
     }
 
     /// <summary>
@@ -4098,5 +3980,109 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         await branchDatabaseConnection.ExecuteAsync(query);
 
         actionData?.MessageBuilder.AppendLine("--> Mappings successfully removed from database and in-memory list.");
+    }
+
+    /// <summary>
+    /// Get the unique indexes for a table, to check if the unique combination already exists in the production database.
+    /// </summary>
+    /// <param name="actionData">The <see cref="BranchMergeLogModel" /> where we can add log messages to.</param>
+    /// <param name="productionDatabaseHelpersService">The <see cref="IDatabaseHelpersService"/> for the production database.</param>
+    /// <returns>Returns the unique indexes if present.</returns>
+    private static async Task<List<IndexSettingsModel>> GetUniqueIndexesAsync(BranchMergeLogModel actionData, IDatabaseHelpersService productionDatabaseHelpersService)
+    {
+        actionData.MessageBuilder.AppendLine($"Checking if the current table '{actionData.TableName}' has a unique index, to check if an unmapped row is present...");
+        var tableDefinition = WiserTableDefinitions.TablesToUpdate.SingleOrDefault(table => String.Equals(table.Name, actionData.TableName, StringComparison.OrdinalIgnoreCase))
+                              ?? new WiserTableDefinitionModel
+                              {
+                                  Name = actionData.TableName,
+                                  Indexes = await productionDatabaseHelpersService.GetIndexesAsync(actionData.TableName)
+                              };
+
+        return tableDefinition.Indexes.Where(x => x.Type == IndexTypes.Unique && !String.Equals(x.Name, "PRIMARY", StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    /// <summary>
+    /// Get the mapped ID based on the origin table and column.
+    /// </summary>
+    /// <param name="value">The original value.</param>
+    /// <param name="tableName">The name of the table being processed.</param>
+    /// <param name="column">The column being processed.</param>
+    /// <param name="idMapping">The dictionary that contains all the ID mappings.</param>
+    /// <param name="actionData">The <see cref="BranchMergeLogModel" /> where we can add log messages to.</param>
+    /// <param name="branchDatabaseConnection">The <see cref="IDatabaseConnection"/> for the branch database.</param>
+    /// <param name="wiserItemsService">The <see cref="IWiserItemsService"/> service to retrieve item information.</param>
+    /// <param name="allEntityTypeSettings">A dictionary that contains all entity type settings.</param>
+    /// <returns>Returns a mapped ID or the original value.</returns>
+    private static async Task<object> GetMappedIdBasedOnTableAndColumnAsync(object value, string tableName, string column, Dictionary<string, Dictionary<ulong, ulong>> idMapping, BranchMergeLogModel actionData, IDatabaseConnection branchDatabaseConnection, IWiserItemsService wiserItemsService, Dictionary<string, EntitySettingsModel> allEntityTypeSettings)
+    {
+        actionData.MessageBuilder.AppendLine($"Attempting to get mapped ID for table '{tableName}', column '{column}' and value '{value}'...");
+
+        // If the value is not a valid ID there will be no mapping, so we can return the original value.
+        if (!UInt64.TryParse(value?.ToString(), out var columnValue))
+        {
+            actionData.MessageBuilder.AppendLine($"--> The value '{value}' is not a valid ID, so returning the original value.");
+            return value;
+        }
+
+        ulong mappedId;
+
+        switch (tableName, column.ToLowerInvariant())
+        {
+            case (WiserTableNames.WiserEntity, "module_id"):
+            case (WiserTableNames.WiserEntityProperty, "module_id"):
+            case (WiserTableNames.WiserPermission, "module_id"):
+                mappedId = GetMappedId(WiserTableNames.WiserModule, idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = WiserTableNames.WiserModule;
+                break;
+            case (WiserTableNames.WiserPermission, "role_id"):
+                mappedId = GetMappedId(WiserTableNames.WiserRoles, idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = WiserTableNames.WiserRoles;
+                break;
+            case (WiserTableNames.WiserPermission, "item_id"):
+                var query = $"SELECT entity_name FROM {WiserTableNames.WiserPermission} WHERE id = ?oldId";
+                var entityNameOfPermission = await branchDatabaseConnection.ExecuteScalarAsync<string>(query);
+                _ = allEntityTypeSettings.TryGetValue(entityNameOfPermission, out var entitySettingsOfPermission);
+                var permissionEntityTablePrefix = wiserItemsService.GetTablePrefixForEntity(entitySettingsOfPermission);
+                mappedId = GetMappedId($"{permissionEntityTablePrefix}{WiserTableNames.WiserItem}", idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = $"{permissionEntityTablePrefix}{WiserTableNames.WiserItem}";
+                break;
+            case (WiserTableNames.WiserPermission, "entity_property_id"):
+                mappedId = GetMappedId(WiserTableNames.WiserEntityProperty, idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = WiserTableNames.WiserEntityProperty;
+                break;
+            case (WiserTableNames.WiserPermission, "query_id"):
+            case (WiserTableNames.WiserStyledOutput, "query_id"):
+                mappedId = GetMappedId(WiserTableNames.WiserQuery, idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = WiserTableNames.WiserQuery;
+                break;
+            case (WiserTableNames.WiserPermission, "data_selector_id"):
+                mappedId = GetMappedId(WiserTableNames.WiserDataSelector, idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = WiserTableNames.WiserDataSelector;
+                break;
+            case (WiserTableNames.WiserEntityProperty, "group_id"):
+                mappedId = GetMappedId(WiserTableNames.WiserEntityProperty, idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = WiserTableNames.WiserEntityProperty;
+                break;
+            case (WiserTableNames.WiserUserRoles, "user_id"):
+                _ = allEntityTypeSettings.TryGetValue("wiseruser", out var entitySettingsOfUser);
+                var userEntityTablePrefix = wiserItemsService.GetTablePrefixForEntity(entitySettingsOfUser);
+                mappedId = GetMappedId($"{userEntityTablePrefix}{WiserTableNames.WiserItem}", idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = $"{userEntityTablePrefix}{WiserTableNames.WiserItem}";
+                break;
+            case (WiserTableNames.WiserUserRoles, "role_id"):
+                mappedId = GetMappedId(WiserTableNames.WiserRoles, idMapping, columnValue, actionData, "id") ?? 0;
+                actionData.LinkedObjectTableName = $"{WiserTableNames.WiserRoles}";
+                break;
+            default:
+                // When the table and column are not recognized, we return the original value to ensure no changes due to data type have been made.
+                actionData.MessageBuilder.AppendLine($"--> No specific mapping found for table '{tableName}' and column '{column}', returning the original value: {value}");
+                return value;
+        }
+
+        actionData.LinkedObjectIdOriginal = columnValue;
+        actionData.LinkedObjectIdMapped = mappedId;
+        actionData.MessageBuilder.AppendLine($"--> Mapped ID for table '{tableName}', column '{column}' and value '{value}' is: {mappedId}");
+
+        return mappedId;
     }
 }
