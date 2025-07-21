@@ -2010,6 +2010,58 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                             await productionDatabaseConnection.ExecuteAsync(query);
                             break;
                         }
+                        case "REMOVE_LINK":
+                        {
+                            // Check if the link type is in the list of changes.
+                            if (actionData.UsedMergeSettings is not {Delete: true})
+                            {
+                                itemsProcessed++;
+                                await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
+
+                                actionData.Status = ObjectActionMergeStatuses.Skipped;
+                                var message = actionData.UsedMergeSettings == null
+                                    ? $"The current row was skipped, because we were not able to find the link type ('{actionData.LinkType}') in the settings, so we don't know if we should merge it or not."
+                                    : $"The current row was skipped, because the user indicated that they don't want to merge delete actions of links of type '{actionData.LinkType}'.";
+                                actionData.MessageBuilder.AppendLine(message);
+                                branchBatchLoggerService.LogMergeAction(actionData);
+                                continue;
+                            }
+
+                            if (linkSourceItemIsCreatedAndDeletedInBranch || linkDestinationItemIsCreatedAndDeletedInBranch)
+                            {
+                                // One of the items of the link was created and then deleted in the branch, so we don't need to do anything.
+                                historyItemsSynchronised.Add(actionData.HistoryId);
+                                itemsProcessed++;
+                                await UpdateProgressInQueue(originalDatabaseConnection, queueId, itemsProcessed);
+
+                                actionData.Status = ObjectActionMergeStatuses.SkippedAndRemoved;
+                                var text = linkSourceItemIsCreatedAndDeletedInBranch switch
+                                {
+                                    true when linkDestinationItemIsCreatedAndDeletedInBranch => "both the source and destination items of the link were created and then deleted in the branch",
+                                    true => "the source item of the link was created and then deleted in the branch",
+                                    _ => "the destination item of the link was created and then deleted in the branch"
+                                };
+
+                                actionData.MessageBuilder.AppendLine($"The current row was skipped and removed, because {text}, so we don't need to do anything..");
+                                branchBatchLoggerService.LogMergeAction(actionData);
+                                continue;
+                            }
+
+                            sqlParameters["itemId"] = actionData.ItemIdMapped;
+                            sqlParameters["destinationItemId"] = actionData.LinkDestinationItemIdMapped;
+                            sqlParameters["type"] = actionData.LinkType;
+
+                            AddParametersToCommand(sqlParameters, productionDatabaseConnection);
+                            query = $"""
+                                     {queryPrefix}
+                                     DELETE FROM `{actionData.TableName}`
+                                     WHERE item_id = ?itemId
+                                     AND destination_item_id = ?destinationItemId
+                                     AND type = ?type
+                                     """;
+                            await productionDatabaseConnection.ExecuteAsync(query);
+                            break;
+                        }
                         case "UPDATE_ITEMLINKDETAIL":
                         {
                             actionData.ItemDetailIdMapped = targetId;
@@ -2854,54 +2906,10 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 actionData.MessageBuilder.AppendLine("--> The action is for removing an item link. These actions don't log the ID of wiser_itemlink in wiser_history, so generating an ID with source item ID, destination item ID and link type, which are logged in wiser_history with this action.");
                 break;
             }
-            case "INSERT_ENTITY":
-            case "INSERT_ENTITYPROPERTY":
-            case "INSERT_QUERY":
-            case "INSERT_MODULE":
-            case "INSERT_DATA_SELECTOR":
-            case "INSERT_PERMISSION":
-            case "INSERT_USER_ROLE":
-            case "INSERT_FIELD_TEMPLATE":
-            case "INSERT_LINK_SETTING":
-            case "INSERT_API_CONNECTION":
-            case "INSERT_ROLE":
-            case "CREATE_STYLED_OUTPUT":
-            case "CREATE_EASY_OBJECT":
-            case "UPDATE_ENTITY":
-            case "UPDATE_ENTITYPROPERTY":
-            case "UPDATE_QUERY":
-            case "UPDATE_DATA_SELECTOR":
-            case "UPDATE_MODULE":
-            case "UPDATE_PERMISSION":
-            case "UPDATE_USER_ROLE":
-            case "UPDATE_FIELD_TEMPLATE":
-            case "UPDATE_LINK_SETTING":
-            case "UPDATE_API_CONNECTION":
-            case "UPDATE_ROLE":
-            case "UPDATE_STYLED_OUTPUT":
-            case "UPDATE_EASY_OBJECT":
-            case "DELETE_ENTITY":
-            case "DELETE_ENTITYPROPERTY":
-            case "DELETE_QUERY":
-            case "DELETE_DATA_SELECTOR":
-            case "DELETE_MODULE":
-            case "DELETE_PERMISSION":
-            case "DELETE_USER_ROLE":
-            case "DELETE_FIELD_TEMPLATE":
-            case "DELETE_LINK_SETTING":
-            case "DELETE_API_CONNECTION":
-            case "DELETE_ROLE":
-            case "DELETE_STYLED_OUTPUT":
-            case "DELETE_EASY_OBJECT":
-            {
-                idForComparison = actionData.ObjectIdOriginal.ToString();
-                actionData.MessageBuilder.AppendLine($"--> The object was some kind of configuration or setting, so using {nameof(actionData.ObjectIdOriginal)}.");
-                break;
-            }
             default:
             {
-                idForComparison = actionData.ItemIdOriginal.ToString();
-                actionData.MessageBuilder.AppendLine($"--> The object was a Wiser item or something related to a Wiser item, so using {nameof(actionData.ItemIdOriginal)}.");
+                idForComparison = actionData.ObjectIdOriginal.ToString();
+                actionData.MessageBuilder.AppendLine($"--> Using {nameof(actionData.ItemIdOriginal)}.");
                 break;
             }
         }
@@ -3832,12 +3840,35 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
         actionData.MessageBuilder.AppendLine($"Generating new ID for table '{tableName}'...");
 
         var query = $"SELECT IFNULL(MAX(id), 0) AS maxId FROM `{tableName}`";
+        var archiveQuery = $"SELECT IFNULL(MAX(id), 0) AS maxId FROM `{tableName}{WiserTableNames.ArchiveSuffix}`";
 
         var maxProductionId = await productionDatabaseConnection.ExecuteScalarAsync<ulong>(query, skipCache: true);
         actionData.MessageBuilder.AppendLine($"--> The highest ID in the production database is: {maxProductionId}");
 
+        if (WiserTableNames.TablesWithArchive.Contains(tableName, StringComparer.OrdinalIgnoreCase))
+        {
+            var maxProductionArchiveId = await productionDatabaseConnection.ExecuteScalarAsync<ulong>(archiveQuery, skipCache: true);
+            actionData.MessageBuilder.AppendLine($"--> This table has an archive. The highest ID in the production database of the archive is: {maxProductionArchiveId}");
+            if (maxProductionArchiveId > maxProductionId)
+            {
+                actionData.MessageBuilder.AppendLine("----> The archive ID is higher than the normal ID, so we will use that as the maximum ID.");
+                maxProductionId = maxProductionArchiveId;
+            }
+        }
+
         var maxEnvironmentId = await branchDatabaseConnection.ExecuteScalarAsync<ulong>(query, skipCache: true);
         actionData.MessageBuilder.AppendLine($"--> The highest ID in the branch database is: {maxEnvironmentId}");
+
+        if (WiserTableNames.TablesWithArchive.Contains(tableName, StringComparer.OrdinalIgnoreCase))
+        {
+            var maxEnvironmentArchiveId = await branchDatabaseConnection.ExecuteScalarAsync<ulong>(archiveQuery, skipCache: true);
+            actionData.MessageBuilder.AppendLine($"--> This table has an archive. The highest ID in the branch database of the archive is: {maxEnvironmentArchiveId}");
+            if (maxEnvironmentArchiveId > maxEnvironmentId)
+            {
+                actionData.MessageBuilder.AppendLine("----> The archive ID is higher than the normal ID, so we will use that as the maximum ID.");
+                maxEnvironmentId = maxEnvironmentArchiveId;
+            }
+        }
 
         var newId = Math.Max(maxProductionId, maxEnvironmentId) + 1;
         actionData.MessageBuilder.AppendLine($"--> Done! The new ID for production will be: {newId}");
