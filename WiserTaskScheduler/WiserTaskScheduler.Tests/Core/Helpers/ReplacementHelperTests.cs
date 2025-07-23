@@ -1,3 +1,4 @@
+using GeeksCoreLibrary.Core.Models;
 using WiserTaskScheduler.Core.Helpers;
 using WiserTaskScheduler.Core.Models;
 
@@ -40,6 +41,36 @@ public class ReplacementHelperTests
     };
 
     [Test]
+    [TestCaseSource(typeof(TestCases), nameof(TestCases.PrepareText_ValidValues_ReturnsCorrectValues_TestCases))]
+    public void PrepareText_ValidValues_ReturnsCorrectValues(string originalString, string remainingKey, HashSettingsModel hashSettings, bool insertValues, bool htmlEncode, string expectedValue, List<ParameterKeyModel> expectedParameterKeys, List<KeyValuePair<string, string>> expectedInsertedParameters)
+    {
+        // Act
+        var actual = ReplacementHelper.PrepareText(originalString, resultSet, remainingKey, hashSettings, insertValues, htmlEncode);
+        var actualPreparedText = actual.Item2.Aggregate(actual.Item1, (current, parameterKey) => current.Replace(parameterKey.ReplacementKey, parameterKey.Key));
+        actualPreparedText = actual.Item3.Aggregate(actualPreparedText, (current, insertedParameter) => current.Replace($"?{insertedParameter.Key}", insertedParameter.Value));
+
+        // Assert
+        actual.Item1.Should().NotBeNull("because we are only testing values present in the result set.");
+        actualPreparedText.Should().BeEquivalentTo(expectedValue, "because the value should be correct.");
+        actual.Item2.Should().NotBeNull("because we are only testing values present in the result set.");
+        actual.Item2.Count.Should().Be(expectedParameterKeys.Count, "because the parameter keys should be correct.");
+
+        for (var i = 0; i < actual.Item2.Count; i++)
+        {
+            actual.Item2[i].Key.Should().Be(expectedParameterKeys[i].Key, "because the parameter key should be the same.");
+        }
+
+        actual.Item3.Should().NotBeNull("because we are only testing values present in the result set.");
+        actual.Item3.Count.Should().Be(expectedInsertedParameters.Count, "because the inserted parameters should be correct.");
+
+        for (var i = 0; i < actual.Item3.Count; i++)
+        {
+            actual.Item3[i].Key.Should().StartWith(expectedInsertedParameters[i].Key, "because the inserted parameter key should be the same.");
+            actual.Item3[i].Value.Should().Be(expectedInsertedParameters[i].Value, "because the inserted parameter value should be the same.");
+        }
+    }
+
+    [Test]
     [TestCaseSource(typeof(TestCases), nameof(TestCases.GetValue_ValidPath_ReturnsCorrectValue_TestCases))]
     public void GetValue_ValidPath_ReturnsCorrectValue(string key, List<int> rows, bool htmlEncode, string expectedValue)
     {
@@ -77,6 +108,18 @@ public class ReplacementHelperTests
     [SuppressMessage("ReSharper", "InconsistentNaming")]
     private class TestCases
     {
+        public static IEnumerable<TestCaseData> PrepareText_ValidValues_ReturnsCorrectValues_TestCases
+        {
+            get
+            {
+                yield return new TestCaseData("", "", null, false, false, "", new List<ParameterKeyModel>(), new List<KeyValuePair<string, string>>());
+                yield return new TestCaseData("Hello, World!", "", null, false, false, "Hello, World!", new List<ParameterKeyModel>(), new List<KeyValuePair<string, string>>());
+                yield return new TestCaseData("[{Value}]", "", null, false, false, "?Value", new List<ParameterKeyModel> { new() { Key = "Value"} }, new List<KeyValuePair<string, string>>());
+                yield return new TestCaseData("[{Value<>}]", "", null, false, false, "Test1", new List<ParameterKeyModel>(), new List<KeyValuePair<string, string>> { new("Value", "Test1") });
+                yield return new TestCaseData("[{Value<>}]", "", null, true, false, "Test1", new List<ParameterKeyModel>(), new List<KeyValuePair<string, string>>());
+            }
+        }
+
         public static IEnumerable<TestCaseData> GetValue_ValidPath_ReturnsCorrectValue_TestCases
         {
             get
