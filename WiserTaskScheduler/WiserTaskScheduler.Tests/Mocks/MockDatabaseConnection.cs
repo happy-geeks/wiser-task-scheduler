@@ -38,24 +38,19 @@ public class MockDatabaseConnection : IDatabaseConnection
     {
         var dataTable = new DataTable();
 
-        switch (query)
+        if (query.StartsWith("QueriesService1"))
         {
-            case "QueriesService1":
-            {
-                dataTable.Columns.Add("testValue", typeof(string));
-                var row = dataTable.NewRow();
-                row["testValue"] = 1;
-                dataTable.Rows.Add(row);
-                break;
-            }
-            case "QueriesService2":
-            {
-                dataTable.Columns.Add("returnValue", typeof(string));
-                var row = dataTable.NewRow();
-                row["returnValue"] = parameters["MyValue"];
-                dataTable.Rows.Add(row);
-                break;
-            }
+            dataTable.Columns.Add("testValue", typeof(string));
+            var row = dataTable.NewRow();
+            row["testValue"] = 1;
+            dataTable.Rows.Add(row);
+        }
+        else if (query.StartsWith("#QueriesService2:"))
+        {
+            dataTable.Columns.Add("returnValue", typeof(string));
+            var row = dataTable.NewRow();
+            row["returnValue"] = parameters.Single(x => x.Key.StartsWith("MyValuewts")).Value;
+            dataTable.Rows.Add(row);
         }
 
         return Task.FromResult(dataTable);

@@ -139,7 +139,39 @@ public class QueriesServiceTests
                             {
                                 TimeId = 1,
                                 Order = 2,
-                                Query = "QueriesService2"
+                                UseResultSet = "MyResult.Results",
+                                Query = "#QueriesService2: SELECT [{MyValue}] AS returnValue FROM MyTable"
+                            }
+                        }
+                    },
+                    null,
+                    Options.Create(new GclSettings()),
+                    JObject.Parse("""
+                                  {
+                                    "MyResult": {
+                                      "Results": [
+                                        {
+                                          "MyValue": "Hello, World!"
+                                        }
+                                      ]
+                                    }
+                                  }
+                                  """),
+                    """
+                    {"Results":[{"Results":[{"returnValue":"Hello, World!"}]}]}
+                    """);
+                yield return new TestCaseData(new ConfigurationModel()
+                    {
+                        ConnectionString = "data source=localhost;initial catalog=TestDB;user id=TestUser;password=TestPassword",
+                        ServiceName = "TestService",
+                        Queries = new []
+                        {
+                            new QueryModel()
+                            {
+                                TimeId = 1,
+                                Order = 2,
+                                UseResultSet = "MyResult.Results[0]",
+                                Query = "#QueriesService2: SELECT [{MyValue<>}] AS returnValue FROM MyTable"
                             }
                         }
                     },
