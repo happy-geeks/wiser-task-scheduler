@@ -266,6 +266,10 @@ public class CleanupService(
     /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
     private async Task CleanupFloatingLinksAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService, ILinkTypesService linkTypesService)
     {
+        // Cleanup floating links is currently disabled
+        // this was tested but since its a risky operation that can lead to data loss it should be activated when more developers are active on the team
+        return;
+
         var allLinkTypes = await linkTypesService.GetAllLinkTypeSettingsAsync();
 
         foreach (var linkType in allLinkTypes.Where(linkType => !linkType.UseItemParentId))
@@ -276,6 +280,10 @@ public class CleanupService(
 
     private async Task CleanupFloatingLinksAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService, ILinkTypesService linkTypesService, LinkSettingsModel linkSettings)
     {
+        // Cleanup floating links is currently disabled
+        // this was tested but since its a risky operation that can lead to data loss it should be activated when more developers are active on the team
+        return;
+
         var itemLinkTablePrefix = linkTypesService.GetTablePrefixForLink(linkSettings);
         var sourceItemTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkSettings.SourceEntityType);
         var destinationItemTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkSettings.DestinationEntityType);
