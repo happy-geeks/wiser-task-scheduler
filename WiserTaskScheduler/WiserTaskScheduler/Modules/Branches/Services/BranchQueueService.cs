@@ -33,6 +33,7 @@ using WiserTaskScheduler.Modules.Branches.Enums;
 using WiserTaskScheduler.Modules.Branches.Interfaces;
 using WiserTaskScheduler.Modules.Branches.Models;
 using WiserTaskScheduler.Modules.Wiser.Interfaces;
+using PrecompiledRegexes = WiserTaskScheduler.Modules.Branches.Helpers.PrecompiledRegexes;
 
 namespace WiserTaskScheduler.Modules.Branches.Services;
 
@@ -1175,6 +1176,9 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             // So we need to map the ID that is saved in wiser_history to the new ID of the item that we create in the production environment.
             var idMappingsAddedInCurrentMerge = new Dictionary<string, Dictionary<ulong, ulong>>(StringComparer.OrdinalIgnoreCase);
             var idMapping = await PrepareIdMappingsAsync(branchDatabaseConnection, productionDatabaseConnection);
+
+            // This is to keep track which styled output formats have been changed to apply the mapping to the correct entries.
+            var styledOutputChangesForMapping = new HashSet<string>();
 
             // Start synchronising all history items one by one.
             var historyItemsSynchronised = new List<ulong>();
@@ -2636,6 +2640,12 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                      """;
                             await productionDatabaseConnection.ExecuteAsync(query);
 
+                            // If from a styled output one of the formats got changed during this merge, we need to store the information to perform mapping at the end.
+                            if (actionData.TableName.Equals(WiserTableNames.WiserStyledOutput, StringComparison.OrdinalIgnoreCase) && actionData.Field.StartsWith("format_", StringComparison.OrdinalIgnoreCase))
+                            {
+                                styledOutputChangesForMapping.Add($"{actionData.ObjectIdMapped}-{actionData.Field.ToLower()}");
+                            }
+
                             break;
                         }
                         case "DELETE_ENTITY":
@@ -2709,9 +2719,9 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             await UpdateProgressInQueue(originalDatabaseConnection, queueId, totalItemsInHistory, true);
 
             // Check if any ids need to be updated for styled output entries.
-            if (idMappingsAddedInCurrentMerge.TryGetValue(WiserTableNames.WiserStyledOutput, out var styledOutputMappings))
+            if (styledOutputChangesForMapping.Count != 0)
             {
-                await UpdateStyledOutputReferencesAsync(productionDatabaseConnection, styledOutputMappings);
+                await UpdateStyledOutputReferencesAsync(productionDatabaseConnection, idMapping[WiserTableNames.WiserStyledOutput], styledOutputChangesForMapping);
             }
 
             try
@@ -3186,50 +3196,57 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
     }
 
     /// <summary>
-    /// Checks if any of the styled outputs have a different ID in production than the branch.
-    /// If that is the case, finds any other styles outputs that use these IDs and updates their references with the new IDs.
+    /// Maps the styled output references in the different formats of the styled output.
     /// </summary>
     /// <param name="productionDatabaseConnection">The <see cref="IDatabaseConnection"/> to the production database.</param>
     /// <param name="styledOutputMappings">The list of ID mappings for the styles output table.</param>
-    private static async Task UpdateStyledOutputReferencesAsync(IDatabaseConnection productionDatabaseConnection, Dictionary<ulong, ulong> styledOutputMappings)
+    /// <param name="styledOutputChangesForMapping">A list of all the IDs and format columns that have been overriden during the merge and needs to be mapped again.</param>
+    private static async Task UpdateStyledOutputReferencesAsync(IDatabaseConnection productionDatabaseConnection, Dictionary<ulong, ulong> styledOutputMappings, HashSet<string> styledOutputChangesForMapping)
     {
-        var idsThatHaveChanged = styledOutputMappings.Where(x => x.Key != x.Value).ToList();
-        var newIdsClause = String.Join(",", idsThatHaveChanged.Select(x => x.Value));
-        foreach (var (branchId, productionId) in idsThatHaveChanged)
+        foreach (var styledOutputChangeForMapping in styledOutputChangesForMapping)
         {
-            // Note: Curly Brace needs to be included in search/replace
-            var searchString = $"{{StyledOutput~{branchId}";
-            var replaceString = $"{{StyledOutput~{productionId}";
+            var styledOutputIdentifierRegex = PrecompiledRegexes.StyledOutputIdentifierRegex.Match(styledOutputChangeForMapping);
+            var id = styledOutputIdentifierRegex.Groups[1].Value;
+            var formatName = styledOutputIdentifierRegex.Groups[2].Value;
 
-            productionDatabaseConnection.AddParameter("searchString", searchString);
+            // Only process the format columns that we know are used in the styled output table.
+            if (!formatName.Equals("format_begin", StringComparison.OrdinalIgnoreCase) && !formatName.Equals("format_item", StringComparison.OrdinalIgnoreCase) && !formatName.Equals("format_end", StringComparison.OrdinalIgnoreCase))
+                continue;
 
-            // Update all references to this styled output via simple string replacement.
-            // References to other styled output can look like this: "{StyledOutput~1}", or this: "{StyledOutput~999~SomeOtherParameter~SomeValue}".
-            // We need to replace the ID in both cases, but we can't just replace "{StyledOutput~1" with "{StyledOutput~4",
-            // because that would then turn "{StyledOutput~10}" into "{StyledOutput~40}", for example.
-            var query = $$"""
-                          UPDATE {{WiserTableNames.WiserStyledOutput}}
-                          SET format_begin = REPLACE(format_begin, '{{searchString}}~', '{{replaceString}}~'),
-                              format_begin = REPLACE(format_begin, '{{searchString}}}', '{{replaceString}}~'),
-                              format_item = REPLACE(format_item, '{{searchString}}~', '{{replaceString}}}'),
-                              format_item = REPLACE(format_item, '{{searchString}}}', '{{replaceString}}}'),
-                              format_end = REPLACE(format_end, '{{searchString}}~', '{{replaceString}}~'),
-                              format_end = REPLACE(format_end, '{{searchString}}}', '{{replaceString}}}'),
-                              format_empty = REPLACE(format_empty, '{{searchString}}~', '{{replaceString}}~'),
-                              format_empty = REPLACE(format_empty, '{{searchString}}}', '{{replaceString}}}')
-                          WHERE id IN ({{newIdsClause}})
-                          AND 
-                          (
-                              format_begin LIKE '%{{searchString}}~%' OR
-                              format_begin LIKE '%{{searchString}}}%' OR
-                              format_item LIKE '%{{searchString}}~%' OR
-                              format_item LIKE '%{{searchString}}}%' OR
-                              format_end LIKE '%{{searchString}}~%' OR
-                              format_end LIKE '%{{searchString}}}%' OR
-                              format_empty LIKE '%{{searchString}}~%' OR
-                              format_empty LIKE '%{{searchString}}}%'
-                          )
-                          """;
+            productionDatabaseConnection.AddParameter("id", id);
+            var query = $"SELECT {formatName} FROM {WiserTableNames.WiserStyledOutput} WHERE id = ?id";
+            var dataTable = await productionDatabaseConnection.GetAsync(query, skipCache: true);
+
+            if (dataTable.Rows.Count == 0)
+            {
+                continue;
+            }
+
+            var firstRow = dataTable.Rows[0];
+            var formatValue = firstRow[formatName].ToString();
+
+            // If the format value contains no styled output references, we can skip it.
+            if (String.IsNullOrWhiteSpace(formatValue) || !formatValue.Contains("{StyledOutput~", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // Replace the styled output references with the new ID mappings using a regex.
+            // By replacing each match we prevent issues if a replacement would contain another styled output reference and be replaced again.
+            // E.g. {StyledOutput~1} would be changed to {StyledOutput~2} and then {StyledOutput~2} would be changed to {StyledOutput~3} if we would use normal replacement.
+            var result = PrecompiledRegexes.StyledOutputBodyRegex.Replace(formatValue, match =>
+            {
+                var styledOutputId = Convert.ToUInt64(match.Groups[1].Value);
+                var newStyledOutputId = styledOutputMappings.TryGetValue(styledOutputId, out var mapping) ? mapping : styledOutputId;
+                return $"{{StyledOutput~{newStyledOutputId}";
+            });
+
+            productionDatabaseConnection.AddParameter("newValue", result);
+            query = $"""
+                     UPDATE {WiserTableNames.WiserStyledOutput}
+                     SET {formatName} = ?newValue
+                     WHERE id = ?id
+                     """;
 
             await productionDatabaseConnection.ExecuteAsync(query);
         }
