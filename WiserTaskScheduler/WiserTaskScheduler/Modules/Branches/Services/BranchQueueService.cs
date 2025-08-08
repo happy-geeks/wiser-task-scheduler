@@ -1765,6 +1765,38 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                                 continue;
                             }
 
+                            // If the field is the parent item ID, we need to map it based on the entity type of the parent item. When no parent item ID is set, we can skip this step since 0 is the default value for parent item ID.
+                            if (actionData.Field.Equals("parent_item_id", StringComparison.OrdinalIgnoreCase) && actionData.NewValue != "0")
+                            {
+                                actionData.MessageBuilder.AppendLine($"The field '{actionData.Field}' is a special field that needs to be mapped based on the entity of the parent.");
+
+                                var originalParentItemId = UInt64.Parse(actionData.NewValue);
+                                var linkTypeSettings = allLinkTypeSettings.Single(l => l.Type == 1 && l.SourceEntityType.Equals(actionData.ItemEntityType, StringComparison.OrdinalIgnoreCase) && l.UseItemParentId);
+
+                                actionData.MessageBuilder.AppendLine($"--> To determine the entity type of the parent, to find the correct prefix, we found the link type settings (ID: '{linkTypeSettings.Id}') for the link type '{linkTypeSettings.Type}' with source entity type '{linkTypeSettings.SourceEntityType}' and destination entity type '{linkTypeSettings.DestinationEntityType}'.");
+
+                                // Retrieve the entity type settings of the parent item, if not already cached to determine the table prefix.
+                                _ = allEntityTypeSettings.TryGetValue(linkTypeSettings.DestinationEntityType, out var entitySettingsOfParent);
+                                if (entitySettingsOfParent == null)
+                                {
+                                    entitySettingsOfParent = await branchEntityTypesService.GetEntityTypeSettingsAsync(linkTypeSettings.DestinationEntityType);
+                                    if (entitySettingsOfParent != null)
+                                    {
+                                        allEntityTypeSettings.Add(linkTypeSettings.DestinationEntityType, entitySettingsOfParent);
+                                    }
+                                }
+
+                                var parentEntityTablePrefix = wiserItemsService.GetTablePrefixForEntity(entitySettingsOfParent);
+                                var mappedParentItemId = GetMappedId($"{parentEntityTablePrefix}{WiserTableNames.WiserItem}", idMapping, originalParentItemId, actionData, "id") ?? 0;
+                                actionData.LinkedObjectIdOriginal = originalParentItemId;
+                                actionData.LinkedObjectIdMapped = mappedParentItemId;
+                                actionData.LinkedObjectTableName = $"{parentEntityTablePrefix}{WiserTableNames.WiserItem}";
+
+                                actionData.NewValue = mappedParentItemId.ToString();
+
+                                actionData.MessageBuilder.AppendLine($"--> Mapped the parent item ID from '{originalParentItemId}' to '{mappedParentItemId}' based on the entity type of the parent item.");
+                            }
+
                             sqlParameters["itemId"] = actionData.ItemIdMapped;
                             sqlParameters["newValue"] = actionData.NewValue;
 
