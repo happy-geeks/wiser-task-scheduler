@@ -2751,9 +2751,9 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
             await UpdateProgressInQueue(originalDatabaseConnection, queueId, totalItemsInHistory, true);
 
             // Check if any ids need to be updated for styled output entries.
-            if (styledOutputChangesForMapping.Count != 0)
+            if (styledOutputChangesForMapping.Count != 0 && idMapping.TryGetValue(WiserTableNames.WiserStyledOutput, out var styledOutputIdMappings))
             {
-                await UpdateStyledOutputReferencesAsync(productionDatabaseConnection, idMapping[WiserTableNames.WiserStyledOutput], styledOutputChangesForMapping);
+                await UpdateStyledOutputReferencesAsync(productionDatabaseConnection, styledOutputIdMappings, styledOutputChangesForMapping);
             }
 
             try
