@@ -36,6 +36,24 @@ public class BranchBatchLoggerService(
     public LogSettings LogSettings { get; set; }
 
     /// <inheritdoc />
+    public async Task PrepareMergeLogTableAsync(string connectionString)
+    {
+        if (String.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new ArgumentNullException(nameof(connectionString));
+        }
+
+        await using var scope = serviceProvider.CreateAsyncScope();
+        var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
+        await databaseConnection.ChangeConnectionStringsAsync(connectionString);
+        var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+        await databaseHelpersService.CheckAndUpdateTablesAsync([WiserTableNames.WiserBranchMergeLog]);
+
+        // Empty the log table before we start, we only want to see the logs of the last merge, otherwise the table will become way too large.
+        await databaseConnection.ExecuteAsync($"TRUNCATE TABLE {WiserTableNames.WiserBranchMergeLog}");
+    }
+
+    /// <inheritdoc />
     public void LogMergeAction(BranchMergeLogModel logData)
     {
         mergeLogQueue.Enqueue(logData);
@@ -122,7 +140,7 @@ public class BranchBatchLoggerService(
             var values = new List<string>();
             for (var i = 0; i < entriesToInsert.Count; i++)
             {
-                values.Add($"(?QueueId{i}, ?QueueName{i}, ?BranchId{i}, ?DateTime{i}, ?HistoryId{i}, ?TableName{i}, ?Field{i}, ?Action{i}, ?OldValue{i}, ?NewValue{i}, ?ObjectIdOriginal{i}, ?ObjectIdMapped{i}, ?ItemIdOriginal{i}, ?ItemIdMapped{i}, ?ItemEntityType{i}, ?ItemTableName{i}, ?LinkIdOriginal{i}, ?LinkIdMapped{i}, ?LinkDestinationItemIdOriginal{i}, ?LinkDestinationItemIdMapped{i}, ?LinkDestinationItemEntityType{i}, ?LinkDestinationItemTableName{i}, ?LinkType{i}, ?LinkOrdering{i}, ?LinkTableName{i}, ?ItemDetailIdOriginal{i}, ?ItemDetailIdMapped{i}, ?ItemDetailLanguageCode{i}, ?ItemDetailGroupName{i}, ?FileIdOriginal{i}, ?FileIdMapped{i}, ?UsedMergeSettings{i}, ?UsedConflictSettings{i}, ?ProductionHost{i}, ?ProductionDatabase{i}, ?BranchHost{i}, ?BranchDatabase{i}, ?Status{i}, ?Message{i})");
+                values.Add($"(?QueueId{i}, ?QueueName{i}, ?BranchId{i}, ?DateTime{i}, ?HistoryId{i}, ?TableName{i}, ?Field{i}, ?Action{i}, ?OldValue{i}, ?NewValue{i}, ?ObjectIdOriginal{i}, ?ObjectIdMapped{i}, ?ItemIdOriginal{i}, ?ItemIdMapped{i}, ?ItemEntityType{i}, ?ItemTableName{i}, ?LinkIdOriginal{i}, ?LinkIdMapped{i}, ?LinkDestinationItemIdOriginal{i}, ?LinkDestinationItemIdMapped{i}, ?LinkDestinationItemEntityType{i}, ?LinkDestinationItemTableName{i}, ?LinkType{i}, ?LinkOrdering{i}, ?LinkTableName{i}, ?ItemDetailIdOriginal{i}, ?ItemDetailIdMapped{i}, ?ItemDetailLanguageCode{i}, ?ItemDetailGroupName{i}, ?FileIdOriginal{i}, ?FileIdMapped{i}, ?LinkedObjectIdOriginal{i}, ?LinkedObjectIdMapped{i}, ?LinkedObjectTableName{i}, ?UsedMergeSettings{i}, ?UsedConflictSettings{i}, ?ProductionHost{i}, ?ProductionDatabase{i}, ?BranchHost{i}, ?BranchDatabase{i}, ?Status{i}, ?Message{i})");
                 databaseConnection.AddParameter($"QueueId{i}", entriesToInsert[i].QueueId);
                 databaseConnection.AddParameter($"QueueName{i}", entriesToInsert[i].QueueName);
                 databaseConnection.AddParameter($"BranchId{i}", entriesToInsert[i].BranchId);
@@ -154,6 +172,9 @@ public class BranchBatchLoggerService(
                 databaseConnection.AddParameter($"ItemDetailGroupName{i}", entriesToInsert[i].ItemDetailGroupName);
                 databaseConnection.AddParameter($"FileIdOriginal{i}", entriesToInsert[i].FileIdOriginal);
                 databaseConnection.AddParameter($"FileIdMapped{i}", entriesToInsert[i].FileIdMapped);
+                databaseConnection.AddParameter($"LinkedObjectIdOriginal{i}", entriesToInsert[i].LinkedObjectIdOriginal);
+                databaseConnection.AddParameter($"LinkedObjectIdMapped{i}", entriesToInsert[i].LinkedObjectIdMapped);
+                databaseConnection.AddParameter($"LinkedObjectTableName{i}", entriesToInsert[i].LinkedObjectTableName);
                 databaseConnection.AddParameter($"UsedMergeSettings{i}", entriesToInsert[i].UsedMergeSettings == null ? null : JsonConvert.SerializeObject(entriesToInsert[i].UsedMergeSettings));
                 databaseConnection.AddParameter($"UsedConflictSettings{i}", entriesToInsert[i].UsedConflictSettings == null ? null : JsonConvert.SerializeObject(entriesToInsert[i].UsedConflictSettings));
                 databaseConnection.AddParameter($"ProductionHost{i}", entriesToInsert[i].ProductionHost);
@@ -198,6 +219,9 @@ public class BranchBatchLoggerService(
                              item_detail_group_name,
                              file_id_original,
                              file_id_mapped,
+                             linked_object_id_original,
+                             linked_object_id_mapped,
+                             linked_object_table_name,
                              used_merge_settings,
                              used_conflict_settings,
                              production_host,

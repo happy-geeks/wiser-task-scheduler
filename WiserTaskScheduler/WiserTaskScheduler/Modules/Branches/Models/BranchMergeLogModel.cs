@@ -167,22 +167,22 @@ public class BranchMergeLogModel(int queueId, string queueName, int branchId, ul
     #region Item detail information
 
     /// <summary>
-    /// If this is a change for a Wiser item detail, this will contain the value of the `id` column of `wiser_itemdetail`, in the branch database.
+    /// If this is a change for a Wiser item detail, this will contain the value of the `id` column of `wiser_itemdetail` or `wiser_itemlinkdetail`, in the branch database.
     /// </summary>
     public ulong ItemDetailIdOriginal { get; set; }
 
     /// <summary>
-    /// If this is a change for a Wiser item detail, this will contain the value of the `id` column of `wiser_itemdetail`, in the branch database.
+    /// If this is a change for a Wiser item detail, this will contain the value of the `id` column of `wiser_itemdetail` or `wiser_itemlinkdetail`, in the branch database.
     /// </summary>
     public ulong ItemDetailIdMapped { get; set; }
 
     /// <summary>
-    /// If this is a change for a Wiser item detail, this will contain the value of the `language_code` column of `wiser_itemdetail`, in the branch database.
+    /// If this is a change for a Wiser item detail, this will contain the value of the `language_code` column of `wiser_itemdetail` or `wiser_itemlinkdetail`, in the branch database.
     /// </summary>
     public string ItemDetailLanguageCode { get; set; } = String.Empty;
 
     /// <summary>
-    /// If this is a change for a Wiser item detail, this will contain the value of the `groupname` column of `wiser_itemdetail`, in the branch database.
+    /// If this is a change for a Wiser item detail, this will contain the value of the `groupname` column of `wiser_itemdetail` or `wiser_itemlinkdetail`, in the branch database.
     /// </summary>
     public string ItemDetailGroupName { get; set; } = String.Empty;
 
@@ -199,6 +199,28 @@ public class BranchMergeLogModel(int queueId, string queueName, int branchId, ul
     /// If this change was for a file in the database, then this will contain the value of the `id` column of `wiser_itemfile` in the production database.
     /// </summary>
     public ulong FileIdMapped { get; set; }
+
+    #endregion
+
+    #region Information for other objects/tables
+
+    /// <summary>
+    /// Some tables/objects are linked to other objects, such as permissions that are linked to queries, items, etc.
+    /// This will contain the ID of the linked object in the branch database.
+    /// </summary>
+    public ulong LinkedObjectIdOriginal { get; set; }
+
+    /// <summary>
+    /// Some tables/objects are linked to other objects, such as permissions that are linked to queries, items, etc.
+    /// This will contain the ID of the linked object in the production database.
+    /// </summary>
+    public ulong LinkedObjectIdMapped { get; set; }
+
+    /// <summary>
+    /// Some tables/objects are linked to other objects, such as permissions that are linked to queries, items, etc.
+    /// This will contain the name of the table that should contain the linked object.
+    /// </summary>
+    public string LinkedObjectTableName { get; set; } = String.Empty;
 
     #endregion
 
