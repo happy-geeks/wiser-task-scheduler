@@ -16,9 +16,23 @@
 
     <ItemGroup>
         <PackageReference Include="GeeksCoreLibrary" Version="5.3.2507.6" />
-        <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.4" />
-        <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.4" />
+        <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.7" />
+        <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.7" />
         <PackageReference Include="Serilog.AspNetCore" Version="9.0.0"/>
-        <PackageReference Include="SlackNet.AspNetCore" Version="0.16.1" />
+        <PackageReference Include="SlackNet.AspNetCore" Version="0.16.2" />
+    </ItemGroup>
+
+    <!-- Exclude Publish folder -->
+    <ItemGroup>
+        <Compile Remove="Publish\**" />
+    </ItemGroup>
+    <ItemGroup>
+        <EmbeddedResource Remove="Publish\**" />
+    </ItemGroup>
+    <ItemGroup>
+        <Content Remove="Publish\**" />
+    </ItemGroup>
+    <ItemGroup>
+        <None Remove="Publish\**" />
     </ItemGroup>
 </Project>

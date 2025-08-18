@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,7 +21,12 @@ namespace WiserTaskScheduler.Core.Services;
 /// <summary>
 /// A service to manage all WTS configurations that are provided by Wiser.
 /// </summary>
-public class CleanupService(IOptions<WtsSettings> wtsSettings, IServiceProvider serviceProvider, ILogService logService, ILogger<CleanupService> logger) : ICleanupService, ISingletonService
+public class CleanupService(
+    IOptions<WtsSettings> wtsSettings,
+    IServiceProvider serviceProvider,
+    ILogService logService,
+    ILogger<CleanupService> logger
+) : ICleanupService, ISingletonService
 {
     private readonly string logName = $"CleanupService ({Environment.MachineName} - {wtsSettings.Value.Name})";
 
@@ -35,12 +41,15 @@ public class CleanupService(IOptions<WtsSettings> wtsSettings, IServiceProvider 
         using var scope = serviceProvider.CreateScope();
         await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
         var databaseHelpersService = scope.ServiceProvider.GetRequiredService<IDatabaseHelpersService>();
+        var wiserItemsService = scope.ServiceProvider.GetRequiredService<IWiserItemsService>();
+        var linkTypesService = scope.ServiceProvider.GetRequiredService<ILinkTypesService>();
 
         await CleanupFilesAsync();
         await CleanupDatabaseLogsAsync(databaseConnection, databaseHelpersService);
         await CleanupDatabaseRenderTimesAsync(databaseConnection, databaseHelpersService);
         await CleanupWtsServicesAsync(databaseConnection, databaseHelpersService);
-		await CleanupTemporaryWiserFilesAsync(databaseConnection, databaseHelpersService);
+        await CleanupTemporaryWiserFilesAsync(databaseConnection, databaseHelpersService);
+        await CleanupFloatingLinksAsync(databaseConnection, databaseHelpersService, wiserItemsService, linkTypesService);
     }
 
     /// <summary>
@@ -247,6 +256,73 @@ public class CleanupService(IOptions<WtsSettings> wtsSettings, IServiceProvider 
         catch (Exception exception)
         {
             await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occured during cleanup: {exception}", logName);
+        }
+    }
+
+    /// <summary>
+    /// Cleanup floating dead links in the database
+    /// </summary>
+    /// <param name="databaseConnection">The database connection to use.</param>
+    /// <param name="databaseHelpersService">The <see cref="IDatabaseHelpersService"/> to use.</param>
+    private async Task CleanupFloatingLinksAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService, ILinkTypesService linkTypesService)
+    {
+        // Cleanup floating links is currently disabled
+        // this was tested but since its a risky operation that can lead to data loss it should be activated when more developers are active on the team
+        return;
+
+        var allLinkTypes = await linkTypesService.GetAllLinkTypeSettingsAsync();
+
+        foreach (var linkType in allLinkTypes.Where(linkType => !linkType.UseItemParentId))
+        {
+            await CleanupFloatingLinksAsync(databaseConnection, databaseHelpersService, wiserItemsService, linkTypesService, linkType);
+        }
+    }
+
+    private async Task CleanupFloatingLinksAsync(IDatabaseConnection databaseConnection, IDatabaseHelpersService databaseHelpersService, IWiserItemsService wiserItemsService, ILinkTypesService linkTypesService, LinkSettingsModel linkSettings)
+    {
+        // Cleanup floating links is currently disabled
+        // this was tested but since its a risky operation that can lead to data loss it should be activated when more developers are active on the team
+        return;
+
+        var itemLinkTablePrefix = linkTypesService.GetTablePrefixForLink(linkSettings);
+        var sourceItemTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkSettings.SourceEntityType);
+        var destinationItemTablePrefix = await wiserItemsService.GetTablePrefixForEntityAsync(linkSettings.DestinationEntityType);
+
+        var retrieveIdsQuery = $"""
+                                SELECT link.id
+                                FROM {itemLinkTablePrefix}{WiserTableNames.WiserItemLink} AS link
+                                LEFT JOIN {sourceItemTablePrefix}{WiserTableNames.WiserItem} AS sourceItem ON sourceItem.id = link.item_id AND sourceItem.entity_type = ?sourceItemEntityType
+                                LEFT JOIN {destinationItemTablePrefix}{WiserTableNames.WiserItem} AS destinationItem ON destinationItem.id = link.destination_item_id AND destinationItem.entity_type = ?destinationItemEntityType
+                                WHERE link.type = ?linkType
+                                AND link.destination_item_id != 0
+                                AND (sourceItem.id IS NULL OR destinationItem.id IS NULL)
+                                AND link.added_on < (CURDATE() - INTERVAL 1 MONTH)
+                                """;
+        try
+        {
+            databaseConnection.ClearParameters();
+            databaseConnection.AddParameter("linkType", linkSettings.Type);
+            databaseConnection.AddParameter("sourceItemEntityType", linkSettings.SourceEntityType);
+            databaseConnection.AddParameter("destinationItemEntityType", linkSettings.DestinationEntityType);
+
+            var retrievedIds = await databaseConnection.GetAsync(retrieveIdsQuery);
+
+            if (retrievedIds.Rows.Count != 0)
+            {
+                var deleteFloatingLinksQuery = $"""
+                                                SET @_saveHistory = TRUE;
+                                                SET @_username = 'WTS Cleanup Service';
+                                                DELETE FROM {itemLinkTablePrefix}{WiserTableNames.WiserItemLink}
+                                                WHERE id IN ({String.Join(", ", retrievedIds.Rows.Cast<DataRow>().Select(x => x.Field<long>("id")))})
+                                                """;
+
+                var deleteResults = await databaseConnection.ExecuteAsync(deleteFloatingLinksQuery);
+                await logService.LogInformation(logger, LogScopes.RunStartAndStop, LogSettings, $"Deleted {deleteResults} floating links for link type '{linkSettings.Type}' in '{itemLinkTablePrefix}{WiserTableNames.WiserItemLink}'.", logName);
+            }
+        }
+        catch (Exception exception)
+        {
+            await logService.LogError(logger, LogScopes.RunStartAndStop, LogSettings, $"an exception occurred during cleanup of {itemLinkTablePrefix}{WiserTableNames.WiserItemLink}: {exception}", logName);
         }
     }
 }
