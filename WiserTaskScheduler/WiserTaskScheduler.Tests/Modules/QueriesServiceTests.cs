@@ -33,7 +33,7 @@ public class QueriesServiceTests
 
     [Test]
     [TestCaseSource(typeof(TestCases), nameof(TestCases.InitializeAsync_InvalidConfiguration_ThrowsException_TestCases))]
-    public async Task InitializeAsync_InvalidConfiguration_ThrowsException(ConfigurationModel configuration, HashSet<string> tablesToOptimize, IOptions<GclSettings> gclSettings)
+    public void InitializeAsync_InvalidConfiguration_ThrowsException(ConfigurationModel configuration, HashSet<string> tablesToOptimize, IOptions<GclSettings> gclSettings)
     {
         // Arrange
         var queriesService = new QueriesService(null, null, null, gclSettings);
