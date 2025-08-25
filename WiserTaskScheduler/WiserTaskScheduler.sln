@@ -30,6 +30,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docker", "Docker", "{61F15D
 		Dockerfile = Dockerfile
 		entrypoint.sh = entrypoint.sh
 	EndProjectSection
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WiserTaskScheduler.Tests", "WiserTaskScheduler.Tests\WiserTaskScheduler.Tests.csproj", "{F4EEEE53-94E2-4867-9318-F183FF44BE69}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Update", "Update", "{AEE874A3-88ED-43A3-B30D-16DD9BD2884B}"
 	ProjectSection(SolutionItems) = preProject
@@ -70,6 +71,10 @@ Global
 		{EF0799C9-2E89-4AFD-B31D-5F3A245C3244}.Release|x64.Build.0 = Release|Any CPU
 		{EF0799C9-2E89-4AFD-B31D-5F3A245C3244}.Release|x86.ActiveCfg = Release|Any CPU
 		{EF0799C9-2E89-4AFD-B31D-5F3A245C3244}.Release|x86.Build.0 = Release|Any CPU
+		{F4EEEE53-94E2-4867-9318-F183FF44BE69}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F4EEEE53-94E2-4867-9318-F183FF44BE69}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F4EEEE53-94E2-4867-9318-F183FF44BE69}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F4EEEE53-94E2-4867-9318-F183FF44BE69}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
