@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using WiserTaskScheduler.Core.Models.AutoProjectDeploy;
 using WiserTaskScheduler.Core.Models.Cleanup;
 using WiserTaskScheduler.Core.Models.ParentsUpdate;
+using WiserTaskScheduler.Core.Models.ProductsApiUpdater;
 using WiserTaskScheduler.Core.Services;
 using WiserTaskScheduler.Modules.Branches.Models;
 using WiserTaskScheduler.Modules.Branches.Services;
@@ -40,6 +41,11 @@ public class WtsSettings
     /// Gets or sets the settings of the <see cref="CleanupService"/>.
     /// </summary>
     public CleanupServiceSettings CleanupService { get; init; } = new();
+
+    /// <summary>
+    /// Gets or sets the settings of the <see cref="ProductsApiUpdateService"/>.
+    /// </summary>
+    public ProductsApiUpdateServiceSettings ProductsApiUpdateService { get; init; } = new();
 
     /// <summary>
     /// Gets or sets the settings of the <see cref="ParentsUpdateService"/>.
