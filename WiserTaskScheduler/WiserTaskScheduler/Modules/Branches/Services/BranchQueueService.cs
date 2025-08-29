@@ -345,6 +345,10 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                 await branchDatabaseConnection.ExecuteAsync(createTableResult.Rows[0].Field<string>("Create table"));
             }
 
+            // Create the wiser_id_mappings table in the new branch.
+            // This is used to know which IDs are already synced to the production environment.
+            await branchDatabaseHelpersService.CheckAndUpdateTablesAsync([WiserTableNames.WiserIdMappings]);
+
             // Cache some settings that we'll need later.
             var allLinkTypes = await wiserItemsService.GetAllLinkTypeSettingsAsync();
 
@@ -950,10 +954,6 @@ public class BranchQueueService(ILogService logService, ILogger<BranchQueueServi
                     errors.Add($"Unable to create stored procedure '{dataRow.Field<string>("ROUTINE_NAME")}' in the new branch, because of the following error: {exception}");
                 }
             }
-
-            // Create the wiser_id_mappings table in the new branch.
-            // This is used to know which IDs are already synced to the production environment.
-            await branchDatabaseHelpersService.CheckAndUpdateTablesAsync([WiserTableNames.WiserIdMappings]);
         }
         catch (Exception exception)
         {
