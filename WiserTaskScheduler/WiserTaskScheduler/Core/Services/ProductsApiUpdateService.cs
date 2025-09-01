@@ -78,6 +78,12 @@ public class ProductsApiUpdateService(
             using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
             var body = await reader.ReadToEndAsync();
 
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                await logService.LogError(logger, LogScopes.RunBody, LogSettings, $"Failed to retrieve out of date products, server returned status '{response.StatusCode}' with reason '{response.ReasonPhrase}' and body '{body}'.", logName);
+                return 0;
+            }
+
             if (string.IsNullOrWhiteSpace(body))
             {
                 await logService.LogError(logger, LogScopes.RunBody, LogSettings, "Failed to retrieve out of date products, response body is empty.", logName);
