@@ -51,6 +51,7 @@ wtsSettings = applicationBuilder.Configuration.GetSection("Wts").Get<WtsSettings
 applicationBuilder.Services.AddHostedService<MainWorker>();
 applicationBuilder.Services.AddHostedService<CleanupWorker>();
 applicationBuilder.Services.AddHostedService<UpdateParentsWorker>();
+applicationBuilder.Services.AddHostedService<ProductsApiUpdateWorker>();
 
 applicationBuilder.Services.AddSingleton<IBranchBatchLoggerService, BranchBatchLoggerService>();
 applicationBuilder.Services.AddHostedService(provider => (BranchBatchLoggerService)provider.GetRequiredService<IBranchBatchLoggerService>());

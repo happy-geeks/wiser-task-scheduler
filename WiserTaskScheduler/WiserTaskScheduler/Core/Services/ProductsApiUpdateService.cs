@@ -44,9 +44,6 @@ public class ProductsApiUpdateService(
             return;
         }
 
-        using var scope = serviceProvider.CreateScope();
-        await using var databaseConnection = scope.ServiceProvider.GetRequiredService<IDatabaseConnection>();
-
         var outOfDateCount = await GetOutOfDateCount();
         if (outOfDateCount > 0)
         {

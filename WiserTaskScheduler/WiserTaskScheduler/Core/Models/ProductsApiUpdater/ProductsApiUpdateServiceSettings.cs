@@ -15,7 +15,7 @@ public class ProductsApiUpdateServiceSettings
     /// <summary>
     /// Gets or Sets the url of the products api.
     /// </summary>
-    public string ProductsApiUrl { get; set; } = "https://wiserapi.configuratoren.nl/api/v3/products";
+    public string ProductsApiUrl { get; set; } = "https://wiserapi.wiser3.nl/api/v3/products";
 
     /// <summary>
     /// Gets or sets the run scheme for the <see cref="ProductsApiUpdateWorker"/>.
