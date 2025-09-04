@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Modules.Branches.Services;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -21,7 +22,6 @@ namespace WiserTaskScheduler.Core.Services;
 /// </summary>
 public class ProductsApiUpdateService(
     IOptions<WtsSettings> wtsSettings,
-    IServiceProvider serviceProvider,
     ILogService logService,
     ILogger<ProductsApiUpdateService> logger,
     IWiserService wiserService
@@ -38,27 +38,37 @@ public class ProductsApiUpdateService(
     /// <inheritdoc />
     public async Task UpdateProductsAsync()
     {
-        if (!productsApiUpdateServiceSettings.Enabled)
+        if (productsApiUpdateServiceSettings.MainEnabled)
         {
-            // if the service is not enabled, we don't need to do anything.
-            return;
+            await UpdateProductsTarget(false);
         }
 
-        var outOfDateCount = await GetOutOfDateCount();
+        if (productsApiUpdateServiceSettings.IterationEnabled)
+        {
+            await UpdateProductsTarget(true);
+        }
+    }
+
+    /// <summary>
+    /// Helper function to call the update logic per target.
+    /// </summary>
+    private async Task UpdateProductsTarget(bool isIteration)
+    {
+        var outOfDateCount = await GetOutOfDateCount(isIteration);
         if (outOfDateCount > 0)
         {
-           await RequestProductsApiUpdateAsync();
+            await RequestProductsApiUpdateAsync(isIteration);
         }
     }
 
     /// <summary>
     /// retrieves the count of out of date products from the Wiser API.
     /// </summary>
-    private async Task<int> GetOutOfDateCount()
+    private async Task<int> GetOutOfDateCount(bool targetIteration = false)
     {
         try
         {
-            var accessToken = await wiserService.GetAccessTokenAsync();
+            var accessToken = targetIteration ? await wiserService.GetIterationAccessTokenAsync() : await wiserService.GetAccessTokenAsync();
             var wiserApiBaseUrl = $"{wiserSettings.WiserApiUrl}{(wiserSettings.WiserApiUrl.EndsWith('/') ? "" : "/")}api/v3/";
             var outdatedProductsUrl = $"{wiserApiBaseUrl}products/count-outdated-products";
 
@@ -108,11 +118,11 @@ public class ProductsApiUpdateService(
     /// <summary>
     /// Requests an update of the products API by calling the Wiser API.
     /// </summary>
-    private async Task RequestProductsApiUpdateAsync()
+    private async Task RequestProductsApiUpdateAsync(bool targetIteration = false)
     {
         try
         {
-            var accessToken = await wiserService.GetAccessTokenAsync();
+            var accessToken = targetIteration ? await wiserService.GetIterationAccessTokenAsync() : await wiserService.GetAccessTokenAsync();
             var wiserApiBaseUrl = $"{wiserSettings.WiserApiUrl}{(wiserSettings.WiserApiUrl.EndsWith('/') ? "" : "/")}api/v3/";
             var updateProductsUrl = $"{wiserApiBaseUrl}products/refresh-all";
 

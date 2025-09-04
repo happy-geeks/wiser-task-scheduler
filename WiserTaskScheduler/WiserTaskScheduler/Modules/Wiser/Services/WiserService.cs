@@ -29,8 +29,15 @@ public class WiserService(IOptions<WtsSettings> wtsSettings, ILogService logServ
     [EditorBrowsable(EditorBrowsableState.Never)]
     private string accessToken = "";
 
+    [Browsable(false)]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    private string accessTokenIteration = "";
+
     private DateTime accessTokenExpireTime = DateTime.MinValue;
     private string refreshToken = "";
+
+    private DateTime accessTokenExpireTimeIteration = DateTime.MinValue;
+    private string refreshTokenIteration = "";
 
     // Semaphore is a locking system that can be used with async code.
     private static readonly SemaphoreSlim AccessTokenLock = new(1, 1);
@@ -68,16 +75,51 @@ public class WiserService(IOptions<WtsSettings> wtsSettings, ILogService logServ
         }
     }
 
+    /// <inheritdoc />
+    public async Task<string> GetIterationAccessTokenAsync()
+    {
+        // Lock to prevent multiple requests at once.
+        await AccessTokenLock.WaitAsync();
+
+        try
+        {
+            if (String.IsNullOrWhiteSpace(accessTokenIteration))
+            {
+                await LoginAsync(false, true);
+            }
+            else if (accessTokenExpireTimeIteration <= DateTime.Now)
+            {
+                if (String.IsNullOrWhiteSpace(refreshTokenIteration))
+                {
+                    await LoginAsync(false, true);
+                }
+                else
+                {
+                    await LoginAsync(true, true);
+                }
+            }
+
+            return accessTokenIteration;
+        }
+        finally
+        {
+            // Release the lock. This is in a finally to be 100% sure that it will always be released. Otherwise the application might freeze.
+            AccessTokenLock.Release();
+        }
+    }
+
     /// <summary>
     /// DO NOT CALL THIS BY YOURSELF!
     /// Login to the Wiser API.
     /// This method is called when using <see cref="accessToken"/> or <see cref="GetAccessTokenAsync"/> with a lock.
+    /// <para name="useRefreshToken">Make use of a refresh token.</para>
+    /// <para name="targetIterationDomain">construct the token for the iteration branch instead of main.</para>
     /// </summary>
-    private async Task LoginAsync(bool useRefreshToken = false)
+    private async Task LoginAsync(bool useRefreshToken = false, bool targetIterationDomain = false)
     {
         var formData = new List<KeyValuePair<string, string>>
         {
-            new("subDomain", $"{wiserSettings.Subdomain}"),
+            new("subDomain", $"{wiserSettings.Subdomain}{(targetIterationDomain ? "-iteration" : "")}"),
             new("client_id", $"{wiserSettings.ClientId}"),
             new("client_secret", $"{wiserSettings.ClientSecret}"),
             new("isTestEnvironment", $"{wiserSettings.TestEnvironment}")
@@ -86,7 +128,7 @@ public class WiserService(IOptions<WtsSettings> wtsSettings, ILogService logServ
         if (useRefreshToken)
         {
             formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
-            formData.Add(new KeyValuePair<string, string>("refresh_token", refreshToken));
+            formData.Add(new KeyValuePair<string, string>("refresh_token", targetIterationDomain ? refreshTokenIteration : refreshToken));
         }
         else
         {
@@ -133,9 +175,18 @@ public class WiserService(IOptions<WtsSettings> wtsSettings, ILogService logServ
             await logService.LogInformation(logger, LogScopes.RunBody, logSettings, $"Response body: {body}", "WiserService");
             var wiserLoginResponse = JsonConvert.DeserializeObject<WiserLoginResponseModel>(body);
 
-            accessToken = wiserLoginResponse.AccessToken;
-            accessTokenExpireTime = DateTime.Now.AddSeconds(wiserLoginResponse.ExpiresIn).AddMinutes(-1); // Refresh 1 minute before expire.
-            refreshToken = wiserLoginResponse.RefreshToken;
+            if (targetIterationDomain)
+            {
+                accessTokenIteration = wiserLoginResponse.AccessToken;
+                accessTokenExpireTimeIteration = DateTime.Now.AddSeconds(wiserLoginResponse.ExpiresIn).AddMinutes(-1); // Refresh 1 minute before expire.
+                refreshTokenIteration = wiserLoginResponse.RefreshToken;
+            }
+            else
+            {
+                accessToken = wiserLoginResponse.AccessToken;
+                accessTokenExpireTime = DateTime.Now.AddSeconds(wiserLoginResponse.ExpiresIn).AddMinutes(-1); // Refresh 1 minute before expire.
+                refreshToken = wiserLoginResponse.RefreshToken;
+            }
         }
         catch (Exception exception)
         {
