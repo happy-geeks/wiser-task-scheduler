@@ -20,4 +20,10 @@ public interface IWiserService
     /// </summary>
     /// <returns>The access token to authenticate with the Wiser API.</returns>
     Task<string> GetAccessTokenAsync();
+
+    /// <summary>
+    /// Get the access token for the Iteration branch and gets a new token if none is available or if it has expired.
+    /// </summary>
+    /// <returns>The access token to authenticate with the Wiser API for iteration branch.</returns>
+    Task<string> GetIterationAccessTokenAsync();
 }

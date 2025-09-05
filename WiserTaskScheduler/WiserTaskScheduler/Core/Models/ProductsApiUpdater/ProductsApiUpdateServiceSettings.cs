@@ -8,9 +8,14 @@ namespace WiserTaskScheduler.Core.Models.ProductsApiUpdater;
 public class ProductsApiUpdateServiceSettings
 {
     /// <summary>
-    ///  Gets or sets a value indicating whether the <see cref="ProductsApiUpdateWorker"/> is enabled.
+    ///  Gets or sets a value indicating whether the update is enabled on the main db.
     /// </summary>
-    public bool Enabled { get; set; } = false;
+    public bool MainEnabled { get; set; } = false;
+
+    /// <summary>
+    ///  Gets or sets a value indicating whether the update is enabled on the iteration db.
+    /// </summary>
+    public bool IterationEnabled { get; set; } = false;
 
     /// <summary>
     /// Gets or Sets the url of the products api.
