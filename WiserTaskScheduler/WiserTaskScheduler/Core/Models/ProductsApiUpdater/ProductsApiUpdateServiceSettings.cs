@@ -13,7 +13,7 @@ public class ProductsApiUpdateServiceSettings
     public bool MainEnabled { get; set; } = false;
 
     /// <summary>
-    ///  Gets or sets a value indicating whether the update is enabled on the main db is enabled.
+    ///  Gets or sets a value indicating whether the update is enabled on the iteration db is enabled.
     /// </summary>
     public bool IterationEnabled { get; set; } = false;
 
