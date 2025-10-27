@@ -163,7 +163,7 @@ public class HttpApisService(IOAuthService oAuthService, IBodyService bodyServic
             var parameterKeys = tuple.Item2;
             authStr = ReplacementHelper.ReplaceText(authStr, rows, parameterKeys, usingResultSet, httpApi.HashSettings, true);
 
-            var (oauthState, authorizationHeaderValue, _, _) = await oAuthService.GetAccessTokenAsync(authStr);
+            var (oauthState, authorizationHeaderValue, _, _) = await oAuthService.GetAccessTokenAsync(authStr, true, configurationServiceName, httpApi.TimeId, httpApi.Order);
             switch (oauthState)
             {
                 case OAuthState.SuccessfullyRequestedNewToken:
