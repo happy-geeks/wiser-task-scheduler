@@ -159,11 +159,10 @@ public class HttpApisService(IOAuthService oAuthService, IBodyService bodyServic
             var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(httpApi.SingleRequest ? keyParts[0] : useResultSet, ReplacementHelper.EmptyRows, resultSets);
             var remainingKey = keyParts.Length > 1 ? useResultSet[(keyParts[0].Length + 1)..] : "";
             var tuple = ReplacementHelper.PrepareText(httpApi.OAuth, usingResultSet, remainingKey, httpApi.HashSettings, htmlEncode: true);
-            var authStr = tuple.Item1;
             var parameterKeys = tuple.Item2;
-            authStr = ReplacementHelper.ReplaceText(authStr, rows, parameterKeys, usingResultSet, httpApi.HashSettings, true);
+            var resolvedAuthName = ReplacementHelper.ReplaceText(tuple.Item1, rows, parameterKeys, usingResultSet, httpApi.HashSettings, true);
 
-            var (oauthState, authorizationHeaderValue, _, _) = await oAuthService.GetAccessTokenAsync(authStr, true, configurationServiceName, httpApi.TimeId, httpApi.Order);
+            var (oauthState, authorizationHeaderValue, _, _) = await oAuthService.GetAccessTokenAsync(resolvedAuthName, true, configurationServiceName, httpApi.TimeId, httpApi.Order);
             switch (oauthState)
             {
                 case OAuthState.SuccessfullyRequestedNewToken:
@@ -173,7 +172,7 @@ public class HttpApisService(IOAuthService oAuthService, IBodyService bodyServic
                 case OAuthState.AuthenticationFailed:
                 case OAuthState.RefreshTokenFailed:
                 case OAuthState.NotEnoughInformation:
-                    await logService.LogWarning(logger, LogScopes.RunBody, httpApi.LogSettings, $"OAuth '{authStr}' authentication failed ({oauthState.ToString()}) for configuration '{configurationServiceName}' with time ID '{httpApi.TimeId}' and order '{httpApi.Order}'.", configurationServiceName, httpApi.TimeId, httpApi.Order, extraValuesToObfuscate);
+                    await logService.LogWarning(logger, LogScopes.RunBody, httpApi.LogSettings, $"OAuth '{resolvedAuthName}' authentication failed ({oauthState.ToString()}) for configuration '{configurationServiceName}' with time ID '{httpApi.TimeId}' and order '{httpApi.Order}'.", configurationServiceName, httpApi.TimeId, httpApi.Order, extraValuesToObfuscate);
                     break;
                 case OAuthState.WaitingForManualAuthentication:
                     // If we're waiting for manual authentication, return an unauthorized response and don't attempt to execute the API request.

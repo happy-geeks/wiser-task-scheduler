@@ -33,5 +33,5 @@ public interface IOAuthService
     /// <param name="apiName">The name of the API that gave an invalid access token.</param>
     /// <param name="resetRefreshToken">Optional: also resets the refresh token if true.</param>
     /// <returns></returns>
-    Task RequestWasUnauthorizedAsync(string apiName, bool resetRefreshToken);
+    Task RequestWasUnauthorizedAsync(string apiName, bool resetRefreshToken = false);
 }
