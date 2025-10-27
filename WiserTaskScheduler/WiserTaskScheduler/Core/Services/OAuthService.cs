@@ -76,7 +76,7 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
     }
 
     /// <inheritdoc />
-    public async Task<(OAuthState State, string AuthorizationHeaderValue, JToken ResponseBody, HttpStatusCode ResponseStatusCode)> GetAccessTokenAsync(string apiName, bool retryAfterWrongRefreshToken = true)
+    public async Task<(OAuthState State, string AuthorizationHeaderValue, JToken ResponseBody, HttpStatusCode ResponseStatusCode)> GetAccessTokenAsync(string apiName, bool retryAfterWrongRefreshToken, string configurationName, int timeId, int order)
     {
         (OAuthState State, string AuthorizationHeaderValue, JToken ResponseBody, HttpStatusCode ResponseStatusCode) result = (OAuthState.NotEnoughInformation, null, null, HttpStatusCode.Unauthorized);
         using var scope = serviceProvider.CreateScope();
@@ -117,7 +117,7 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
                     switch (oAuthApi.GrantType)
                     {
                         case OAuthGrantType.RefreshToken:
-                            await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.", LogName);
+                            await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using refresh token.", configurationName, timeId, order);
 
                             result.State = OAuthState.RefreshTokenFailed;
                             formData.Add(new KeyValuePair<string, string>("grant_type", "refresh_token"));
@@ -141,7 +141,7 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
                             throw new NotImplementedException("OAuthGrantType.Implicit is not supported yet");
 
                         case OAuthGrantType.PasswordCredentials:
-                            await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using username and password.", LogName);
+                            await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using username and password.", configurationName, timeId, order);
 
                             formData.Add(new KeyValuePair<string, string>("grant_type", "password"));
                             formData.Add(new KeyValuePair<string, string>("username", oAuthApi.Username));
@@ -150,7 +150,7 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
                             break;
 
                         case OAuthGrantType.ClientCredentials:
-                            await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using client credentials.", LogName);
+                            await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Requesting new access token for '{apiName}' using client credentials.", configurationName, timeId, order);
 
                             formData.Add(new KeyValuePair<string, string>("grant_type", "client_credentials"));
 
@@ -202,7 +202,7 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
                             catch (Exception exception)
                             {
                                 // If the conversion fails, then log it and use the string value instead.
-                                await logService.LogWarning(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to convert claim value to specified type. Using string instead. Exception: {exception}", LogName);
+                                await logService.LogWarning(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to convert claim value to specified type. Using string instead. Exception: {exception}", configurationName, timeId, order);
                                 claims[claim.Name] = claim.Value;
                             }
                         }
@@ -258,7 +258,7 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    await logService.LogError(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to get access token for {oAuthApi.ApiName}. Received: {response.StatusCode}\n{json}", LogName);
+                    await logService.LogError(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"Failed to get access token for {oAuthApi.ApiName}. Received: {response.StatusCode}\n{json}", configurationName, timeId, order);
                 }
                 else
                 {
@@ -278,7 +278,7 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
 
                     oAuthApi.ExpireTime -= oAuthApi.ExpireTimeOffset;
 
-                    await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"A new access token has been retrieved for {oAuthApi.ApiName} and is valid till {oAuthApi.ExpireTime.ToLocalTime()}", LogName);
+                    await logService.LogInformation(logger, LogScopes.RunBody, oAuthApi.LogSettings, $"A new access token has been retrieved for {oAuthApi.ApiName} and is valid till {oAuthApi.ExpireTime.ToLocalTime()}", configurationName, timeId, order);
 
                     result.State = OAuthState.SuccessfullyRequestedNewToken;
                 }
@@ -301,8 +301,8 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
                 break;
             case OAuthState.RefreshTokenFailed:
                 // Retry to get the token with the login credentials if the refresh token was invalid.
-                await RequestWasUnauthorizedAsync(apiName);
-                result = await GetAccessTokenAsync(apiName, false);
+                await RequestWasUnauthorizedAsync(apiName, true);
+                result = await GetAccessTokenAsync(apiName, false, configurationName, timeId, order);
                 break;
             case OAuthState.UsingAlreadyExistingToken:
                 result.AuthorizationHeaderValue = $"{oAuthApi.TokenType} {oAuthApi.AccessToken}";
@@ -322,7 +322,7 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
     }
 
     /// <inheritdoc />
-    public async Task RequestWasUnauthorizedAsync(string apiName)
+    public async Task RequestWasUnauthorizedAsync(string apiName, bool resetRefreshToken = false)
     {
         var oAuthApi = configuration.OAuths.SingleOrDefault(oAuth => oAuth.ApiName.Equals(apiName));
 
@@ -334,6 +334,11 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
         oAuthApi.AccessToken = null;
         oAuthApi.TokenType = null;
         oAuthApi.ExpireTime = DateTime.MinValue;
+
+        if (resetRefreshToken)
+        {
+            oAuthApi.RefreshToken = null;
+        }
 
         await SaveToDatabaseAsync(oAuthApi);
     }
