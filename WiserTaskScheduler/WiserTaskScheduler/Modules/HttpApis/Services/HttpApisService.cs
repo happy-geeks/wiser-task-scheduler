@@ -155,7 +155,7 @@ public class HttpApisService(IOAuthService oAuthService, IBodyService bodyServic
 
         if (!String.IsNullOrWhiteSpace(httpApi.OAuth))
         {
-            var (oauthState, authorizationHeaderValue, _, _) = await oAuthService.GetAccessTokenAsync(httpApi.OAuth);
+            var (oauthState, authorizationHeaderValue, _, _) = await oAuthService.GetAccessTokenAsync(httpApi.OAuth, true, configurationServiceName, httpApi.TimeId, httpApi.Order);
             switch (oauthState)
             {
                 case OAuthState.SuccessfullyRequestedNewToken:
