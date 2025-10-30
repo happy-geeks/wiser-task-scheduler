@@ -11,9 +11,9 @@ public interface IOAuthService
     /// <summary>
     /// Set the configuration to be used for OAuth calls.
     /// </summary>
-    /// <param name="configuration">The configuration to set.</param>
+    /// <param name="oAuthConfigurationModel">The configuration to set.</param>
     /// <returns></returns>
-    Task SetConfigurationAsync(OAuthConfigurationModel configuration);
+    Task SetConfigurationAsync(OAuthConfigurationModel oAuthConfigurationModel);
 
     /// <summary>
     /// Get the access token of the specified API.

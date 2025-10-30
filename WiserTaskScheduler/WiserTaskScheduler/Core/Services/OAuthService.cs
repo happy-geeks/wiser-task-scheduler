@@ -35,7 +35,7 @@ public class OAuthService(IOptions<GclSettings> gclSettings, ILogService logServ
     private OAuthConfigurationModel configuration;
 
     // Semaphore is a locking system that can be used with async code.
-    private static readonly SemaphoreSlim OauthApiLock = new(1, 1);
+    private static readonly SemaphoreSlim OauthApiLock = new(initialCount: 1, maxCount: 1);
 
     /// <inheritdoc />
     public async Task SetConfigurationAsync(OAuthConfigurationModel oAuthConfigurationModel)

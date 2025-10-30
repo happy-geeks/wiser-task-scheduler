@@ -70,7 +70,7 @@ public class ConfigurationsService(
             actionsServices.Add(action.GetType().ToString(), actionsService);
         }
 
-        if (!actions.Any())
+        if (actions.Count == 0)
         {
             await logService.LogWarning(logger, LogScopes.StartAndStop, LogSettings, $"{configurationServiceName} has no actions for time ID '{timeIdValue}'. Please make sure the time ID of the run scheme and actions are filled in correctly.", configurationServiceName, timeIdValue);
             return;
