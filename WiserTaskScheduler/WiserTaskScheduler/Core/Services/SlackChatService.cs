@@ -1,5 +1,4 @@
 ﻿using System.Threading.Tasks;
-using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
 using WiserTaskScheduler.Core.Interfaces;
 #if !DEBUG
 using System;

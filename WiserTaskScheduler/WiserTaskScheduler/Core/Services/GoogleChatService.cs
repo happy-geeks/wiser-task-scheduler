@@ -1,17 +1,30 @@
+using WiserTaskScheduler.Core.Interfaces;
+using System.Threading.Tasks;
+#if !DEBUG
 using System;
 using System.Collections.Concurrent;
 using System.Net.Http;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
-using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
 using WiserTaskScheduler.Core.Models.GoogleChat;
+#endif
 
 namespace WiserTaskScheduler.Core.Services;
 
+#if DEBUG
+public class GoogleChatService : IGoogleChatService
+{
+    /// <inheritdoc />
+    public Task SendChannelMessageAsync(string message, string[] replies = null, string recipient = null, string messageHash = null)
+    {
+        // Only send messages to Google Chat for production Wiser Task Schedulers to prevent exceptions during developing/testing to trigger it.
+        return Task.CompletedTask;
+    }
+}
+#else
 public class GoogleChatService(IOptions<WtsSettings> wtsSettings, ILogger<GoogleChatService> logger) : IGoogleChatService
 {
     private readonly WtsSettings wtsSettings = wtsSettings.Value;
@@ -141,3 +154,4 @@ public class GoogleChatService(IOptions<WtsSettings> wtsSettings, ILogger<Google
         return null;
     }
 }
+#endif
