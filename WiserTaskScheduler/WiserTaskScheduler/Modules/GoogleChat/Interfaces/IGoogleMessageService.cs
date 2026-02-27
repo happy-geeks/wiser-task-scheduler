@@ -1,0 +1,3 @@
+namespace WiserTaskScheduler.Modules.GoogleChat.Interfaces;
+
+public interface IGoogleMessageService;

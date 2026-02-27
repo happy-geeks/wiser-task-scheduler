@@ -17,7 +17,7 @@ using WiserTaskScheduler.Core.Models;
 
 namespace WiserTaskScheduler.Core.Services;
 
-public class LogService(IServiceProvider serviceProvider, ISlackChatService slackChatService, IOptions<WtsSettings> settings) : ILogService, ISingletonService
+public class LogService(IServiceProvider serviceProvider, INotificationService notificationService, IOptions<WtsSettings> settings) : ILogService, ISingletonService
 {
     private readonly WtsSettings settings = settings.Value;
     private readonly ConcurrentDictionary<string, LogLevel> highestLogLevelOfServices = new();
@@ -139,7 +139,7 @@ public class LogService(IServiceProvider serviceProvider, ISlackChatService slac
                         var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"{configurationName}{timeId}{order}{message}"));
                         var messageHash = String.Join("", hash.Select(b => b.ToString("x2")));
 
-                        await slackChatService.SendChannelMessageAsync(slackMessage, [message], messageHash: messageHash);
+                        await notificationService.SendChannelMessageAsync(slackMessage, [message], messageHash: messageHash);
                     }
                 }
                 catch

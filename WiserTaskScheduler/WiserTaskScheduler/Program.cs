@@ -13,7 +13,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
 using SlackNet.AspNetCore;
+using WiserTaskScheduler.Core.Enums;
+using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
+using WiserTaskScheduler.Core.Services;
 using WiserTaskScheduler.Core.Workers;
 using WiserTaskScheduler.Modules.Branches.Interfaces;
 using WiserTaskScheduler.Modules.Branches.Services;
@@ -62,6 +65,18 @@ if (wtsSettings.AutoProjectDeploy.IsEnabled)
     applicationBuilder.Services.AddHostedService<AutoProjectDeployWorker>();
 }
 
+switch (wtsSettings.NotificationMode)
+{
+    case NotificationMode.Slack:
+        // Only add the Slack chat service if the notification mode is set to Slack.
+        applicationBuilder.Services.AddSingleton<INotificationService, SlackChatService>();
+        break;
+    case NotificationMode.GoogleChat:
+        // If the notification mode is not set to Slack, add a dummy implementation of the Slack chat service that does nothing. This way, we don't have to check for null every time we want to send a message.
+        applicationBuilder.Services.AddSingleton<INotificationService, GoogleChatService>();
+        break;
+}
+
 // This is not added as a hosted service, because these workers will be started and stopped dynamically via the MainWorker.
 applicationBuilder.Services.AddScoped<ConfigurationsWorker>();
 
@@ -79,6 +94,9 @@ if (!String.IsNullOrWhiteSpace(slackBotToken))
     applicationBuilder.Services.AddSingleton(new SlackEndpointConfiguration());
     applicationBuilder.Services.AddSlackNet(c => c.UseApiToken(slackBotToken));
 }
+
+applicationBuilder.Services.AddSingleton<ISlackChatService, SlackChatService>();
+applicationBuilder.Services.AddSingleton<IGoogleChatService, GoogleChatService>();
 
 // Configure automatic scanning of classes for dependency injection.
 applicationBuilder.Services.Scan(scan => scan
@@ -108,7 +126,8 @@ applicationBuilder.Services.Scan(scan => scan
     // Payment service providers need to be added with their own type, otherwise the factory won't work.
     .AddClasses(classes => classes.AssignableTo<IPaymentServiceProviderService>())
     .AsSelf()
-    .WithScopedLifetime());
+    .WithScopedLifetime()
+);
 
 // Configure Serilog.
 Log.Logger = new LoggerConfiguration()

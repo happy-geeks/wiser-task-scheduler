@@ -14,7 +14,7 @@ using WiserTaskScheduler.Core.Models;
 namespace WiserTaskScheduler.Core.Services;
 
 #if DEBUG
-public class SlackChatService : ISlackChatService, ISingletonService
+public class SlackChatService : ISlackChatService
 {
     /// <inheritdoc />
     public Task SendChannelMessageAsync(string message, string[] replies = null, string recipient = null, string messageHash = null)
