@@ -28,7 +28,7 @@ public class MainWorker : BaseWorker
     /// </summary>
     /// <param name="wtsSettings">The settings of the WTS for the run scheme.</param>
     /// <param name="mainService">The main service to handle the main functionality of the WTS.</param>
-    /// <param name="notificationService"></param>
+    /// <param name="notificationService">The service that can send messages to Slack or Google Chat.</param>
     /// <param name="logService">The service to use for logging.</param>
     /// <param name="logger">The logger to use for logging.</param>
     /// <param name="baseWorkerDependencyAggregate">The aggregate containing the dependencies needed by the <see cref="BaseWorker"/>.</param>
