@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
@@ -6,40 +6,35 @@ using Newtonsoft.Json.Linq;
 using WiserTaskScheduler.Core.Helpers;
 using WiserTaskScheduler.Core.Interfaces;
 using WiserTaskScheduler.Core.Models;
-using WiserTaskScheduler.Modules.SlackMessages.Interfaces;
-using WiserTaskScheduler.Modules.SlackMessages.Models;
+using WiserTaskScheduler.Modules.GoogleChat.Interfaces;
+using WiserTaskScheduler.Modules.GoogleChat.Models;
 
-namespace WiserTaskScheduler.Modules.SlackMessages.Services;
+namespace WiserTaskScheduler.Modules.GoogleChat.Services;
 
-/// <summary>
-/// A service for a slack message action
-/// </summary>
-public class SlackMessageService(ISlackChatService slackChatService) : ISlackMessageService, IActionsService, IScopedService
+public class GoogleMessageService(IGoogleChatService googleChatService) : IGoogleMessageService, IActionsService, IScopedService
 {
-    /// <inheritdoc />
     public Task InitializeAsync(ConfigurationModel configuration, HashSet<string> tablesToOptimize)
     {
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc />
     public async Task<JObject> Execute(ActionModel action, JObject resultSets, string configurationServiceName)
     {
-        var slackMessage = (SlackMessageModel) action;
-        var useResultSet = slackMessage.UseResultSet;
-        var message = slackMessage.Message;
+        var googleMessageAction = (GoogleChatMessageModel) action;
+        var useResultSet = googleMessageAction.UseResultSet;
+        var message = googleMessageAction.Message;
 
         if (!String.IsNullOrWhiteSpace(useResultSet))
         {
             var keyParts = useResultSet.Split('.');
             var usingResultSet = ResultSetHelper.GetCorrectObject<JObject>(useResultSet, ReplacementHelper.EmptyRows, resultSets);
             var remainingKey = keyParts.Length > 1 ? useResultSet[(keyParts[0].Length + 1)..] : "";
-            var toPathTuple = ReplacementHelper.PrepareText(slackMessage.Message, usingResultSet, remainingKey, slackMessage.HashSettings);
+            var toPathTuple = ReplacementHelper.PrepareText(googleMessageAction.Message, usingResultSet, remainingKey, googleMessageAction.HashSettings);
 
-            message = ReplacementHelper.ReplaceText(toPathTuple.Item1, ReplacementHelper.EmptyRows, toPathTuple.Item2, usingResultSet, slackMessage.HashSettings);
+            message = ReplacementHelper.ReplaceText(toPathTuple.Item1, ReplacementHelper.EmptyRows, toPathTuple.Item2, usingResultSet, googleMessageAction.HashSettings);
         }
 
-        await slackChatService.SendChannelMessageAsync(message, [], slackMessage.Recipient);
+        await googleChatService.SendChannelMessageAsync(message, [], googleMessageAction.WebHookUrl);
 
         return new JObject
         {

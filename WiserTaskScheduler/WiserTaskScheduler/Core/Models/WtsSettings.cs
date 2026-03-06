@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using WiserTaskScheduler.Core.Enums;
 using WiserTaskScheduler.Core.Models.AutoProjectDeploy;
 using WiserTaskScheduler.Core.Models.Cleanup;
 using WiserTaskScheduler.Core.Models.ParentsUpdate;
@@ -7,6 +8,7 @@ using WiserTaskScheduler.Core.Models.ProductsApiUpdater;
 using WiserTaskScheduler.Core.Services;
 using WiserTaskScheduler.Modules.Branches.Models;
 using WiserTaskScheduler.Modules.Branches.Services;
+using WiserTaskScheduler.Core.Models.GoogleChat;
 using WiserTaskScheduler.Modules.Wiser.Models;
 
 namespace WiserTaskScheduler.Core.Models;
@@ -61,6 +63,16 @@ public class WtsSettings
     /// Gets or sets the <see cref="SlackSettings"/> used by the <see cref="SlackChatService"/>.
     /// </summary>
     public SlackSettings SlackSettings { get; init; } = new();
+    
+    /// <summary>
+    /// Gets or sets the <see cref="GoogleChatSettings"/> used by the <see cref="GoogleChatService"/>.
+    /// </summary>
+    public GoogleChatSettings GoogleChatSettings { get; init; } = new();
+    
+    /// <summary>
+    /// Gets or sets the <see cref="NotificationMode"/> used to determine where to send notifications.
+    /// </summary>
+    public NotificationMode NotificationMode { get; init; } = NotificationMode.Slack;
 
     /// <summary>
     /// Gets or sets the <see cref="AutoProjectDeploy"/> used by the <see cref="AutoProjectDeployService"/>.

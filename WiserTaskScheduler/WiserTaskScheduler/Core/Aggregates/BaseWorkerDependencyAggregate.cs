@@ -14,7 +14,7 @@ namespace WiserTaskScheduler.Core.Aggregates;
 /// </summary>
 public class BaseWorkerDependencyAggregate(
     ILogService logService,
-    ISlackChatService slackChatService,
+    INotificationService notificationsService,
     ILogger<BaseWorker> logger,
     IRunSchemesService runSchemesService,
     IWiserDashboardService wiserDashboardService,
@@ -25,7 +25,10 @@ public class BaseWorkerDependencyAggregate(
     /// <inheritdoc />
     public ILogService LogService { get; } = logService;
 
-    public ISlackChatService SlackChatService { get; } = slackChatService;
+    /// <summary>
+    /// Gets the service to used for sending notifications. This is used for example to send notifications to a slack channel or a google chat.
+    /// </summary>
+    public INotificationService NotificationService { get; } = notificationsService;
 
     /// <inheritdoc />
     public ILogger<BaseWorker> Logger { get; } = logger;

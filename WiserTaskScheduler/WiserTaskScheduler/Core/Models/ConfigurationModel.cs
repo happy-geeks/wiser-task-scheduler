@@ -9,6 +9,7 @@ using WiserTaskScheduler.Modules.DocumentStoreRead.Models;
 using WiserTaskScheduler.Modules.Ftps.Models;
 using WiserTaskScheduler.Modules.GenerateCommunications.Models;
 using WiserTaskScheduler.Modules.GenerateFiles.Models;
+using WiserTaskScheduler.Modules.GoogleChat.Models;
 using WiserTaskScheduler.Modules.HttpApis.Models;
 using WiserTaskScheduler.Modules.ImportFiles.Models;
 using WiserTaskScheduler.Modules.Queries.Models;
@@ -245,6 +246,12 @@ public class ConfigurationModel
     /// </summary>
     [XmlElement("Script")]
     public ScriptModel[] Scripts { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the SlackMessages that have been placed outside the group.
+    /// </summary>
+    [XmlElement("SlackMessage")]
+    public SlackMessageModel[] SlackMessages { get; set; }
 
     /// <summary>
     /// Gets or sets the SlackMessages that have been placed in the group.
@@ -254,10 +261,17 @@ public class ConfigurationModel
     public SlackMessageModel[] SlackMessageGroup { get; set; }
 
     /// <summary>
-    /// Gets or sets the SlackMessages that have been placed outside the group.
+    /// Gets or sets the GoogleChatMessages that have been placed outside the group.
     /// </summary>
-    [XmlElement("SlackMessage")]
-    public SlackMessageModel[] SlackMessages { get; set; }
+    [XmlElement("GoogleChatMessage")]
+    public GoogleChatMessageModel[] GoogleChatMessage { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the GoogleChatMessages that have been placed in the group.
+    /// </summary>
+    [XmlArray("GoogleChatMessages")]
+    [XmlArrayItem(typeof(GoogleChatMessageModel))]
+    public GoogleChatMessageModel[] GoogleChatMessageGroup { get; set; }
 
     /// <summary>
     /// Get all run schemes that are defined in this configuration.

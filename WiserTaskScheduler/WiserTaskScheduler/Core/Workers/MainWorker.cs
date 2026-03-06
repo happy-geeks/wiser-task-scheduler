@@ -19,7 +19,7 @@ public class MainWorker : BaseWorker
     private readonly IMainService mainService;
     private readonly ILogService logService;
     private readonly ILogger<MainWorker> logger;
-    private readonly ISlackChatService slackChatService;
+    private readonly INotificationService notificationService;
 
     private readonly string wtsName;
 
@@ -28,11 +28,11 @@ public class MainWorker : BaseWorker
     /// </summary>
     /// <param name="wtsSettings">The settings of the WTS for the run scheme.</param>
     /// <param name="mainService">The main service to handle the main functionality of the WTS.</param>
-    /// <param name="slackChatService">The service for sending updates to a Slack channel.</param>
+    /// <param name="notificationService">The service that can send messages to Slack or Google Chat.</param>
     /// <param name="logService">The service to use for logging.</param>
     /// <param name="logger">The logger to use for logging.</param>
     /// <param name="baseWorkerDependencyAggregate">The aggregate containing the dependencies needed by the <see cref="BaseWorker"/>.</param>
-    public MainWorker(IOptions<WtsSettings> wtsSettings, IMainService mainService, ISlackChatService slackChatService, ILogService logService, ILogger<MainWorker> logger, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
+    public MainWorker(IOptions<WtsSettings> wtsSettings, IMainService mainService, INotificationService notificationService, ILogService logService, ILogger<MainWorker> logger, IBaseWorkerDependencyAggregate baseWorkerDependencyAggregate) : base(baseWorkerDependencyAggregate)
     {
         Initialize(LogName, wtsSettings.Value.MainService.RunScheme, wtsSettings.Value.ServiceFailedNotificationEmails, true);
         RunScheme.LogSettings ??= new LogSettings();
@@ -40,13 +40,13 @@ public class MainWorker : BaseWorker
         this.mainService = mainService;
         this.logService = logService;
         this.logger = logger;
-        this.slackChatService = slackChatService;
+        this.notificationService = notificationService;
 
         wtsName = $"{Environment.MachineName} - {wtsSettings.Value.Name}";
 
         this.mainService.LogSettings = RunScheme.LogSettings;
 
-        slackChatService.SendChannelMessageAsync($"*Wiser Task Scheduler has started ({wtsName})*");
+        notificationService.SendChannelMessageAsync($"*Wiser Task Scheduler has started ({wtsName})*");
     }
 
     /// <inheritdoc />
@@ -59,10 +59,10 @@ public class MainWorker : BaseWorker
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "Main worker needs to stop, stopping all configuration workers.", Name, RunScheme.TimeId);
-        await slackChatService.SendChannelMessageAsync($"*Wiser Task Scheduler is shutting down ({wtsName})*");
+        await notificationService.SendChannelMessageAsync($"*Wiser Task Scheduler is shutting down ({wtsName})*");
         await mainService.StopAllConfigurationsAsync();
         await logService.LogInformation(logger, LogScopes.StartAndStop, RunScheme.LogSettings, "All configuration workers have stopped, stopping main worker.", Name, RunScheme.TimeId);
         await base.StopAsync(cancellationToken);
-        await slackChatService.SendChannelMessageAsync($"*Wiser Task Scheduler was shut down ({wtsName})*");
+        await notificationService.SendChannelMessageAsync($"*Wiser Task Scheduler was shut down ({wtsName})*");
     }
 }

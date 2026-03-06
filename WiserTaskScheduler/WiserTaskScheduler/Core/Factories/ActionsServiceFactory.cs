@@ -19,6 +19,8 @@ using WiserTaskScheduler.Modules.GenerateCommunications.Interfaces;
 using WiserTaskScheduler.Modules.GenerateCommunications.Models;
 using WiserTaskScheduler.Modules.GenerateFiles.Interfaces;
 using WiserTaskScheduler.Modules.GenerateFiles.Models;
+using WiserTaskScheduler.Modules.GoogleChat.Interfaces;
+using WiserTaskScheduler.Modules.GoogleChat.Models;
 using WiserTaskScheduler.Modules.HttpApis.Interfaces;
 using WiserTaskScheduler.Modules.HttpApis.Models;
 using WiserTaskScheduler.Modules.ImportFiles.Interfaces;
@@ -60,6 +62,7 @@ public class ActionsServiceFactory(IServiceProvider serviceProvider) : IActionsS
             GenerateCommunicationModel => serviceProvider.GetRequiredService<IGenerateCommunicationsService>() as IActionsService,
             DocumentStoreReadModel => serviceProvider.GetRequiredService<IDocumentStoreReadService>() as IActionsService,
             SlackMessageModel => serviceProvider.GetRequiredService<ISlackMessageService>() as IActionsService,
+            GoogleChatMessageModel => serviceProvider.GetRequiredService<IGoogleMessageService>() as IActionsService,
             ScriptModel => serviceProvider.GetRequiredService<IScriptsService>() as IActionsService,
             _ => throw new ArgumentOutOfRangeException(nameof(action), action.ToString(), null)
         };
