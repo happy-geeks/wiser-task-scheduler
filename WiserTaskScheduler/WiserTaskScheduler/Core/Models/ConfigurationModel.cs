@@ -261,13 +261,13 @@ public class ConfigurationModel
     public SlackMessageModel[] SlackMessageGroup { get; set; }
 
     /// <summary>
-    /// Gets or sets the SlackMessages that have been placed outside the group.
+    /// Gets or sets the GoogleChatMessages that have been placed outside the group.
     /// </summary>
     [XmlElement("GoogleChatMessage")]
     public GoogleChatMessageModel[] GoogleChatMessage { get; set; }
     
     /// <summary>
-    /// Gets or sets the SlackMessages that have been placed in the group.
+    /// Gets or sets the GoogleChatMessages that have been placed in the group.
     /// </summary>
     [XmlArray("GoogleChatMessages")]
     [XmlArrayItem(typeof(GoogleChatMessageModel))]
