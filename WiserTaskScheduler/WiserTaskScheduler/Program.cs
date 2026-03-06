@@ -68,12 +68,14 @@ if (wtsSettings.AutoProjectDeploy.IsEnabled)
 switch (wtsSettings.NotificationMode)
 {
     case NotificationMode.Slack:
-        // Only add the Slack chat service if the notification mode is set to Slack.
         applicationBuilder.Services.AddSingleton<INotificationService, SlackChatService>();
         break;
     case NotificationMode.GoogleChat:
-        // If the notification mode is not set to Slack, add a dummy implementation of the Slack chat service that does nothing. This way, we don't have to check for null every time we want to send a message.
         applicationBuilder.Services.AddSingleton<INotificationService, GoogleChatService>();
+        break;
+    default:
+        // If the notification mode is not set to Slack or Google chat, add a dummy implementation of the Slack chat service that does nothing. This way, we don't have to check for null every time we want to send a message.
+        applicationBuilder.Services.AddSingleton<INotificationService, DummyNotificationService>();
         break;
 }
 
